@@ -1,0 +1,82 @@
+{
+    "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+    "appId": "ai.opencode.desktop",
+    "productName": "LangXiaoZhiAgent",
+    "directories": {
+        "output": "release",
+        "buildResources": "build"
+    },
+    "files": [
+        "dist/**/*",
+        "!node_modules"
+    ],
+    "extraResources": [
+        {
+            "from": "bin/",
+            "to": "bin/",
+            "filter": [
+                "opencode*"
+            ]
+        }
+    ],
+    "win": {
+        "forceCodeSigning": false,
+        "signAndEditExecutable": false,
+        "target": [
+            {
+                "target": "portable",
+                "arch": [
+                    "x64"
+                ]
+            }
+        ],
+        "icon": "build/icon.ico",
+        "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+        "oneClick": false,
+        "allowToChangeInstallationDirectory": true,
+        "installerIcon": "build/icon.ico",
+        "uninstallerIcon": "build/icon.ico"
+    },
+    "mac": {
+        "target": [
+            {
+                "target": "dmg",
+                "arch": [
+                    "x64",
+                    "arm64"
+                ]
+            },
+            {
+                "target": "zip",
+                "arch": [
+                    "x64",
+                    "arm64"
+                ]
+            }
+        ],
+        "icon": "build/icon.icns",
+        "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+        "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+        "target": [
+            {
+                "target": "AppImage",
+                "arch": [
+                    "x64"
+                ]
+            },
+            {
+                "target": "deb",
+                "arch": [
+                    "x64"
+                ]
+            }
+        ],
+        "icon": "build/icon.png",
+        "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+        "category": "Development"
+    }
+}
