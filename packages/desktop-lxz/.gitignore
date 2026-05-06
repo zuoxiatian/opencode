@@ -1,6 +1,7 @@
+bin
 node_modules
 dist
 release
 *.log
 .DS_Store
-bin
+
