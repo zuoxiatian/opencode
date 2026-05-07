@@ -10,6 +10,12 @@
         "dist/**/*",
         "!node_modules"
     ],
+    "extraResources": [
+        {
+            "from": "build/icon.png",
+            "to": "icon.png"
+        }
+    ],
     "win": {
         "forceCodeSigning": false,
         "signAndEditExecutable": false,

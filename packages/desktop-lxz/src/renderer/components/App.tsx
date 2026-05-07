@@ -4,7 +4,7 @@ import { ContentPanel } from "./ContentPanel"
 import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
-import appIcon from "../../../build/icon.ico"
+import appIcon from "../../../build/icon.png"
 
 // 服务器信息类型
 interface ServerInfo {

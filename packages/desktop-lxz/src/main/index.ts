@@ -48,6 +48,15 @@ function getBunCommand() {
     return "bun"
 }
 
+function getAppIconPath() {
+    const iconPath = process.env.NODE_ENV === "development"
+        ? join(getRepoRoot(), "packages", "desktop-lxz", "build", "icon.png")
+        : join(process.resourcesPath, "icon.png")
+
+    if (existsSync(iconPath)) return iconPath
+    return undefined
+}
+
 /**
  * 启动 OpenCode 服务器
  */
@@ -171,12 +180,19 @@ async function startServer(): Promise<ServerInfo> {
  * 创建主窗口
  */
 async function createWindow() {
+    const appIconPath = getAppIconPath()
+
+    if (process.platform === "darwin" && appIconPath) {
+        app.dock.setIcon(appIconPath)
+    }
+
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
         minWidth: 800,
         minHeight: 600,
         title: "LongwiseTechAgent",
+        icon: appIconPath,
         // 使用无边框窗口 + 自定义控件覆盖
         frame: false,
         titleBarStyle: "hidden",
