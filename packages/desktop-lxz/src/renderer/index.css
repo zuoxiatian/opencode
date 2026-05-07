@@ -1150,7 +1150,14 @@ body {
 
 .agent-toggle .toggle-icon,
 .model-toggle .toggle-icon {
-    font-size: 10px;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    font-size: 0;
+    line-height: 1;
     opacity: 0.7;
     transition: transform var(--transition-fast);
     flex-shrink: 0;
@@ -2493,8 +2500,72 @@ body {
 
 .toolbar-btn {
     width: 30px;
-    font-size: 18px;
     padding: 0;
+}
+
+.toolbar-icon,
+.agent-toggle .toggle-icon,
+.model-toggle .toggle-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex-shrink: 0;
+    font-size: 0;
+    line-height: 1;
+}
+
+.toolbar-icon::before,
+.toolbar-icon::after,
+.toggle-icon::before,
+.toggle-icon::after {
+    content: "";
+    position: absolute;
+    display: block;
+    background: currentColor;
+}
+
+.toolbar-icon,
+.toggle-icon {
+    --icon-color: currentColor;
+}
+
+.toolbar-icon::before,
+.toolbar-icon::after,
+.toggle-icon::before,
+.toggle-icon::after {
+    background: var(--icon-color);
+}
+
+.attachment-icon::before {
+    width: 12px;
+    height: 1.5px;
+    border-radius: 1px;
+}
+
+.attachment-icon::after {
+    width: 1.5px;
+    height: 12px;
+    border-radius: 1px;
+}
+
+.mode-icon::before {
+    width: 9px;
+    height: 9px;
+    background: transparent;
+    border: 1.5px solid var(--icon-color);
+    transform: rotate(45deg);
+}
+
+.model-icon::before {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+    border-right: 1.5px solid var(--icon-color);
+    border-bottom: 1.5px solid var(--icon-color);
+    transform: translateY(-2px) rotate(45deg);
 }
 
 .agent-toggle,
@@ -2524,8 +2595,6 @@ body {
 
 .agent-toggle .toggle-icon,
 .model-toggle .toggle-icon {
-    flex-shrink: 0;
-    font-size: 12px;
     opacity: 0.75;
 }
 

@@ -824,7 +824,7 @@ export function ChatPanel() {
                     <div class="chat-toolbar">
                         <div class="agent-selector">
                             <button class="toolbar-btn" title="添加附件" aria-label="添加附件">
-                                <span>+</span>
+                                <span class="toolbar-icon attachment-icon">+</span>
                             </button>
                             <div class="agent-dropdown" ref={agentDropdownRef}>
                                 <button
@@ -832,7 +832,7 @@ export function ChatPanel() {
                                     onClick={() => setShowAgentMenu(!showAgentMenu())}
                                     title="切换模式"
                                 >
-                                    <span class="toggle-icon">◇</span>
+                                    <span class="toggle-icon mode-icon">◇</span>
                                     <span>{currentAgentInfo()?.name ?? currentAgent()}</span>
                                 </button>
                                 <Show when={showAgentMenu()}>
@@ -861,7 +861,7 @@ export function ChatPanel() {
                                     onClick={() => setShowModelMenu(!showModelMenu())}
                                     title={currentModelInfo() ? `${currentModelInfo()?.providerName}/${currentModelInfo()?.modelID}` : "选择模型"}
                                 >
-                                    <span class="toggle-icon">⌄</span>
+                                    <span class="toggle-icon model-icon">⌄</span>
                                     <span>{modelLabel()}</span>
                                 </button>
                                 <Show when={showModelMenu()}>
