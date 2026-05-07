@@ -82,7 +82,7 @@ export function App(props: AppProps) {
             {/* 窗口标题栏 */}
             <div class="window-titlebar">
                 <img class="window-titlebar-icon" src={appIcon} alt="" />
-                <span class="window-titlebar-title">朗小知Agent</span>
+                <span class="window-titlebar-title">LongwiseTechAgent</span>
             </div>
 
             <div class={`app-layout ${isDragging() ? "dragging" : ""}`}>

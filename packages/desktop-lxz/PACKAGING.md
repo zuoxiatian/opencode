@@ -106,8 +106,8 @@ bun run dist
 Expected final artifacts:
 
 ```text
-packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-win-x64-Installer.exe
-packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-win-x64-Portable.exe
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-win-x64-Installer.exe
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-win-x64-Portable.exe
 ```
 
 ## macOS Build
@@ -133,10 +133,10 @@ bun run dist:mac
 Expected macOS artifacts:
 
 ```text
-packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-x64.dmg
-packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-arm64.dmg
-packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-x64.zip
-packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-arm64.zip
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-mac-x64.dmg
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-mac-arm64.dmg
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-mac-x64.zip
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-mac-arm64.zip
 ```
 
 ## Cleanup
@@ -155,7 +155,7 @@ Remove-Item packages\app\dist -Recurse -Force -ErrorAction SilentlyContinue
 `packages/desktop-lxz/release` should contain only the artifacts you intend to distribute, for example:
 
 ```text
-LangXiaoZhiAgent-1.0.0-win-x64-Installer.exe
-LangXiaoZhiAgent-1.0.0-win-x64-Portable.exe
+LongwiseTechAgent-1.0.0-win-x64-Installer.exe
+LongwiseTechAgent-1.0.0-win-x64-Portable.exe
 ```
 

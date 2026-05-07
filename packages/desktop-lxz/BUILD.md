@@ -141,12 +141,12 @@ bun run dist:mac
 
 | 文件 | 说明 |
 |------|------|
-| `LangXiaoZhiAgent-{version}-win-x64-Installer.exe` | Windows NSIS 安装程序 |
-| `LangXiaoZhiAgent-{version}-win-x64-Portable.exe` | Windows 便携版 |
-| `LangXiaoZhiAgent-{version}-mac-x64.dmg` | macOS Intel DMG |
-| `LangXiaoZhiAgent-{version}-mac-arm64.dmg` | macOS Apple Silicon DMG |
-| `LangXiaoZhiAgent-{version}-mac-x64.zip` | macOS Intel ZIP |
-| `LangXiaoZhiAgent-{version}-mac-arm64.zip` | macOS Apple Silicon ZIP |
+| `LongwiseTechAgent-{version}-win-x64-Installer.exe` | Windows NSIS 安装程序 |
+| `LongwiseTechAgent-{version}-win-x64-Portable.exe` | Windows 便携版 |
+| `LongwiseTechAgent-{version}-mac-x64.dmg` | macOS Intel DMG |
+| `LongwiseTechAgent-{version}-mac-arm64.dmg` | macOS Apple Silicon DMG |
+| `LongwiseTechAgent-{version}-mac-x64.zip` | macOS Intel ZIP |
+| `LongwiseTechAgent-{version}-mac-arm64.zip` | macOS Apple Silicon ZIP |
 | `win-unpacked/` | 解压后的应用目录 |
 | `builder-debug.yml` | 构建调试信息 |
 

@@ -176,7 +176,7 @@ async function createWindow() {
         height: 900,
         minWidth: 800,
         minHeight: 600,
-        title: "LangXiaoZhiAgent",
+        title: "LongwiseTechAgent",
         // 使用无边框窗口 + 自定义控件覆盖
         frame: false,
         titleBarStyle: "hidden",
@@ -219,7 +219,7 @@ async function createWindow() {
         mainWindow.webContents.send("server-ready", serverInfo)
     } catch (err) {
         console.error("Failed to start server:", err)
-        dialog.showErrorBox("启动失败", `无法启动 LangXiaoZhiAgent 服务器: ${err}`)
+        dialog.showErrorBox("启动失败", `无法启动 LongwiseTechAgent 服务器: ${err}`)
     }
 }
 

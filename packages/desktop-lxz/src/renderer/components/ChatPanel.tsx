@@ -330,6 +330,20 @@ export function ChatPanel() {
                 break
             }
 
+            case "message.part.delta": {
+                const { sessionID, messageID, field, delta } = event.properties
+                if (sessionID !== currentSessionId) return
+
+                const role = messageRoles.get(messageID) || "assistant"
+                if (role !== "assistant") return
+
+                if (field === "text") {
+                    console.log("处理 AI 文本增量:", delta)
+                    setStreamingContent(prev => prev + delta)
+                }
+                break
+            }
+
             case "session.status": {
                 const { sessionID, status } = event.properties
                 if (sessionID !== currentSessionId) return

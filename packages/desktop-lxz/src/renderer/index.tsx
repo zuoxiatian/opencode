@@ -50,7 +50,7 @@ function Root() {
             when={!isLoading()}
             fallback={
                 <div class="welcome-screen">
-                    <div class="welcome-title">LangXiaoZhiAgent</div>
+                    <div class="welcome-title">LongwiseTechAgent</div>
                     <div class="welcome-subtitle">正在启动后端服务...</div>
                     <div class="status-indicator">
                         <span class="status-dot connecting"></span>
