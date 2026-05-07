@@ -287,9 +287,6 @@ export function ChatPanel() {
         switch (event.type) {
             case "session.created":
             case "session.updated": {
-                if (!eventDirectory || eventDirectory === "global" || eventDirectory === sdk.directory() || event.properties.info.directory === sdk.directory()) {
-                    sdk.refreshSessionList()
-                }
                 break
             }
 
@@ -412,9 +409,6 @@ export function ChatPanel() {
         setStreamingContent("")
         setToolCalls([])
         setIsLoading(false)
-        sdk.refreshSessionList()
-        setTimeout(() => sdk.refreshSessionList(), 1500)
-        setTimeout(() => sdk.refreshSessionList(), 5000)
     }
 
     // 订阅 SSE 事件
@@ -591,8 +585,6 @@ export function ChatPanel() {
             }
 
             console.log("消息已提交，等待 SSE 事件...")
-            sdk.refreshSessionList()
-
         } catch (error) {
             console.error("发送消息失败:", error)
             const errorMessage = error instanceof Error ? error.message : "未知错误"
