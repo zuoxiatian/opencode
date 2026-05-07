@@ -10,21 +10,6 @@ interface ServerInfo {
     password: string | null
 }
 
-// 扩展 Window 类型
-declare global {
-    interface Window {
-        electronAPI: {
-            pickDirectory: () => Promise<string | null>
-            pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
-            saveFile: (options?: { defaultPath?: string }) => Promise<string | null>
-            openExternal: (url: string) => Promise<void>
-            restart: () => Promise<void>
-            getServerInfo: () => Promise<ServerInfo | null>
-            onServerReady: (callback: (info: ServerInfo) => void) => void
-        }
-    }
-}
-
 function Root() {
     const [serverInfo, setServerInfo] = createSignal<ServerInfo | null>(null)
     const [isLoading, setIsLoading] = createSignal(true)

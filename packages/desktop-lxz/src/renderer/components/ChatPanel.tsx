@@ -1,12 +1,23 @@
 import { createSignal, For, Show, createEffect, createMemo, onCleanup, onMount } from "solid-js"
 import { useSDK, type DiscussIssue } from "../context/sdk"
-import type { Agent, Event, Provider } from "@opencode-ai/sdk/v2/client"
+import type { Agent, Event, Part, Provider } from "@opencode-ai/sdk/v2/client"
 
 interface Message {
     id: string
     role: "user" | "assistant"
     content: string
     timestamp: number
+}
+
+interface SessionMessage {
+    info: {
+        id: string
+        role: "user" | "assistant"
+        time?: {
+            created?: number
+        }
+    }
+    parts?: Part[]
 }
 
 // 工具调用状态
@@ -156,6 +167,16 @@ export function ChatPanel() {
         }
     }
 
+    const resetConversation = () => {
+        messageRoles.clear()
+        setSessionId(null)
+        setMessages([])
+        setStreamingContent("")
+        setToolCalls([])
+        setSessionStatus("idle")
+        setIsLoading(false)
+    }
+
     // 当消息更新时滚动到底部
     createEffect(() => {
         messages()
@@ -252,6 +273,17 @@ export function ChatPanel() {
         }
 
         switch (event.type) {
+            case "session.created":
+            case "session.updated": {
+                if (eventDirectory === sdk.directory() || event.properties.info.directory === sdk.directory()) {
+                    sdk.refreshSessionList()
+                }
+                if (event.properties.sessionID === currentSessionId) {
+                    sdk.setSelectedSession(event.properties.info)
+                }
+                break
+            }
+
             // message.updated 用于记录消息的角色
             case "message.updated": {
                 const { info } = event.properties
@@ -273,7 +305,7 @@ export function ChatPanel() {
             }
 
             case "message.part.updated": {
-                const { part, delta } = event.properties
+                const { part } = event.properties
 
                 // 检查是否是当前会话的消息
                 if (part.sessionID !== currentSessionId) {
@@ -291,13 +323,8 @@ export function ChatPanel() {
                 }
 
                 if (part.type === "text") {
-                    console.log("处理 AI 文本消息:", delta ? `delta: ${delta}` : `full: ${part.text}`)
-                    // 更新流式文本内容
-                    if (delta) {
-                        setStreamingContent(prev => prev + delta)
-                    } else {
-                        setStreamingContent(part.text)
-                    }
+                    console.log("处理 AI 文本消息:", `full: ${part.text}`)
+                    setStreamingContent(part.text)
                 } else if (part.type === "tool") {
                     console.log("处理工具调用:", part.tool, part.state?.status)
                     const { callID, tool, state } = part
@@ -408,19 +435,15 @@ export function ChatPanel() {
     createEffect(() => {
         const dir = sdk.directory()
         if (dir) {
-            // 只清除状态，不取消订阅
-            setSessionId(null)
-            setMessages([])
-            setStreamingContent("")
-            setToolCalls([])
+            resetConversation()
         }
     })
 
-    // 当选中文件变化时，创建或恢复会话
+    // 当选中历史对话变化时，恢复会话
     createEffect(() => {
-        const file = sdk.selectedFile()
-        if (file && !file.isDirectory) {
-            initSessionForFile(file.path)
+        const session = sdk.selectedSession()
+        if (session) {
+            void loadSession(session.id)
         }
     })
 
@@ -436,44 +459,12 @@ export function ChatPanel() {
         }
     })
 
-    // 初始化文件对应的会话
-    const initSessionForFile = async (filePath: string) => {
-        // 重置消息状态，但不取消订阅（通过 sessionId 过滤事件）
-        setMessages([])
-        setStreamingContent("")
-        setToolCalls([])
+    const isTextPart = (part: Part): part is Part & { type: "text"; text: string } => part.type === "text"
 
-        // 检查是否有已存在的会话 ID
-        const existingSessionId = sdk.getSessionForFile(filePath)
-        if (existingSessionId) {
-            const sessionExists = await verifySessionExists(existingSessionId)
-            if (sessionExists) {
-                setSessionId(existingSessionId)
-                await loadSessionMessages(existingSessionId)
-                console.log(`已恢复文件 ${filePath} 的会话: ${existingSessionId}`)
-                return
-            } else {
-                console.log(`会话 ${existingSessionId} 在服务器上不存在，将创建新会话`)
-            }
-        }
-        await createNewSessionForFile(filePath)
-    }
-
-    // 验证会话是否在服务器上存在
-    const verifySessionExists = async (sessionId: string): Promise<boolean> => {
-        try {
-            const { serverInfo } = sdk
-            const headers = getHeaders()
-
-            const response = await fetch(
-                `${serverInfo.url}/session/${sessionId}/message?limit=1`,
-                { headers }
-            )
-            return response.ok
-        } catch (error) {
-            console.error("验证会话失败:", error)
-            return false
-        }
+    const loadSession = async (nextSessionId: string) => {
+        resetConversation()
+        setSessionId(nextSessionId)
+        await loadSessionMessages(nextSessionId)
     }
 
     // 加载会话历史消息
@@ -488,36 +479,27 @@ export function ChatPanel() {
             )
 
             if (response.ok) {
-                const messagesData = await response.json()
-                const loadedMessages: Message[] = []
-
-                for (const msg of messagesData) {
-                    if (msg.parts) {
-                        const textContent = msg.parts
-                            .filter((p: any) => p.type === "text")
-                            .map((p: any) => p.text)
-                            .join("\n")
-
-                        if (textContent) {
-                            loadedMessages.push({
-                                id: msg.info.id,
-                                role: msg.info.role,
-                                content: textContent,
-                                timestamp: msg.info.time?.created || Date.now(),
-                            })
-                        }
-                    }
-                }
-
-                setMessages(loadedMessages)
+                const messagesData = await response.json() as SessionMessage[]
+                setMessages(messagesData
+                    .map((msg) => ({
+                        info: msg.info,
+                        content: msg.parts?.filter(isTextPart).map((part) => part.text).join("\n") ?? "",
+                    }))
+                    .filter((msg): msg is { info: SessionMessage["info"]; content: string } => Boolean(msg.content))
+                    .map((msg) => ({
+                        id: msg.info.id,
+                        role: msg.info.role,
+                        content: msg.content,
+                        timestamp: msg.info.time?.created || Date.now(),
+                    })))
             }
         } catch (error) {
             console.error("加载会话消息失败:", error)
         }
     }
 
-    // 为文件创建新会话
-    const createNewSessionForFile = async (filePath: string) => {
+    // 为当前文件夹创建新会话
+    const createNewSessionForFolder = async () => {
         try {
             const { serverInfo } = sdk
             const headers = getHeaders()
@@ -532,21 +514,23 @@ export function ChatPanel() {
                 const data = await response.json()
                 const newSessionId = data.id
                 setSessionId(newSessionId)
-                sdk.setSessionForFile(filePath, newSessionId)
-                console.log(`为文件 ${filePath} 创建新会话: ${newSessionId}`)
+                sdk.setSelectedSession(data)
+                sdk.refreshSessionList()
+                console.log(`为文件夹 ${sdk.directory()} 创建新会话: ${newSessionId}`)
+                return newSessionId
             }
         } catch (error) {
             console.error("创建会话失败:", error)
         }
+        return null
     }
 
     const handleSend = async () => {
         const text = inputText().trim()
         if (!text || isLoading()) return
 
-        const selectedFile = sdk.selectedFile()
-        if (!selectedFile) {
-            addMessage("assistant", "请先在左侧选择一个文件。")
+        if (!sdk.directory()) {
+            addMessage("assistant", "请先在左侧选择一个文件夹。")
             return
         }
 
@@ -562,15 +546,17 @@ export function ChatPanel() {
 
             let currentSessionId = sessionId()
             if (!currentSessionId) {
-                await createNewSessionForFile(selectedFile.path)
-                currentSessionId = sessionId()
-                // 不需要再次订阅，组件挂载时已经订阅过了
+                currentSessionId = await createNewSessionForFolder()
             }
+            if (!currentSessionId) throw new Error("创建会话失败")
 
             // 发送消息 - 使用 message 端点（可以正常触发 SSE 事件）
-            const messageWithFile = `[当前文件: ${selectedFile.path}]\n\n${text}`
+            const selectedFile = sdk.selectedFile()
+            const messageWithContext = selectedFile && !selectedFile.isDirectory
+                ? `[当前文件夹: ${sdk.directory()}]\n[当前文件: ${selectedFile.path}]\n\n${text}`
+                : `[当前文件夹: ${sdk.directory()}]\n\n${text}`
             console.log("发送消息到:", `${serverInfo.url}/session/${currentSessionId}/message`)
-            console.log("请求内容:", { parts: [{ type: "text", text: messageWithFile }] })
+            console.log("请求内容:", { parts: [{ type: "text", text: messageWithContext }] })
             console.log("请求头:", headers)
 
             const messageResponse = await fetch(`${serverInfo.url}/session/${currentSessionId}/message`, {
@@ -579,7 +565,7 @@ export function ChatPanel() {
                 body: JSON.stringify({
                     agent: currentAgent(), // 使用选中的 Agent
                     ...(currentModel() ? { model: currentModel() } : {}),
-                    parts: [{ type: "text", text: messageWithFile }],
+                    parts: [{ type: "text", text: messageWithContext }],
                 }),
             })
 
@@ -592,6 +578,7 @@ export function ChatPanel() {
             }
 
             console.log("消息发送成功，等待 SSE 事件...")
+            sdk.refreshSessionList()
 
         } catch (error) {
             console.error("发送消息失败:", error)
@@ -660,10 +647,9 @@ export function ChatPanel() {
         }
     }
 
-    // 清空对话 - 创建新会话并重新关联文件
+    // 清空对话 - 创建当前文件夹下的新会话
     const handleClearMessages = async () => {
-        const selectedFile = sdk.selectedFile()
-        if (!selectedFile || isLoading()) return
+        if (!sdk.directory() || isLoading()) return
 
         try {
             const { serverInfo } = sdk
@@ -680,9 +666,9 @@ export function ChatPanel() {
                 const newSession = await response.json()
                 const newSessionId = newSession.id
 
-                // 重新关联文件
-                sdk.setSessionForFile(selectedFile.path, newSessionId)
                 setSessionId(newSessionId)
+                sdk.setSelectedSession(newSession)
+                sdk.refreshSessionList()
 
                 // 清空 UI 上的消息
                 setMessages([])
@@ -704,7 +690,7 @@ export function ChatPanel() {
                 {/* 左侧区域 - 标题和文件名，flex: 1 占据剩余空间 */}
                 <div style={{ display: "flex", "flex-direction": "column", gap: "4px", flex: 1, "min-width": 0 }}>
                     <div class="chat-title">AI 助手</div>
-                    <Show when={sdk.selectedFile()}>
+                    <Show when={sdk.directory()}>
                         <div style={{
                             "font-size": "12px",
                             color: "var(--text-secondary)",
@@ -712,13 +698,13 @@ export function ChatPanel() {
                             "align-items": "center",
                             gap: "6px"
                         }}>
-                            <span style={{ opacity: 0.7 }}>📄</span>
+                            <span style={{ opacity: 0.7 }}>{sdk.selectedFile() ? "📄" : "📁"}</span>
                             <span style={{
                                 overflow: "hidden",
                                 "text-overflow": "ellipsis",
                                 "white-space": "nowrap"
                             }}>
-                                {sdk.selectedFile()?.name}
+                                {sdk.selectedFile()?.name ?? sdk.directory().split(/[/\\]/).pop() ?? sdk.directory()}
                             </span>
                         </div>
                     </Show>
@@ -732,7 +718,7 @@ export function ChatPanel() {
                         </div>
                     </Show>
                     {/* 清空对话按钮 */}
-                    <Show when={sdk.selectedFile() && !isLoading()}>
+                    <Show when={sdk.directory() && !isLoading()}>
                         <button
                             onClick={handleClearMessages}
                             title="清空对话"
@@ -817,11 +803,11 @@ export function ChatPanel() {
                 {/* 输入框 */}
                 <textarea
                     class="chat-input"
-                    placeholder={sdk.selectedFile() ? "输入消息..." : "请先选择一个文件"}
+                    placeholder={sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
                     value={inputText()}
                     onInput={(e) => setInputText(e.currentTarget.value)}
                     onKeyDown={handleKeyDown}
-                    disabled={isLoading() || !sdk.selectedFile()}
+                    disabled={isLoading() || !sdk.directory()}
                     rows={1}
                 />
                 {/* 工具栏：模式选择器 + 发送按钮 */}
@@ -894,7 +880,7 @@ export function ChatPanel() {
                             <button
                                 class="send-btn"
                                 onClick={handleSend}
-                                disabled={!inputText().trim() || !sdk.selectedFile()}
+                                disabled={!inputText().trim() || !sdk.directory()}
                                 title="发送消息"
                             >
                                 <span class="send-icon">→</span>

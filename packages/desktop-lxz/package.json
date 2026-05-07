@@ -6,6 +6,7 @@
     "type": "module",
     "scripts": {
         "dev": "bun run script/dev.ts",
+        "typecheck": "tsc --noEmit",
         "build": "electron-vite build",
         "preview": "electron-vite preview",
         "pack": "electron-builder --dir",

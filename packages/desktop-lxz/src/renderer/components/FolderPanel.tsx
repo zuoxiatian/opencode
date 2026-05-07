@@ -1,4 +1,5 @@
-import { createSignal, For, Show, onMount, createEffect } from "solid-js"
+import { createEffect, createSignal, For, onMount, Show } from "solid-js"
+import type { Session } from "@opencode-ai/sdk/v2/client"
 import { useSDK } from "../context/sdk"
 
 interface FileItem {
@@ -7,45 +8,53 @@ interface FileItem {
     isDirectory: boolean
 }
 
+const RECENT_FOLDERS_KEY = "recent_folders"
+
 export function FolderPanel() {
     const sdk = useSDK()
     const [recentFolders, setRecentFolders] = createSignal<string[]>([])
-    const [selectedFolder, setSelectedFolder] = createSignal<string | null>(null)
     const [files, setFiles] = createSignal<FileItem[]>([])
+    const [sessions, setSessions] = createSignal<Session[]>([])
     const [isLoadingFiles, setIsLoadingFiles] = createSignal(false)
-    const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set<string>())
+    const [isLoadingSessions, setIsLoadingSessions] = createSignal(false)
+    const [showFiles, setShowFiles] = createSignal(false)
 
     onMount(() => {
-        // 从 localStorage 加载最近使用的文件夹
-        const saved = localStorage.getItem("recent_folders")
-        if (saved) {
-            try {
-                setRecentFolders(JSON.parse(saved))
-            } catch (e) {
-                console.error("无法解析最近文件夹:", e)
-            }
+        const saved = localStorage.getItem(RECENT_FOLDERS_KEY)
+        if (!saved) return
+        try {
+            setRecentFolders(JSON.parse(saved))
+        } catch (error) {
+            console.error("无法解析最近文件夹:", error)
         }
     })
 
-    // 当选择文件夹时加载文件列表
     createEffect(() => {
-        const folder = selectedFolder()
-        if (folder) {
-            loadFiles(folder)
-        } else {
+        const folder = sdk.directory()
+        if (!folder) {
             setFiles([])
+            setSessions([])
+            return
         }
+        void loadFiles(folder)
+    })
+
+    createEffect(() => {
+        const folder = sdk.directory()
+        sdk.sessionListVersion()
+        if (!folder) {
+            setSessions([])
+            return
+        }
+        void loadSessions(folder)
     })
 
     const loadFiles = async (folder: string) => {
         setIsLoadingFiles(true)
         try {
-            const fileList = await window.electronAPI.readDirectory(folder)
-            // 只保留文件，排除文件夹，按名称排序
-            const filesOnly = fileList
-                .filter((f: FileItem) => !f.isDirectory)
-                .sort((a: FileItem, b: FileItem) => a.name.localeCompare(b.name))
-            setFiles(filesOnly)
+            setFiles((await window.electronAPI.readDirectory(folder))
+                .filter((file: FileItem) => !file.isDirectory)
+                .sort((a: FileItem, b: FileItem) => a.name.localeCompare(b.name)))
         } catch (error) {
             console.error("加载文件列表失败:", error)
             setFiles([])
@@ -54,27 +63,51 @@ export function FolderPanel() {
         }
     }
 
-    const handleOpenFolder = async () => {
-        const folder = await window.electronAPI.pickDirectory()
-        if (folder) {
-            selectFolder(folder)
+    const loadSessions = async (folder: string) => {
+        setIsLoadingSessions(true)
+        try {
+            setSessions((await sdk.client.session.list({
+                directory: folder,
+                roots: true,
+                limit: 50,
+            }, { throwOnError: true })).data)
+        } catch (error) {
+            console.error("加载对话记录失败:", error)
+            setSessions([])
+        } finally {
+            setIsLoadingSessions(false)
         }
     }
 
-    const selectFolder = (folder: string) => {
-        setSelectedFolder(folder)
-        sdk.setDirectory(folder)
-        setExpandedFolders(new Set<string>())
-
-        // 更新最近使用的文件夹列表
-        const recent = recentFolders().filter((f) => f !== folder)
-        const updated = [folder, ...recent].slice(0, 10)
-        setRecentFolders(updated)
-        localStorage.setItem("recent_folders", JSON.stringify(updated))
+    const handleOpenFolder = async () => {
+        const folder = await window.electronAPI.pickDirectory()
+        if (folder) selectFolder(folder)
     }
 
-    const getFolderName = (path: string) => {
-        return path.split(/[/\\]/).pop() || path
+    const selectFolder = (folder: string) => {
+        sdk.setDirectory(folder)
+        setShowFiles(false)
+        setRecentFolders([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 10))
+        localStorage.setItem(
+            RECENT_FOLDERS_KEY,
+            JSON.stringify([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 10)),
+        )
+    }
+
+    const getFolderName = (folder: string) => folder.split(/[/\\]/).pop() || folder
+
+    const formatRelativeTime = (time: number) => {
+        const diff = Date.now() - time
+        if (diff < 60_000) return "刚刚"
+        if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分`
+        if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时`
+        if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)} 天`
+        return `${Math.floor(diff / 604_800_000)} 周`
+    }
+
+    const getSessionTitle = (session: Session) => {
+        if (!session.title.startsWith("New session - ")) return session.title
+        return "新对话"
     }
 
     const getFileIcon = (file: FileItem) => {
@@ -82,119 +115,107 @@ export function FolderPanel() {
         const ext = file.name.split(".").pop()?.toLowerCase() || ""
         const icons: Record<string, string> = {
             pdf: "📕",
-            doc: "📘", docx: "📘",
-            xls: "📗", xlsx: "📗",
-            ppt: "📙", pptx: "📙",
+            doc: "📄", docx: "📄",
+            xls: "📊", xlsx: "📊",
+            ppt: "📽️", pptx: "📽️",
             jpg: "🖼️", jpeg: "🖼️", png: "🖼️", gif: "🖼️", svg: "🖼️",
-            mp3: "🎵", wav: "🎵", flac: "🎵",
-            mp4: "🎬", mov: "🎬", avi: "🎬",
-            zip: "📦", rar: "📦", "7z": "📦",
-            js: "📜", ts: "📜", tsx: "📜", jsx: "📜",
-            py: "🐍",
-            json: "📋",
-            md: "📝",
-            txt: "📄",
-            html: "🌐", css: "🎨",
+            js: "JS", ts: "TS", tsx: "TS", jsx: "JS",
+            json: "{}",
+            md: "MD",
+            txt: "TXT",
+            html: "HTML", css: "CSS",
         }
         return icons[ext] || "📄"
     }
 
-    const toggleFolder = (path: string) => {
-        const expanded = new Set(expandedFolders())
-        if (expanded.has(path)) {
-            expanded.delete(path)
-        } else {
-            expanded.add(path)
-        }
-        setExpandedFolders(expanded)
-    }
-
     const handleFileClick = (file: FileItem) => {
-        if (file.isDirectory) {
-            toggleFolder(file.path)
-        } else {
-            // 选择文件
-            sdk.setSelectedFile(file)
-        }
+        sdk.setSelectedFile(file)
     }
 
     return (
         <div class="folder-panel">
             <div class="folder-panel-header">
-                <div class="folder-panel-title">项目目录</div>
-                <button class="btn btn-primary" onClick={handleOpenFolder}>
+                <button class="folder-open-button" onClick={handleOpenFolder} title="打开文件夹">
                     <span>📁</span>
                     <span>打开文件夹</span>
                 </button>
             </div>
 
-            <div class="folder-panel-content">
-                <Show when={selectedFolder()}>
-                    <div class="folder-panel-title" style={{ "margin-top": "16px" }}>
-                        当前项目
-                    </div>
-                    <div class={`folder-item active`}>
-                        <span class="folder-item-icon">📂</span>
-                        <span class="folder-item-name">{getFolderName(selectedFolder()!)}</span>
-                    </div>
-
-                    {/* 文件列表 */}
-                    <div class="folder-panel-title" style={{ "margin-top": "16px" }}>
-                        文件列表
-                    </div>
-                    <Show when={isLoadingFiles()}>
-                        <div style={{ color: "var(--text-tertiary)", padding: "8px 0" }}>
-                            加载中...
+            <div class="folder-panel-content folder-history-layout">
+                <Show
+                    when={recentFolders().length > 0}
+                    fallback={
+                        <div class="empty-state">
+                            <div class="empty-state-title">还没有打开任何文件夹</div>
+                            <div class="empty-state-subtitle">选择一个文件夹后，对话会按文件夹保存。</div>
                         </div>
-                    </Show>
-                    <Show when={!isLoadingFiles() && files().length > 0}>
-                        <div class="file-list">
-                            <For each={files()}>
-                                {(file) => (
-                                    <div
-                                        class={`file-item ${sdk.selectedFile()?.path === file.path ? "active" : ""}`}
-                                        onClick={() => handleFileClick(file)}
-                                        title={file.path}
-                                    >
-                                        <span class="file-item-icon">{getFileIcon(file)}</span>
-                                        <span class="file-item-name">{file.name}</span>
-                                    </div>
-                                )}
-                            </For>
-                        </div>
-                    </Show>
-                    <Show when={!isLoadingFiles() && files().length === 0}>
-                        <div style={{ color: "var(--text-tertiary)", padding: "8px 0", "font-size": "12px" }}>
-                            文件夹为空
-                        </div>
-                    </Show>
-                </Show>
-
-                <Show when={!selectedFolder()}>
-                    <Show when={recentFolders().length > 0}>
-                        <div class="folder-panel-title" style={{ "margin-top": "24px" }}>
-                            最近项目
-                        </div>
+                    }
+                >
+                    <div class="folder-history-section">
                         <For each={recentFolders()}>
                             {(folder) => (
-                                <div
-                                    class={`folder-item ${folder === selectedFolder() ? "active" : ""}`}
+                                <button
+                                    class={`history-folder-item ${folder === sdk.directory() ? "active" : ""}`}
                                     onClick={() => selectFolder(folder)}
                                     title={folder}
                                 >
-                                    <span class="folder-item-icon">📁</span>
-                                    <span class="folder-item-name">{getFolderName(folder)}</span>
-                                </div>
+                                    <span class="history-folder-icon">📁</span>
+                                    <span class="history-folder-name">{getFolderName(folder)}</span>
+                                </button>
                             )}
                         </For>
-                    </Show>
+                    </div>
+                </Show>
 
-                    <Show when={recentFolders().length === 0}>
-                        <div style={{ color: "var(--text-tertiary)", "text-align": "center", padding: "48px 16px" }}>
-                            <p>还没有打开任何项目</p>
-                            <p style={{ "margin-top": "8px", "font-size": "12px" }}>点击上方按钮选择一个项目文件夹</p>
+                <Show when={sdk.directory()}>
+                    <div class="conversation-section">
+                        <div class="conversation-list">
+                            <Show when={isLoadingSessions()}>
+                                <div class="conversation-empty">加载对话记录...</div>
+                            </Show>
+                            <Show when={!isLoadingSessions() && sessions().length === 0}>
+                                <div class="conversation-empty">当前文件夹还没有对话</div>
+                            </Show>
+                            <For each={sessions()}>
+                                {(session) => (
+                                    <button
+                                        class={`conversation-item ${sdk.selectedSession()?.id === session.id ? "active" : ""}`}
+                                        onClick={() => sdk.setSelectedSession(session)}
+                                        title={session.title}
+                                    >
+                                        <span class="conversation-title">{getSessionTitle(session)}</span>
+                                        <span class="conversation-time">{formatRelativeTime(session.time.updated)}</span>
+                                    </button>
+                                )}
+                            </For>
                         </div>
-                    </Show>
+
+                        <button class="file-toggle" onClick={() => setShowFiles(!showFiles())}>
+                            <span>{showFiles() ? "▾" : "▸"}</span>
+                            <span>文件预览</span>
+                        </button>
+                        <Show when={showFiles()}>
+                            <Show when={isLoadingFiles()}>
+                                <div class="conversation-empty">加载文件...</div>
+                            </Show>
+                            <Show when={!isLoadingFiles() && files().length > 0}>
+                                <div class="file-list compact">
+                                    <For each={files()}>
+                                        {(file) => (
+                                            <button
+                                                class={`file-item ${sdk.selectedFile()?.path === file.path ? "active" : ""}`}
+                                                onClick={() => handleFileClick(file)}
+                                                title={file.path}
+                                            >
+                                                <span class="file-item-icon">{getFileIcon(file)}</span>
+                                                <span class="file-item-name">{file.name}</span>
+                                            </button>
+                                        )}
+                                    </For>
+                                </div>
+                            </Show>
+                        </Show>
+                    </div>
                 </Show>
             </div>
         </div>

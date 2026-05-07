@@ -1,5 +1,5 @@
 import { createContext, useContext, createSignal, type ParentProps, type Accessor, type Setter, onCleanup, batch } from "solid-js"
-import { createOpencodeClient, type OpencodeClient, type Event } from "@opencode-ai/sdk/v2/client"
+import { createOpencodeClient, type OpencodeClient, type Event, type Session } from "@opencode-ai/sdk/v2/client"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -31,11 +31,6 @@ export interface DiscussIssue {
     }
 }
 
-// 文件到会话的映射
-interface FileSessionMap {
-    [filePath: string]: string // filePath -> sessionId
-}
-
 // 事件监听器类型 - 接收目录和事件
 type EventListener = (event: Event, directory?: string) => void
 
@@ -47,8 +42,10 @@ interface SDKContextType {
     setDirectory: (dir: string) => void
     selectedFile: Accessor<SelectedFile | null>
     setSelectedFile: (file: SelectedFile | null) => void
-    getSessionForFile: (filePath: string) => string | null
-    setSessionForFile: (filePath: string, sessionId: string) => void
+    selectedSession: Accessor<Session | null>
+    setSelectedSession: Setter<Session | null>
+    sessionListVersion: Accessor<number>
+    refreshSessionList: () => void
     subscribeToEvents: (callback: EventListener) => () => void
     // 讨论审核问题相关
     discussIssue: Accessor<DiscussIssue | null>
@@ -69,38 +66,20 @@ interface SDKProviderProps extends ParentProps {
     serverInfo: ServerInfo
 }
 
-const FILE_SESSION_MAP_KEY = "file_session_map"
-
 export function SDKProvider(props: SDKProviderProps) {
     const [directory, setDirectory] = createSignal("")
     const [selectedFile, setSelectedFile] = createSignal<SelectedFile | null>(null)
+    const [selectedSession, setSelectedSession] = createSignal<Session | null>(null)
+    const [sessionListVersion, setSessionListVersion] = createSignal(0)
     const [discussIssue, setDiscussIssue] = createSignal<DiscussIssue | null>(null)
 
     const eventListeners = new Set<EventListener>()
     const abortController = new AbortController()
 
-    const loadFileSessionMap = (): FileSessionMap => {
-        try {
-            const saved = localStorage.getItem(FILE_SESSION_MAP_KEY)
-            return saved ? JSON.parse(saved) : {}
-        } catch {
-            return {}
-        }
-    }
-
-    const saveFileSessionMap = (map: FileSessionMap) => {
-        localStorage.setItem(FILE_SESSION_MAP_KEY, JSON.stringify(map))
-    }
-
-    const getSessionForFile = (filePath: string): string | null => {
-        const map = loadFileSessionMap()
-        return map[filePath] || null
-    }
-
-    const setSessionForFile = (filePath: string, sessionId: string) => {
-        const map = loadFileSessionMap()
-        map[filePath] = sessionId
-        saveFileSessionMap(map)
+    const updateDirectory = (dir: string) => {
+        setDirectory(dir)
+        setSelectedFile(null)
+        setSelectedSession(null)
     }
 
     // 创建带认证的 fetch 函数
@@ -257,11 +236,13 @@ export function SDKProvider(props: SDKProviderProps) {
         client,
         serverInfo: props.serverInfo,
         directory,
-        setDirectory,
+        setDirectory: updateDirectory,
         selectedFile,
         setSelectedFile,
-        getSessionForFile,
-        setSessionForFile,
+        selectedSession,
+        setSelectedSession,
+        sessionListVersion,
+        refreshSessionList: () => setSessionListVersion((value) => value + 1),
         subscribeToEvents,
         discussIssue,
         setDiscussIssue,
