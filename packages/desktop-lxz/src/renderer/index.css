@@ -2338,6 +2338,73 @@ body {
     white-space: nowrap;
 }
 
+.chat-reasoning {
+    width: 100%;
+    min-width: 0;
+    margin: 0 0 10px;
+}
+
+.chat-reasoning-trigger {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.chat-reasoning-trigger:hover {
+    color: var(--text-secondary);
+}
+
+.chat-reasoning-chevron {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    transform: rotate(-90deg);
+    transition: transform 120ms ease;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4.7 5.7 8 9l3.3-3.3 1 1L8 11 3.7 6.7l1-1Z'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4.7 5.7 8 9l3.3-3.3 1 1L8 11 3.7 6.7l1-1Z'/%3E%3C/svg%3E") center / contain no-repeat;
+    background: currentColor;
+}
+
+.chat-reasoning[data-open="true"] .chat-reasoning-chevron {
+    transform: rotate(0deg);
+}
+
+.chat-reasoning-label {
+    flex: 0 0 auto;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+}
+
+.chat-reasoning-heading {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-reasoning-content[data-component="markdown"] {
+    margin: 6px 0 0 22px;
+    padding: 8px 0 0 10px;
+    border-left: 2px solid var(--border-default);
+    color: var(--text-tertiary);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
 .chat-message-content[data-component="markdown"] {
     color: var(--text-secondary);
     font-size: 13px;
