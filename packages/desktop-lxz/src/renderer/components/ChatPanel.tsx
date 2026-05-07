@@ -141,6 +141,8 @@ export function ChatPanel() {
     let agentDropdownRef: HTMLDivElement | undefined
     let modelDropdownRef: HTMLDivElement | undefined
     let unsubscribe: (() => void) | null = null
+    let loadedSelectedSessionId: string | null = null
+    let finalizedStreamingContent = ""
 
     // 点击外部关闭菜单
     const handleClickOutside = (e: MouseEvent) => {
@@ -169,6 +171,7 @@ export function ChatPanel() {
 
     const resetConversation = () => {
         messageRoles.clear()
+        finalizedStreamingContent = ""
         setSessionId(null)
         setMessages([])
         setStreamingContent("")
@@ -277,9 +280,6 @@ export function ChatPanel() {
             case "session.updated": {
                 if (eventDirectory === sdk.directory() || event.properties.info.directory === sdk.directory()) {
                     sdk.refreshSessionList()
-                }
-                if (event.properties.sessionID === currentSessionId) {
-                    sdk.setSelectedSession(event.properties.info)
                 }
                 break
             }
@@ -396,7 +396,8 @@ export function ChatPanel() {
     // 完成消息
     const finalizeMessage = () => {
         const content = streamingContent()
-        if (content) {
+        if (content && content !== finalizedStreamingContent) {
+            finalizedStreamingContent = content
             addMessage("assistant", content)
         }
         setStreamingContent("")
@@ -442,9 +443,9 @@ export function ChatPanel() {
     // 当选中历史对话变化时，恢复会话
     createEffect(() => {
         const session = sdk.selectedSession()
-        if (session) {
-            void loadSession(session.id)
-        }
+        if (!session || session.id === loadedSelectedSessionId) return
+        loadedSelectedSessionId = session.id
+        void loadSession(session.id)
     })
 
     // 当有讨论问题传入时，自动填充输入框
@@ -463,6 +464,7 @@ export function ChatPanel() {
 
     const loadSession = async (nextSessionId: string) => {
         resetConversation()
+        loadedSelectedSessionId = nextSessionId
         setSessionId(nextSessionId)
         await loadSessionMessages(nextSessionId)
     }
@@ -513,6 +515,7 @@ export function ChatPanel() {
             if (response.ok) {
                 const data = await response.json()
                 const newSessionId = data.id
+                loadedSelectedSessionId = newSessionId
                 setSessionId(newSessionId)
                 sdk.setSelectedSession(data)
                 sdk.refreshSessionList()
