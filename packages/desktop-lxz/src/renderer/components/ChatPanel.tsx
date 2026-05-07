@@ -109,6 +109,41 @@ function pickDefaultModel(models: ModelOption[], defaults: Record<string, string
     return models.find((model) => defaults[model.providerID] === model.modelID) ?? models[0]
 }
 
+function cleanReasoningHeading(value: string) {
+    return value
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .replace(/[*_~]+/g, "")
+        .trim()
+}
+
+function reasoningHeading(text: string) {
+    const markdown = text.replace(/\r\n?/g, "\n")
+    const html = markdown.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)
+    if (html?.[1]) {
+        const value = cleanReasoningHeading(html[1].replace(/<[^>]+>/g, " "))
+        if (value) return value
+    }
+
+    const atx = markdown.match(/^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/m)
+    if (atx?.[1]) {
+        const value = cleanReasoningHeading(atx[1])
+        if (value) return value
+    }
+
+    const setext = markdown.match(/^([^\n]+)\n(?:=+|-+)\s*$/m)
+    if (setext?.[1]) {
+        const value = cleanReasoningHeading(setext[1])
+        if (value) return value
+    }
+
+    const strong = markdown.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)
+    if (strong?.[1]) {
+        const value = cleanReasoningHeading(strong[1])
+        if (value) return value
+    }
+}
+
 // 构建讨论问题的上下文模板
 function buildIssueContext(issue: DiscussIssue): string {
     const lines = [
@@ -144,6 +179,7 @@ export function ChatPanel() {
     const [isLoading, setIsLoading] = createSignal(false)
     const [sessionId, setSessionId] = createSignal<string | null>(null)
     const [streamingContent, setStreamingContent] = createSignal("")
+    const [streamingReasoningHeading, setStreamingReasoningHeading] = createSignal("")
     const [toolCalls, setToolCalls] = createSignal<ToolCall[]>([])
     const [sessionStatus, setSessionStatus] = createSignal<"idle" | "busy" | "retry">("idle")
     const [agents, setAgents] = createSignal<AgentOption[]>([])
@@ -154,6 +190,8 @@ export function ChatPanel() {
     const [showModelMenu, setShowModelMenu] = createSignal(false)
     // 跟踪消息角色（messageID -> role）
     const messageRoles = new Map<string, "user" | "assistant">()
+    const partTypes = new Map<string, Part["type"]>()
+    const reasoningTexts = new Map<string, string>()
     let messagesContainer: HTMLDivElement | undefined
     let agentDropdownRef: HTMLDivElement | undefined
     let modelDropdownRef: HTMLDivElement | undefined
@@ -188,10 +226,13 @@ export function ChatPanel() {
 
     const resetConversation = () => {
         messageRoles.clear()
+        partTypes.clear()
+        reasoningTexts.clear()
         finalizedStreamingContent = ""
         setSessionId(null)
         setMessages([])
         setStreamingContent("")
+        setStreamingReasoningHeading("")
         setToolCalls([])
         setSessionStatus("idle")
         setIsLoading(false)
@@ -201,6 +242,7 @@ export function ChatPanel() {
     createEffect(() => {
         messages()
         streamingContent()
+        streamingReasoningHeading()
         toolCalls()
         scrollToBottom()
     })
@@ -321,6 +363,7 @@ export function ChatPanel() {
                     addMessage("assistant", `错误: ${errorMsg}`)
                     setIsLoading(false)
                     setStreamingContent("")
+                    setStreamingReasoningHeading("")
                     setToolCalls([])
                 }
                 break
@@ -335,6 +378,7 @@ export function ChatPanel() {
                 }
 
                 // 获取消息角色，如果未知则假设是 assistant（因为用户消息通常先收到 message.updated）
+                partTypes.set(part.id, part.type)
                 const role = messageRoles.get(part.messageID) || "assistant"
                 console.log(`message.part.updated - messageID: ${part.messageID}, role: ${role}, type: ${part.type}`)
 
@@ -347,6 +391,9 @@ export function ChatPanel() {
                 if (part.type === "text") {
                     console.log("处理 AI 文本消息:", `full: ${part.text}`)
                     setStreamingContent(part.text)
+                } else if (part.type === "reasoning") {
+                    reasoningTexts.set(part.id, part.text)
+                    setStreamingReasoningHeading(reasoningHeading(part.text) ?? "")
                 } else if (part.type === "tool") {
                     console.log("处理工具调用:", part.tool, part.state?.status)
                     const { callID, tool, state } = part
@@ -380,13 +427,20 @@ export function ChatPanel() {
             }
 
             case "message.part.delta": {
-                const { sessionID, messageID, field, delta } = event.properties
+                const { sessionID, messageID, partID, field, delta } = event.properties
                 if (sessionID !== currentSessionId) return
 
                 const role = messageRoles.get(messageID) || "assistant"
                 if (role !== "assistant") return
 
                 if (field === "text") {
+                    if (partTypes.get(partID) === "reasoning") {
+                        const text = (reasoningTexts.get(partID) ?? "") + delta
+                        reasoningTexts.set(partID, text)
+                        setStreamingReasoningHeading(reasoningHeading(text) ?? "")
+                        return
+                    }
+
                     console.log("处理 AI 文本增量:", delta)
                     setStreamingContent(prev => prev + delta)
                 }
@@ -423,6 +477,7 @@ export function ChatPanel() {
             addMessage("assistant", content)
         }
         setStreamingContent("")
+        setStreamingReasoningHeading("")
         setToolCalls([])
         setIsLoading(false)
     }
@@ -577,6 +632,7 @@ export function ChatPanel() {
         setInputText("")
         setIsLoading(true)
         setStreamingContent("")
+        setStreamingReasoningHeading("")
         setToolCalls([])
 
         try {
@@ -622,6 +678,7 @@ export function ChatPanel() {
             addMessage("assistant", `发送失败: ${errorMessage}`)
             setIsLoading(false)
             setStreamingContent("")
+            setStreamingReasoningHeading("")
             setToolCalls([])
         }
     }
@@ -663,6 +720,7 @@ export function ChatPanel() {
                 console.log("会话已中止")
                 setIsLoading(false)
                 setStreamingContent("")
+                setStreamingReasoningHeading("")
                 setToolCalls([])
             } else {
                 console.error("中止会话失败:", response.status)
@@ -709,6 +767,7 @@ export function ChatPanel() {
                 // 清空 UI 上的消息
                 setMessages([])
                 setStreamingContent("")
+                setStreamingReasoningHeading("")
                 setToolCalls([])
 
                 console.log(`已清空对话，新会话 ID: ${newSessionId}`)
@@ -752,7 +811,7 @@ export function ChatPanel() {
 
             <div class="chat-messages" ref={messagesContainer}>
                 <Show
-                    when={messages().length > 0 || streamingContent() || toolCalls().length > 0}
+                    when={messages().length > 0 || isLoading() || streamingContent() || toolCalls().length > 0}
                     fallback={
                         <div class="chat-empty">
                             <div class="chat-empty-icon" aria-hidden="true"></div>
@@ -789,6 +848,18 @@ export function ChatPanel() {
                                             </div>
                                         )}
                                     </For>
+                                </div>
+                            </div>
+                        </Show>
+
+                        <Show when={isLoading()}>
+                            <div class="chat-turn assistant">
+                                <div class="chat-thinking">
+                                    <span class="chat-thinking-spinner" aria-hidden="true"></span>
+                                    <span class="chat-thinking-label">思考中</span>
+                                    <Show when={streamingReasoningHeading()}>
+                                        <span class="chat-thinking-heading">{streamingReasoningHeading()}</span>
+                                    </Show>
                                 </div>
                             </div>
                         </Show>
