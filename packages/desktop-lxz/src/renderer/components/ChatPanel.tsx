@@ -144,6 +144,32 @@ function reasoningHeading(text: string) {
     }
 }
 
+function ReasoningBlock(props: { text: string; heading?: string; streaming?: boolean; cacheKey: string }) {
+    const [open, setOpen] = createSignal(false)
+    const heading = createMemo(() => props.heading || reasoningHeading(props.text) || "···")
+
+    return (
+        <div class="chat-reasoning" data-open={open() ? "true" : "false"}>
+            <button class="chat-reasoning-trigger" type="button" onClick={() => setOpen((value) => !value)}>
+                <Show when={props.streaming}>
+                    <span class="chat-thinking-spinner" aria-hidden="true"></span>
+                </Show>
+                <span class="chat-reasoning-chevron" aria-hidden="true"></span>
+                <span class="chat-reasoning-label">{props.streaming ? "思考中" : "···"}</span>
+                <span class="chat-reasoning-heading">{heading()}</span>
+            </button>
+            <Show when={open()}>
+                <Markdown
+                    class="chat-reasoning-content"
+                    text={props.text}
+                    cacheKey={`${props.cacheKey}:reasoning`}
+                    streaming={props.streaming}
+                />
+            </Show>
+        </div>
+    )
+}
+
 // 构建讨论问题的上下文模板
 function buildIssueContext(issue: DiscussIssue): string {
     const lines = [
@@ -179,6 +205,7 @@ export function ChatPanel() {
     const [isLoading, setIsLoading] = createSignal(false)
     const [sessionId, setSessionId] = createSignal<string | null>(null)
     const [streamingContent, setStreamingContent] = createSignal("")
+    const [streamingReasoningText, setStreamingReasoningText] = createSignal("")
     const [streamingReasoningHeading, setStreamingReasoningHeading] = createSignal("")
     const [toolCalls, setToolCalls] = createSignal<ToolCall[]>([])
     const [sessionStatus, setSessionStatus] = createSignal<"idle" | "busy" | "retry">("idle")
@@ -232,6 +259,7 @@ export function ChatPanel() {
         setSessionId(null)
         setMessages([])
         setStreamingContent("")
+        setStreamingReasoningText("")
         setStreamingReasoningHeading("")
         setToolCalls([])
         setSessionStatus("idle")
@@ -242,6 +270,7 @@ export function ChatPanel() {
     createEffect(() => {
         messages()
         streamingContent()
+        streamingReasoningText()
         streamingReasoningHeading()
         toolCalls()
         scrollToBottom()
@@ -363,6 +392,7 @@ export function ChatPanel() {
                     addMessage("assistant", `错误: ${errorMsg}`)
                     setIsLoading(false)
                     setStreamingContent("")
+                    setStreamingReasoningText("")
                     setStreamingReasoningHeading("")
                     setToolCalls([])
                 }
@@ -393,6 +423,7 @@ export function ChatPanel() {
                     setStreamingContent(part.text)
                 } else if (part.type === "reasoning") {
                     reasoningTexts.set(part.id, part.text)
+                    setStreamingReasoningText(Array.from(reasoningTexts.values()).filter(Boolean).join("\n\n"))
                     setStreamingReasoningHeading(reasoningHeading(part.text) ?? "")
                 } else if (part.type === "tool") {
                     console.log("处理工具调用:", part.tool, part.state?.status)
@@ -437,6 +468,7 @@ export function ChatPanel() {
                     if (partTypes.get(partID) === "reasoning") {
                         const text = (reasoningTexts.get(partID) ?? "") + delta
                         reasoningTexts.set(partID, text)
+                        setStreamingReasoningText(Array.from(reasoningTexts.values()).filter(Boolean).join("\n\n"))
                         setStreamingReasoningHeading(reasoningHeading(text) ?? "")
                         return
                     }
@@ -477,6 +509,7 @@ export function ChatPanel() {
             addMessage("assistant", content)
         }
         setStreamingContent("")
+        setStreamingReasoningText("")
         setStreamingReasoningHeading("")
         setToolCalls([])
         setIsLoading(false)
@@ -632,6 +665,7 @@ export function ChatPanel() {
         setInputText("")
         setIsLoading(true)
         setStreamingContent("")
+        setStreamingReasoningText("")
         setStreamingReasoningHeading("")
         setToolCalls([])
 
@@ -678,6 +712,7 @@ export function ChatPanel() {
             addMessage("assistant", `发送失败: ${errorMessage}`)
             setIsLoading(false)
             setStreamingContent("")
+            setStreamingReasoningText("")
             setStreamingReasoningHeading("")
             setToolCalls([])
         }
@@ -720,6 +755,7 @@ export function ChatPanel() {
                 console.log("会话已中止")
                 setIsLoading(false)
                 setStreamingContent("")
+                setStreamingReasoningText("")
                 setStreamingReasoningHeading("")
                 setToolCalls([])
             } else {
@@ -767,6 +803,7 @@ export function ChatPanel() {
                 // 清空 UI 上的消息
                 setMessages([])
                 setStreamingContent("")
+                setStreamingReasoningText("")
                 setStreamingReasoningHeading("")
                 setToolCalls([])
 
@@ -854,13 +891,25 @@ export function ChatPanel() {
 
                         <Show when={isLoading()}>
                             <div class="chat-turn assistant">
-                                <div class="chat-thinking">
-                                    <span class="chat-thinking-spinner" aria-hidden="true"></span>
-                                    <span class="chat-thinking-label">思考中</span>
-                                    <Show when={streamingReasoningHeading()}>
-                                        <span class="chat-thinking-heading">{streamingReasoningHeading()}</span>
-                                    </Show>
-                                </div>
+                                <Show
+                                    when={streamingReasoningText()}
+                                    fallback={
+                                        <div class="chat-thinking">
+                                            <span class="chat-thinking-spinner" aria-hidden="true"></span>
+                                            <span class="chat-thinking-label">思考中</span>
+                                            <Show when={streamingReasoningHeading()}>
+                                                <span class="chat-thinking-heading">{streamingReasoningHeading()}</span>
+                                            </Show>
+                                        </div>
+                                    }
+                                >
+                                    <ReasoningBlock
+                                        text={streamingReasoningText()}
+                                        heading={streamingReasoningHeading()}
+                                        cacheKey={`${sessionId() ?? "streaming"}:streaming`}
+                                        streaming
+                                    />
+                                </Show>
                             </div>
                         </Show>
 
