@@ -3,6 +3,7 @@ import { FolderPanel } from "./FolderPanel"
 import { ContentPanel } from "./ContentPanel"
 import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
+import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import appIcon from "../../../build/icon.ico"
 
 // 服务器信息类型
@@ -78,6 +79,7 @@ export function App(props: AppProps) {
     })
 
     return (
+        <MarkedProvider>
         <SDKProvider serverInfo={props.serverInfo}>
             {/* 窗口标题栏 */}
             <div class="window-titlebar">
@@ -166,5 +168,6 @@ export function App(props: AppProps) {
                 </div>
             </div>
         </SDKProvider>
+        </MarkedProvider>
     )
 }

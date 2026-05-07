@@ -25,6 +25,25 @@
             ],
             "@opencode-ai/util": [
                 "../util/src/index.ts"
+            ],
+            "@opencode-ai/ui": [
+                "../ui/src/index.ts"
+            ],
+            "@opencode-ai/ui/*": [
+                "../ui/src/components/*.tsx",
+                "../ui/src/*.ts"
+            ],
+            "@opencode-ai/ui/styles": [
+                "../ui/src/styles/index.css"
+            ],
+            "@opencode-ai/ui/context/*": [
+                "../ui/src/context/*.tsx"
+            ],
+            "@opencode-ai/core": [
+                "../core/src/index.ts"
+            ],
+            "@opencode-ai/core/*": [
+                "../core/src/*"
             ]
         }
     },

@@ -1,6 +1,7 @@
 /* @refresh reload */
 import { render } from "solid-js/web"
 import { createSignal, onMount, Show } from "solid-js"
+import "@opencode-ai/ui/styles"
 import "./index.css"
 import { App } from "./components/App"
 

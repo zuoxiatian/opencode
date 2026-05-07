@@ -50,6 +50,10 @@ export default defineConfig({
             alias: {
                 "@": resolve(__dirname, "src/renderer"),
                 "@opencode-ai/sdk": resolve(__dirname, "../sdk/js/src"),
+                "@opencode-ai/ui/styles": resolve(__dirname, "../ui/src/styles/index.css"),
+                "@opencode-ai/ui/context": resolve(__dirname, "../ui/src/context"),
+                "@opencode-ai/ui": resolve(__dirname, "../ui/src/components"),
+                "@opencode-ai/core": resolve(__dirname, "../core/src"),
             },
         },
         plugins: [

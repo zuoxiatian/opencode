@@ -1,6 +1,7 @@
 import { createSignal, For, Show, createEffect, createMemo, onCleanup, onMount } from "solid-js"
 import { useSDK, type DiscussIssue } from "../context/sdk"
 import type { Agent, Event, Part, Provider } from "@opencode-ai/sdk/v2/client"
+import { Markdown } from "@opencode-ai/ui/markdown"
 
 interface Message {
     id: string
@@ -743,7 +744,12 @@ export function ChatPanel() {
                                 <div class={`chat-turn ${message.role}`}>
                                     <div class={`chat-message ${message.role}`}>
                                         <div class="chat-message-role">{message.role === "user" ? "You" : "Assistant"}</div>
-                                        <div class="chat-message-content">{message.content}</div>
+                                        <Markdown
+                                            class="chat-message-content"
+                                            text={message.content}
+                                            cacheKey={message.id}
+                                            streaming={false}
+                                        />
                                     </div>
                                 </div>
                             )}
@@ -768,10 +774,12 @@ export function ChatPanel() {
                             <div class="chat-turn assistant">
                                 <div class="chat-message assistant streaming">
                                     <div class="chat-message-role">Assistant</div>
-                                    <div class="chat-message-content">
-                                        {streamingContent()}
-                                        <span class="streaming-cursor" aria-hidden="true"></span>
-                                    </div>
+                                    <Markdown
+                                        class="chat-message-content"
+                                        text={streamingContent()}
+                                        cacheKey={`${sessionId() ?? "streaming"}:streaming`}
+                                        streaming
+                                    />
                                 </div>
                             </div>
                         </Show>
