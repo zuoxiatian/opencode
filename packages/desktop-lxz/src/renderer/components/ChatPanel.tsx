@@ -202,6 +202,14 @@ export function ChatPanel() {
         return model.modelName
     })
 
+    const sessionTitle = createMemo(() => sdk.selectedSession()?.title?.trim() || "新对话")
+
+    const contextLabel = createMemo(() => {
+        const directory = sdk.directory()
+        if (!directory) return "未选择文件夹"
+        return sdk.selectedFile()?.name ?? directory.split(/[/\\]/).pop() ?? directory
+    })
+
     const loadChatOptions = async () => {
         try {
             const [providersResult, agentsResult] = await Promise.all([
@@ -278,7 +286,7 @@ export function ChatPanel() {
         switch (event.type) {
             case "session.created":
             case "session.updated": {
-                if (eventDirectory === sdk.directory() || event.properties.info.directory === sdk.directory()) {
+                if (!eventDirectory || eventDirectory === "global" || eventDirectory === sdk.directory() || event.properties.info.directory === sdk.directory()) {
                     sdk.refreshSessionList()
                 }
                 break
@@ -403,6 +411,9 @@ export function ChatPanel() {
         setStreamingContent("")
         setToolCalls([])
         setIsLoading(false)
+        sdk.refreshSessionList()
+        setTimeout(() => sdk.refreshSessionList(), 1500)
+        setTimeout(() => sdk.refreshSessionList(), 5000)
     }
 
     // 订阅 SSE 事件
@@ -558,29 +569,27 @@ export function ChatPanel() {
             const messageWithContext = selectedFile && !selectedFile.isDirectory
                 ? `[当前文件夹: ${sdk.directory()}]\n[当前文件: ${selectedFile.path}]\n\n${text}`
                 : `[当前文件夹: ${sdk.directory()}]\n\n${text}`
-            console.log("发送消息到:", `${serverInfo.url}/session/${currentSessionId}/message`)
+            console.log("发送异步消息到:", `${serverInfo.url}/session/${currentSessionId}/prompt_async`)
             console.log("请求内容:", { parts: [{ type: "text", text: messageWithContext }] })
             console.log("请求头:", headers)
 
-            const messageResponse = await fetch(`${serverInfo.url}/session/${currentSessionId}/message`, {
+            const messageResponse = await fetch(`${serverInfo.url}/session/${currentSessionId}/prompt_async`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({
-                    agent: currentAgent(), // 使用选中的 Agent
+                    agent: currentAgent(),
                     ...(currentModel() ? { model: currentModel() } : {}),
                     parts: [{ type: "text", text: messageWithContext }],
                 }),
             })
 
-            console.log("message 响应状态:", messageResponse.status, messageResponse.statusText)
-
             if (!messageResponse.ok) {
                 const errorData = await messageResponse.text()
-                console.error("发送消息错误:", errorData)
+                console.error("发送异步消息错误:", errorData)
                 throw new Error(`发送失败: ${messageResponse.status}`)
             }
 
-            console.log("消息发送成功，等待 SSE 事件...")
+            console.log("消息已提交，等待 SSE 事件...")
             sdk.refreshSessionList()
 
         } catch (error) {
@@ -642,11 +651,11 @@ export function ChatPanel() {
     // 格式化工具状态显示
     const getToolStatusIcon = (status: string) => {
         switch (status) {
-            case "pending": return "⏳"
-            case "running": return "⚙️"
-            case "completed": return "✅"
-            case "error": return "❌"
-            default: return "❓"
+            case "pending": return "..."
+            case "running": return ">"
+            case "completed": return "✓"
+            case "error": return "!"
+            default: return "-"
         }
     }
 
@@ -690,55 +699,28 @@ export function ChatPanel() {
     return (
         <div class="chat-panel">
             <div class="chat-header">
-                {/* 左侧区域 - 标题和文件名，flex: 1 占据剩余空间 */}
-                <div style={{ display: "flex", "flex-direction": "column", gap: "4px", flex: 1, "min-width": 0 }}>
-                    <div class="chat-title">AI 助手</div>
-                    <Show when={sdk.directory()}>
-                        <div style={{
-                            "font-size": "12px",
-                            color: "var(--text-secondary)",
-                            display: "flex",
-                            "align-items": "center",
-                            gap: "6px"
-                        }}>
-                            <span style={{ opacity: 0.7 }}>{sdk.selectedFile() ? "📄" : "📁"}</span>
-                            <span style={{
-                                overflow: "hidden",
-                                "text-overflow": "ellipsis",
-                                "white-space": "nowrap"
-                            }}>
-                                {sdk.selectedFile()?.name ?? sdk.directory().split(/[/\\]/).pop() ?? sdk.directory()}
-                            </span>
-                        </div>
-                    </Show>
+                <div class="chat-header-main">
+                    <div class="chat-title-row">
+                        <Show when={isLoading()}>
+                            <span class="chat-working-spinner" aria-hidden="true"></span>
+                        </Show>
+                        <div class="chat-title">{sessionTitle()}</div>
+                    </div>
+                    <div class="chat-context-line">
+                        <span class={sdk.selectedFile() ? "chat-file-mark" : "chat-folder-mark"} aria-hidden="true"></span>
+                        <span class="chat-context-name">{contextLabel()}</span>
+                    </div>
                 </div>
-                {/* 右侧区域 - 状态指示器和按钮，固定位置 */}
-                <div style={{ display: "flex", "align-items": "center", gap: "8px", "flex-shrink": 0 }}>
+                <div class="chat-header-actions">
                     <Show when={sessionId()}>
                         <div class="status-indicator">
                             <span class={`status-dot ${sessionStatus() === "busy" ? "busy" : "online"}`}></span>
                             <span>{sessionStatus() === "busy" ? "处理中" : "就绪"}</span>
                         </div>
                     </Show>
-                    {/* 清空对话按钮 */}
                     <Show when={sdk.directory() && !isLoading()}>
-                        <button
-                            onClick={handleClearMessages}
-                            title="清空对话"
-                            style={{
-                                background: "transparent",
-                                border: "1px solid var(--border-default)",
-                                "border-radius": "6px",
-                                padding: "4px 8px",
-                                cursor: "pointer",
-                                "font-size": "14px",
-                                transition: "all 0.2s",
-                                opacity: 0.7
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
-                            onMouseLeave={(e) => e.currentTarget.style.opacity = "0.7"}
-                        >
-                            🗑️
+                        <button class="chat-header-btn" onClick={handleClearMessages} title="清空对话" aria-label="清空对话">
+                            <span class="chat-trash-icon" aria-hidden="true"></span>
                         </button>
                     </Show>
                 </div>
@@ -748,156 +730,148 @@ export function ChatPanel() {
                 <Show
                     when={messages().length > 0 || streamingContent() || toolCalls().length > 0}
                     fallback={
-                        <div style={{
-                            display: "flex",
-                            "flex-direction": "column",
-                            "align-items": "center",
-                            "justify-content": "center",
-                            height: "100%",
-                            color: "var(--text-tertiary)",
-                            "text-align": "center"
-                        }}>
-                            <div style={{ "font-size": "48px", "margin-bottom": "16px", opacity: 0.3 }}>
-                                💬
-                            </div>
-                            <div>开始对话</div>
-                            <div style={{ "font-size": "12px", "margin-top": "8px" }}>
-                                在下方输入消息，按 Enter 发送
-                            </div>
+                        <div class="chat-empty">
+                            <div class="chat-empty-icon" aria-hidden="true"></div>
+                            <div class="chat-empty-title">开始对话</div>
+                            <div class="chat-empty-subtitle">输入问题后按 Enter 发送</div>
                         </div>
                     }
                 >
-                    <For each={messages()}>
-                        {(message) => (
-                            <div class={`message ${message.role}`}>
-                                <div class="message-role">
-                                    {message.role === "user" ? "你" : "AI"}
-                                </div>
-                                <div class="message-content">{message.content}</div>
-                            </div>
-                        )}
-                    </For>
-
-                    {/* 工具调用显示 */}
-                    <Show when={toolCalls().length > 0}>
-                        <div class="tool-calls">
-                            <For each={toolCalls()}>
-                                {(tool) => (
-                                    <div class={`tool-call ${tool.status}`}>
-                                        <span class="tool-icon">{getToolStatusIcon(tool.status)}</span>
-                                        <span class="tool-name">{tool.title || tool.tool}</span>
+                    <div class="chat-timeline">
+                        <For each={messages()}>
+                            {(message) => (
+                                <div class={`chat-turn ${message.role}`}>
+                                    <div class={`chat-message ${message.role}`}>
+                                        <div class="chat-message-role">{message.role === "user" ? "You" : "Assistant"}</div>
+                                        <div class="chat-message-content">{message.content}</div>
                                     </div>
-                                )}
-                            </For>
-                        </div>
-                    </Show>
+                                </div>
+                            )}
+                        </For>
 
-                    {/* 流式内容显示 */}
-                    <Show when={streamingContent()}>
-                        <div class="message assistant streaming">
-                            <div class="message-role">AI</div>
-                            <div class="message-content">{streamingContent()}</div>
-                        </div>
-                    </Show>
+                        <Show when={toolCalls().length > 0}>
+                            <div class="chat-turn assistant">
+                                <div class="tool-calls">
+                                    <For each={toolCalls()}>
+                                        {(tool) => (
+                                            <div class={`tool-call ${tool.status}`}>
+                                                <span class="tool-icon">{getToolStatusIcon(tool.status)}</span>
+                                                <span class="tool-name">{tool.title || tool.tool}</span>
+                                            </div>
+                                        )}
+                                    </For>
+                                </div>
+                            </div>
+                        </Show>
+
+                        <Show when={streamingContent()}>
+                            <div class="chat-turn assistant">
+                                <div class="chat-message assistant streaming">
+                                    <div class="chat-message-role">Assistant</div>
+                                    <div class="chat-message-content">
+                                        {streamingContent()}
+                                        <span class="streaming-cursor" aria-hidden="true"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </Show>
+                    </div>
                 </Show>
             </div>
 
-            <div class="chat-input-container">
-                {/* 输入框 */}
-                <textarea
-                    class="chat-input"
-                    placeholder={sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
-                    value={inputText()}
-                    onInput={(e) => setInputText(e.currentTarget.value)}
-                    onKeyDown={handleKeyDown}
-                    disabled={isLoading() || !sdk.directory()}
-                    rows={1}
-                />
-                {/* 工具栏：模式选择器 + 发送按钮 */}
-                <div class="chat-toolbar">
-                    <div class="agent-selector">
-                        <button class="toolbar-btn" title="添加附件">
-                            <span>+</span>
-                        </button>
-                        <div class="agent-dropdown" ref={agentDropdownRef}>
-                            <button
-                                class="agent-toggle"
-                                onClick={() => setShowAgentMenu(!showAgentMenu())}
-                                title="切换模式"
-                            >
-                                <span class="toggle-icon">∧</span>
-                                <span>{currentAgentInfo()?.name ?? currentAgent()}</span>
+            <div class="chat-composer-wrap">
+                <div class="chat-input-container">
+                    <textarea
+                        class="chat-input"
+                        placeholder={sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
+                        value={inputText()}
+                        onInput={(e) => setInputText(e.currentTarget.value)}
+                        onKeyDown={handleKeyDown}
+                        disabled={isLoading() || !sdk.directory()}
+                        rows={1}
+                    />
+                    <div class="chat-toolbar">
+                        <div class="agent-selector">
+                            <button class="toolbar-btn" title="添加附件" aria-label="添加附件">
+                                <span>+</span>
                             </button>
-                            <Show when={showAgentMenu()}>
-                                <div class="agent-menu">
-                                    <For each={agents()}>
-                                        {(agent) => (
-                                            <button
-                                                class={`agent-menu-item ${currentAgent() === agent.name ? "active" : ""}`}
-                                                onClick={() => applyAgent(agent)}
-                                                title={agent.description}
-                                            >
-                                                <span class="menu-icon">{agent.name === "plan" ? "◇" : "▣"}</span>
-                                                <span>{agent.name}</span>
-                                                <Show when={currentAgent() === agent.name}>
-                                                    <span class="check-icon">✓</span>
-                                                </Show>
-                                            </button>
-                                        )}
-                                    </For>
-                                </div>
-                            </Show>
+                            <div class="agent-dropdown" ref={agentDropdownRef}>
+                                <button
+                                    class="agent-toggle"
+                                    onClick={() => setShowAgentMenu(!showAgentMenu())}
+                                    title="切换模式"
+                                >
+                                    <span class="toggle-icon">◇</span>
+                                    <span>{currentAgentInfo()?.name ?? currentAgent()}</span>
+                                </button>
+                                <Show when={showAgentMenu()}>
+                                    <div class="agent-menu">
+                                        <For each={agents()}>
+                                            {(agent) => (
+                                                <button
+                                                    class={`agent-menu-item ${currentAgent() === agent.name ? "active" : ""}`}
+                                                    onClick={() => applyAgent(agent)}
+                                                    title={agent.description}
+                                                >
+                                                    <span class="menu-icon">{agent.name === "plan" ? "◇" : "▣"}</span>
+                                                    <span>{agent.name}</span>
+                                                    <Show when={currentAgent() === agent.name}>
+                                                        <span class="check-icon">✓</span>
+                                                    </Show>
+                                                </button>
+                                            )}
+                                        </For>
+                                    </div>
+                                </Show>
+                            </div>
+                            <div class="model-dropdown" ref={modelDropdownRef}>
+                                <button
+                                    class="model-toggle"
+                                    onClick={() => setShowModelMenu(!showModelMenu())}
+                                    title={currentModelInfo() ? `${currentModelInfo()?.providerName}/${currentModelInfo()?.modelID}` : "选择模型"}
+                                >
+                                    <span class="toggle-icon">⌄</span>
+                                    <span>{modelLabel()}</span>
+                                </button>
+                                <Show when={showModelMenu()}>
+                                    <div class="model-menu">
+                                        <For each={modelOptions()}>
+                                            {(model) => (
+                                                <button
+                                                    class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
+                                                    onClick={() => { setCurrentModel(model); setShowModelMenu(false); }}
+                                                >
+                                                    <span class="model-menu-main">{model.modelName}</span>
+                                                    <span class="model-menu-meta">{model.providerName}{model.isDefault ? " · 默认" : ""}</span>
+                                                    <Show when={currentModel() && sameModel(model, currentModel()!)}>
+                                                        <span class="check-icon">✓</span>
+                                                    </Show>
+                                                </button>
+                                            )}
+                                        </For>
+                                    </div>
+                                </Show>
+                            </div>
                         </div>
-                        <div class="model-dropdown" ref={modelDropdownRef}>
-                            <button
-                                class="model-toggle"
-                                onClick={() => setShowModelMenu(!showModelMenu())}
-                                title={currentModelInfo() ? `${currentModelInfo()?.providerName}/${currentModelInfo()?.modelID}` : "选择模型"}
-                            >
-                                <span class="toggle-icon">⌁</span>
-                                <span>{modelLabel()}</span>
-                            </button>
-                            <Show when={showModelMenu()}>
-                                <div class="model-menu">
-                                    <For each={modelOptions()}>
-                                        {(model) => (
-                                            <button
-                                                class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
-                                                onClick={() => { setCurrentModel(model); setShowModelMenu(false); }}
-                                            >
-                                                <span class="model-menu-main">{model.modelName}</span>
-                                                <span class="model-menu-meta">{model.providerName}{model.isDefault ? " · 默认" : ""}</span>
-                                                <Show when={currentModel() && sameModel(model, currentModel()!)}>
-                                                    <span class="check-icon">✓</span>
-                                                </Show>
-                                            </button>
-                                        )}
-                                    </For>
-                                </div>
-                            </Show>
-                        </div>
-                    </div>
-                    <Show
-                        when={isLoading()}
-                        fallback={
-                            <button
-                                class="send-btn"
-                                onClick={handleSend}
-                                disabled={!inputText().trim() || !sdk.directory()}
-                                title="发送消息"
-                            >
-                                <span class="send-icon">→</span>
-                            </button>
-                        }
-                    >
-                        <button
-                            class="stop-btn"
-                            onClick={handleAbort}
-                            title="停止执行"
+                        <Show
+                            when={isLoading()}
+                            fallback={
+                                <button
+                                    class="send-btn"
+                                    onClick={handleSend}
+                                    disabled={!inputText().trim() || !sdk.directory()}
+                                    title="发送消息"
+                                    aria-label="发送消息"
+                                >
+                                    <span class="send-icon">↑</span>
+                                </button>
+                            }
                         >
-                            <span class="stop-icon">■</span>
-                        </button>
-                    </Show>
+                            <button class="stop-btn" onClick={handleAbort} title="停止执行" aria-label="停止执行">
+                                <span class="stop-icon">■</span>
+                            </button>
+                        </Show>
+                    </div>
                 </div>
             </div>
         </div>

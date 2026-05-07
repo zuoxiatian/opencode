@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onMount, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { useSDK } from "../context/sdk"
 
@@ -20,15 +20,26 @@ export function FolderPanel() {
     const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
     const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
     const [showFiles, setShowFiles] = createSignal(false)
+    let unsubscribe: (() => void) | undefined
 
     onMount(() => {
         const saved = localStorage.getItem(RECENT_FOLDERS_KEY)
-        if (!saved) return
-        try {
-            setRecentFolders(JSON.parse(saved))
-        } catch (error) {
-            console.error("无法解析最近文件夹:", error)
+        if (saved) {
+            try {
+                setRecentFolders(JSON.parse(saved))
+            } catch (error) {
+                console.error("无法解析最近文件夹:", error)
+            }
         }
+        unsubscribe = sdk.subscribeToEvents((event) => {
+            if (event.type === "session.created" || event.type === "session.updated") {
+                applySessionUpdate(event.properties.sessionID, event.properties.info as Partial<Session>)
+            }
+        })
+    })
+
+    onCleanup(() => {
+        unsubscribe?.()
     })
 
     createEffect(() => {
@@ -121,6 +132,47 @@ export function FolderPanel() {
     const getSessionTitle = (session: Session) => {
         if (!session.title.startsWith("New session - ")) return session.title
         return "新对话"
+    }
+
+    const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
+        ...session,
+        ...info,
+        id: session.id,
+        time: {
+            ...session.time,
+            ...info.time,
+        },
+    })
+
+    const isCompleteSessionInfo = (info: Partial<Session>): info is Session => {
+        return Boolean(info.id && info.slug && info.projectID && info.directory && info.title && info.version && info.time)
+    }
+
+    const applySessionUpdate = (sessionID: string, info: Partial<Session>) => {
+        const selected = sdk.selectedSession()
+        if (selected?.id === sessionID) {
+            sdk.setSelectedSession(mergeSessionInfo(selected, info))
+        }
+        setSessionsByFolder((prev) => {
+            const folder = info.directory ?? Object.entries(prev).find((entry) => entry[1].some((session) => session.id === sessionID))?.[0]
+            if (!folder) return prev
+            const list = prev[folder] ?? []
+            const index = list.findIndex((session) => session.id === sessionID)
+            if (index === -1) {
+                const session = { ...info, id: sessionID }
+                if (!isCompleteSessionInfo(session)) return prev
+                return {
+                    ...prev,
+                    [folder]: [session, ...list].sort((a, b) => b.time.updated - a.time.updated),
+                }
+            }
+            return {
+                ...prev,
+                [folder]: list
+                    .map((session) => session.id === sessionID ? mergeSessionInfo(session, info) : session)
+                    .sort((a, b) => b.time.updated - a.time.updated),
+            }
+        })
     }
 
     const visibleSessions = (folder: string) => {
