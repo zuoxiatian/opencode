@@ -4,6 +4,7 @@ import { createSignal, onMount, Show } from "solid-js"
 import "@opencode-ai/ui/styles"
 import "./index.css"
 import { App } from "./components/App"
+import welcomeIcon from "../../build/128x128.png"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -36,8 +37,10 @@ function Root() {
             when={!isLoading()}
             fallback={
                 <div class="welcome-screen">
+                    <img class="welcome-icon" src={welcomeIcon} alt="" />
                     <div class="welcome-title">LongwiseTechAgent</div>
                     <div class="welcome-subtitle">正在启动后端服务...</div>
+                    <div class="welcome-progress"></div>
                     <div class="status-indicator">
                         <span class="status-dot connecting"></span>
                         <span>连接中</span>
@@ -49,6 +52,7 @@ function Root() {
                 when={serverInfo()}
                 fallback={
                     <div class="welcome-screen">
+                        <img class="welcome-icon" src={welcomeIcon} alt="" />
                         <div class="welcome-title">连接失败</div>
                         <div class="welcome-subtitle">无法连接到后端服务</div>
                         <button class="btn btn-primary" onClick={() => window.electronAPI.restart()}>
