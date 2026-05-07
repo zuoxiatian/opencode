@@ -10,6 +10,11 @@ interface FileItem {
 
 const RECENT_FOLDERS_KEY = "recent_folders"
 
+function isDefaultSessionTitle(title?: string) {
+    const value = title?.trim()
+    return value === "新对话" || /^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value ?? "")
+}
+
 export function FolderPanel() {
     const sdk = useSDK()
     const [recentFolders, setRecentFolders] = createSignal<string[]>([])
@@ -130,7 +135,7 @@ export function FolderPanel() {
     }
 
     const getSessionTitle = (session: Session) => {
-        if (!session.title.startsWith("New session - ")) return session.title
+        if (!isDefaultSessionTitle(session.title)) return session.title
         return "新对话"
     }
 

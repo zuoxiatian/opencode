@@ -76,6 +76,39 @@ export function SDKProvider(props: SDKProviderProps) {
     const eventListeners = new Set<EventListener>()
     const abortController = new AbortController()
 
+    const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
+        ...session,
+        ...info,
+        id: session.id,
+        time: {
+            ...session.time,
+            ...info.time,
+        },
+    })
+
+    const applySelectedSessionEvent = (event: Event, eventDirectory: string) => {
+        if (event.type === "session.created" || event.type === "session.updated") {
+            const properties = event.properties as { sessionID: string; info: Partial<Session> }
+            setSelectedSession((session) => {
+                if (session?.id !== properties.sessionID) return session
+                if (event.type === "session.updated" && properties.info.title !== undefined && properties.info.title !== session.title) {
+                    console.log("=== LXZ_TITLE_CHANGED_EVENT ===", {
+                        directory: eventDirectory,
+                        sessionID: properties.sessionID,
+                        before: session.title,
+                        after: properties.info.title,
+                        info: properties.info,
+                    })
+                }
+                return mergeSessionInfo(session, properties.info)
+            })
+        }
+        if (event.type === "session.deleted") {
+            const properties = event.properties as { sessionID?: string; info?: Partial<Session> }
+            setSelectedSession((session) => session?.id === (properties.sessionID ?? properties.info?.id) ? null : session)
+        }
+    }
+
     const updateDirectory = (dir: string) => {
         setDirectory(dir)
         setSelectedFile(null)
@@ -148,6 +181,7 @@ export function SDKProvider(props: SDKProviderProps) {
         batch(() => {
             for (const event of events) {
                 if (!event) continue
+                applySelectedSessionEvent(event.payload, event.directory)
                 for (const listener of eventListeners) {
                     try {
                         listener(event.payload, event.directory)

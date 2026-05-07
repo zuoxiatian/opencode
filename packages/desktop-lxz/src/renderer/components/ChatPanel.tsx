@@ -49,6 +49,22 @@ interface ModelOption extends ModelSelection {
     isDefault: boolean
 }
 
+function formatSessionTitle(title?: string) {
+    const value = title?.trim()
+    if (!value) return "新对话"
+    if (/^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value)) return "新对话"
+    return value
+}
+
+function isDefaultSessionTitle(title?: string) {
+    const value = title?.trim()
+    return value === "新对话" || /^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value ?? "")
+}
+
+function createInitialSessionTitle(text: string) {
+    return Array.from(text.replace(/\s+/g, " ").trim()).slice(0, 20).join("")
+}
+
 function isSelectableAgent(agent: Agent): agent is Agent & { mode: "primary" | "all" } {
     return agent.mode !== "subagent" && agent.hidden !== true
 }
@@ -203,7 +219,7 @@ export function ChatPanel() {
         return model.modelName
     })
 
-    const sessionTitle = createMemo(() => sdk.selectedSession()?.title?.trim() || "新对话")
+    const sessionTitle = createMemo(() => formatSessionTitle(sdk.selectedSession()?.title))
 
     const contextLabel = createMemo(() => {
         const directory = sdk.directory()
@@ -507,7 +523,7 @@ export function ChatPanel() {
     }
 
     // 为当前文件夹创建新会话
-    const createNewSessionForFolder = async () => {
+    const createNewSessionForFolder = async (title?: string) => {
         try {
             const { serverInfo } = sdk
             const headers = getHeaders()
@@ -515,7 +531,7 @@ export function ChatPanel() {
             const response = await fetch(`${serverInfo.url}/session`, {
                 method: "POST",
                 headers,
-                body: JSON.stringify({}),
+                body: JSON.stringify(title ? { title } : {}),
             })
 
             if (response.ok) {
@@ -532,6 +548,20 @@ export function ChatPanel() {
             console.error("创建会话失败:", error)
         }
         return null
+    }
+
+    const ensureInitialSessionTitle = async (currentSessionId: string, text: string) => {
+        const session = sdk.selectedSession()
+        if (session?.id === currentSessionId && !isDefaultSessionTitle(session.title)) return
+        if (messages().filter((message) => message.role === "user").length > 1) return
+
+        const result = await sdk.client.session.update({
+            sessionID: currentSessionId,
+            title: createInitialSessionTitle(text),
+        }, { throwOnError: false })
+        if (!result.data) return
+        sdk.setSelectedSession(result.data)
+        sdk.refreshSessionList()
     }
 
     const handleSend = async () => {
@@ -555,12 +585,13 @@ export function ChatPanel() {
 
             let currentSessionId = sessionId()
             if (!currentSessionId) {
-                currentSessionId = await createNewSessionForFolder()
+                currentSessionId = await createNewSessionForFolder(createInitialSessionTitle(text))
             }
             if (!currentSessionId) throw new Error("创建会话失败")
 
             // 发送消息 - 使用 message 端点（可以正常触发 SSE 事件）
             const selectedFile = sdk.selectedFile()
+            await ensureInitialSessionTitle(currentSessionId, text)
             const messageWithContext = selectedFile && !selectedFile.isDirectory
                 ? `[当前文件夹: ${sdk.directory()}]\n[当前文件: ${selectedFile.path}]\n\n${text}`
                 : `[当前文件夹: ${sdk.directory()}]\n\n${text}`
