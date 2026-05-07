@@ -2304,6 +2304,40 @@ body {
     color: var(--text-secondary);
 }
 
+.chat-thinking {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+}
+
+.chat-thinking-spinner {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    border: 2px solid rgba(255, 255, 255, 0.12);
+    border-top-color: var(--accent-primary);
+    border-radius: 999px;
+    animation: spin 0.8s linear infinite;
+}
+
+.chat-thinking-label {
+    flex: 0 0 auto;
+}
+
+.chat-thinking-heading {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-tertiary);
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .chat-message-content[data-component="markdown"] {
     color: var(--text-secondary);
     font-size: 13px;
