@@ -1,6 +1,6 @@
 # OpenCode Desktop 打包指南
 
-本文档说明如何将 `desktop-vite` 项目打包为 Windows 可执行文件 (EXE)。
+本文档说明如何将 `desktop-lxz` 项目打包为 Windows 可执行文件 (EXE) 和 macOS 应用包。
 
 ## 目录
 
@@ -37,23 +37,24 @@ npm --version
 
 ## 项目依赖关系
 
-打包 `desktop-vite` 需要以下项目按顺序构建：
+打包 `desktop-lxz` 需要以下项目按顺序构建：
 
 ```
-desktop-vite (Electron 桌面应用)
+desktop-lxz (Electron 桌面应用)
     ├── @opencode-ai/sdk (SDK 接口 - Vite 构建时直接引用源码)
     │   └── packages/sdk/js/src
     └── opencode (后端服务 - 作为 extraResources 打包)
-        └── packages/opencode/bin/opencode.exe
+        ├── Windows: packages/desktop-lxz/bin/opencode.exe
+        └── macOS: packages/desktop-lxz/bin/mac/{x64,arm64}/opencode
 ```
 
 ### 依赖说明
 
 | 项目 | 路径 | 构建必要性 |
 |------|------|------------|
-| **opencode** | `packages/opencode` | ✅ 必须先构建，生成 `bin/opencode.exe` |
+| **opencode** | `packages/opencode` | ✅ 必须先构建，生成目标平台二进制 |
 | **@opencode-ai/sdk** | `packages/sdk/js` | ⚪ 无需预编译，Vite 直接引用源码 |
-| **desktop-vite** | `packages/desktop-vite` | ✅ 最后构建并打包 |
+| **desktop-lxz** | `packages/desktop-lxz` | ✅ 最后构建并打包 |
 
 ---
 
@@ -83,20 +84,22 @@ $env:OPENCODE_VERSION="1.1.25"  # 与 package.json 中的版本保持一致
 bun run script/build.ts --single
 ```
 
-构建完成后，将生成的二进制文件复制到 `bin` 目录：
+构建完成后，将生成的二进制文件复制到 `desktop-lxz` 的 `bin` 目录：
 
 ```powershell
-# 创建 bin 目录（如果不存在）
-if (!(Test-Path -Path "bin")) { New-Item -ItemType Directory -Path "bin" }
+cd ..\..
 
-# 复制二进制文件
-Copy-Item -Path "dist\opencode-windows-x64\bin\opencode.exe" -Destination "bin\opencode.exe" -Force
+# 创建 bin 目录（如果不存在）
+if (!(Test-Path -Path "packages\desktop-lxz\bin")) { New-Item -ItemType Directory -Path "packages\desktop-lxz\bin" }
+
+# 复制 Windows 二进制文件
+Copy-Item -Path "packages\opencode\dist\opencode-windows-x64\bin\opencode.exe" -Destination "packages\desktop-lxz\bin\opencode.exe" -Force
 ```
 
-### 步骤 3: 构建 desktop-vite
+### 步骤 3: 构建 desktop-lxz
 
 ```powershell
-cd ../desktop-vite
+cd ../desktop-lxz
 
 # 构建 Electron 应用 (main + preload + renderer)
 npm run build
@@ -112,16 +115,38 @@ npm run dist
 npm run pack
 ```
 
+### 步骤 5: 打包 macOS
+
+macOS 的 `dmg` 和 `zip` 需要在 macOS 机器上执行打包。先准备两个架构的后端二进制：
+
+```bash
+cd packages/opencode
+OPENCODE_CHANNEL=latest OPENCODE_VERSION=1.1.25 bun run script/build.ts --skip-install
+
+cd ../desktop-lxz
+mkdir -p bin/mac/x64 bin/mac/arm64
+cp ../opencode/dist/opencode-darwin-x64/bin/opencode bin/mac/x64/opencode
+cp ../opencode/dist/opencode-darwin-arm64/bin/opencode bin/mac/arm64/opencode
+chmod +x bin/mac/x64/opencode bin/mac/arm64/opencode
+
+bun run build
+bun run dist:mac
+```
+
 ---
 
 ## 输出文件
 
-打包完成后，文件位于 `packages/desktop-vite/release/` 目录：
+打包完成后，文件位于 `packages/desktop-lxz/release/` 目录：
 
 | 文件 | 说明 |
 |------|------|
-| `OpenCode-{version}-win-x64.exe` | NSIS 安装程序 (~113 MB) |
-| `OpenCode-{version}-win-x64.zip` | 便携版压缩包 (~155 MB) |
+| `LangXiaoZhiAgent-{version}-win-x64-Installer.exe` | Windows NSIS 安装程序 |
+| `LangXiaoZhiAgent-{version}-win-x64-Portable.exe` | Windows 便携版 |
+| `LangXiaoZhiAgent-{version}-mac-x64.dmg` | macOS Intel DMG |
+| `LangXiaoZhiAgent-{version}-mac-arm64.dmg` | macOS Apple Silicon DMG |
+| `LangXiaoZhiAgent-{version}-mac-x64.zip` | macOS Intel ZIP |
+| `LangXiaoZhiAgent-{version}-mac-arm64.zip` | macOS Apple Silicon ZIP |
 | `win-unpacked/` | 解压后的应用目录 |
 | `builder-debug.yml` | 构建调试信息 |
 
@@ -141,7 +166,7 @@ $ErrorActionPreference = "Stop"
 
 $ROOT_DIR = "C:\Users\82029\Desktop\工作\gitwork1\new_ai\open-code\opencode-dev"
 $OPENCODE_DIR = "$ROOT_DIR\packages\opencode"
-$DESKTOP_DIR = "$ROOT_DIR\packages\desktop-vite"
+$DESKTOP_DIR = "$ROOT_DIR\packages\desktop-lxz"
 
 Write-Host "=== OpenCode Desktop 构建脚本 ===" -ForegroundColor Cyan
 
@@ -156,16 +181,17 @@ bun run script/build.ts --single
 if ($LASTEXITCODE -ne 0) { throw "opencode 构建失败" }
 
 # 复制二进制文件
-if (!(Test-Path -Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
-Copy-Item -Path "dist\opencode-windows-x64\bin\opencode.exe" -Destination "bin\opencode.exe" -Force
+Set-Location $ROOT_DIR
+if (!(Test-Path -Path "packages\desktop-lxz\bin")) { New-Item -ItemType Directory -Path "packages\desktop-lxz\bin" | Out-Null }
+Copy-Item -Path "packages\opencode\dist\opencode-windows-x64\bin\opencode.exe" -Destination "packages\desktop-lxz\bin\opencode.exe" -Force
 Write-Host "✓ opencode.exe 已生成" -ForegroundColor Green
 
-# 步骤 2: 构建 desktop-vite
-Write-Host "`n[2/3] 正在构建 desktop-vite..." -ForegroundColor Yellow
+# 步骤 2: 构建 desktop-lxz
+Write-Host "`n[2/3] 正在构建 desktop-lxz..." -ForegroundColor Yellow
 Set-Location $DESKTOP_DIR
 
 npm run build
-if ($LASTEXITCODE -ne 0) { throw "desktop-vite 构建失败" }
+if ($LASTEXITCODE -ne 0) { throw "desktop-lxz 构建失败" }
 Write-Host "✓ Electron 应用已构建" -ForegroundColor Green
 
 # 步骤 3: 打包

@@ -1,4 +1,4 @@
-# Desktop Vite Packaging Notes
+# Desktop LXZ Packaging Notes
 
 This package is local integration code. Treat `packages/opencode` as an upstream
 dependency: build it first, copy only the generated binary into this package, and
@@ -9,7 +9,7 @@ do not edit upstream source to fix desktop packaging issues.
 - Node: `22.13.1` via nvm-windows
 - Bun: `1.3.13`
 - Electron: `33.0.0`
-- Build target: Windows x64 portable exe
+- Build target: Windows x64 installer/portable exe; macOS x64/arm64 dmg and zip
 
 Before running Electron or packaging, clear Electron's Node mode flag:
 
@@ -20,7 +20,7 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 ## Problems Encountered
 
 1. `bun install --frozen-lockfile` wanted to update `bun.lock`.
-   - Cause: the newly added `packages/desktop-vite` workspace is picked up by root `packages/*`.
+   - Cause: the newly added `packages/desktop-lxz` workspace is picked up by root `packages/*`.
    - Workaround used for local setup: install with `--no-save` and avoid committing lockfile changes unless explicitly intended.
 
 2. Native install failed on Node 24.
@@ -33,7 +33,7 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
    - Fix: run Electron's install script with a mirror if needed:
 
 ```powershell
-Set-Location packages\desktop-vite\node_modules\electron
+Set-Location packages\desktop-lxz\node_modules\electron
 $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 $env:npm_config_electron_mirror = "https://npmmirror.com/mirrors/electron/"
 node install.js
@@ -81,18 +81,18 @@ Smoke test passed: 1.14.29
 
 ```powershell
 Set-Location C:\Users\LZ-DSJ-01\Desktop\work\git_work\opencode\opencode
-New-Item -ItemType Directory -Force -Path packages\desktop-vite\bin | Out-Null
-Copy-Item packages\opencode\dist\opencode-windows-x64\bin\opencode.exe packages\desktop-vite\bin\opencode.exe -Force
+New-Item -ItemType Directory -Force -Path packages\desktop-lxz\bin | Out-Null
+Copy-Item packages\opencode\dist\opencode-windows-x64\bin\opencode.exe packages\desktop-lxz\bin\opencode.exe -Force
 ```
 
 4. Build the Electron app:
 
 ```powershell
-Set-Location packages\desktop-vite
+Set-Location packages\desktop-lxz
 bun run build
 ```
 
-5. Package the portable exe:
+5. Package the Windows installer and portable exe:
 
 ```powershell
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
@@ -103,10 +103,40 @@ $env:npm_config_electron_builder_binaries_mirror = "https://npmmirror.com/mirror
 bun run dist
 ```
 
-Expected final artifact:
+Expected final artifacts:
 
 ```text
-packages/desktop-vite/release/OpenCode-1.0.0-win-x64.exe
+packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-win-x64-Installer.exe
+packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-win-x64-Portable.exe
+```
+
+## macOS Build
+
+Create macOS artifacts on a macOS host. The app packages one `opencode` backend
+binary per Electron architecture, so prepare both resource directories before
+running `dist:mac`.
+
+```bash
+cd packages/opencode
+OPENCODE_CHANNEL=latest OPENCODE_VERSION=1.14.29 bun run script/build.ts --skip-install
+
+cd ../desktop-lxz
+mkdir -p bin/mac/x64 bin/mac/arm64
+cp ../opencode/dist/opencode-darwin-x64/bin/opencode bin/mac/x64/opencode
+cp ../opencode/dist/opencode-darwin-arm64/bin/opencode bin/mac/arm64/opencode
+chmod +x bin/mac/x64/opencode bin/mac/arm64/opencode
+
+bun run build
+bun run dist:mac
+```
+
+Expected macOS artifacts:
+
+```text
+packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-x64.dmg
+packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-arm64.dmg
+packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-x64.zip
+packages/desktop-lxz/release/LangXiaoZhiAgent-1.0.0-mac-arm64.zip
 ```
 
 ## Cleanup
@@ -115,16 +145,17 @@ After a successful package, keep only the final exe:
 
 ```powershell
 Set-Location C:\Users\LZ-DSJ-01\Desktop\work\git_work\opencode\opencode
-Remove-Item packages\desktop-vite\release\win-unpacked -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item packages\desktop-vite\bin -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item packages\desktop-vite\dist -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item packages\desktop-lxz\release\win-unpacked -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item packages\desktop-lxz\bin -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item packages\desktop-lxz\dist -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item packages\opencode\dist -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item packages\app\dist -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
-`packages/desktop-vite/release` should contain only:
+`packages/desktop-lxz/release` should contain only the artifacts you intend to distribute, for example:
 
 ```text
-OpenCode-1.0.0-win-x64.exe
+LangXiaoZhiAgent-1.0.0-win-x64-Installer.exe
+LangXiaoZhiAgent-1.0.0-win-x64-Portable.exe
 ```
 

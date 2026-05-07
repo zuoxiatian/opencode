@@ -10,19 +10,25 @@
         "dist/**/*",
         "!node_modules"
     ],
-    "extraResources": [
-        {
-            "from": "bin/",
-            "to": "bin/",
-            "filter": [
-                "opencode*"
-            ]
-        }
-    ],
     "win": {
         "forceCodeSigning": false,
         "signAndEditExecutable": false,
+        "extraResources": [
+            {
+                "from": "bin/",
+                "to": "bin/",
+                "filter": [
+                    "opencode.exe"
+                ]
+            }
+        ],
         "target": [
+            {
+                "target": "nsis",
+                "arch": [
+                    "x64"
+                ]
+            },
             {
                 "target": "portable",
                 "arch": [
@@ -37,7 +43,11 @@
         "oneClick": false,
         "allowToChangeInstallationDirectory": true,
         "installerIcon": "build/icon.ico",
-        "uninstallerIcon": "build/icon.ico"
+        "uninstallerIcon": "build/icon.ico",
+        "artifactName": "${productName}-${version}-win-${arch}-Installer.${ext}"
+    },
+    "portable": {
+        "artifactName": "${productName}-${version}-win-${arch}-Portable.${ext}"
     },
     "mac": {
         "target": [
@@ -53,6 +63,15 @@
                 "arch": [
                     "x64",
                     "arm64"
+                ]
+            }
+        ],
+        "extraResources": [
+            {
+                "from": "bin/mac/${arch}/",
+                "to": "bin/",
+                "filter": [
+                    "opencode"
                 ]
             }
         ],
