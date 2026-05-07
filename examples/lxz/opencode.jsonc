@@ -1,0 +1,46 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Default model used by chats.
+  // Format: "<provider>/<model>".
+  "model": "openai/gpt-5.2",
+
+  // Optional smaller model used for lightweight tasks like titles.
+  "small_model": "openai/gpt-5.2-mini",
+
+  "provider": {
+    "openai": {
+      "options": {
+        // Prefer environment variables for secrets in real use:
+        // $env:OPENAI_API_KEY = "sk-..."
+        "apiKey": "{env:OPENAI_API_KEY}"
+      }
+    },
+
+    // Example for an OpenAI-compatible endpoint.
+    // Use model: "local/qwen3-coder" to select this example provider.
+    "local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local OpenAI Compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:11434/v1",
+        "apiKey": "local"
+      },
+      "models": {
+        "qwen3-coder": {
+          "name": "Qwen3 Coder",
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          }
+        }
+      }
+    }
+  },
+
+  // Additional skill folders. With the LXZ patch, external skills are already
+  // scanned from ~/.lxz/skills, so this is only needed for extra folders.
+  "skills": {
+    "paths": []
+  }
+}

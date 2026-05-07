@@ -1,20 +1,21 @@
 import path from "path"
 import fs from "fs/promises"
-import { xdgData, xdgCache, xdgConfig, xdgState } from "xdg-basedir"
 import os from "os"
 import { Context, Effect, Layer } from "effect"
 import { Flock } from "./util/flock"
 
-const app = "opencode"
-const data = path.join(xdgData!, app)
-const cache = path.join(xdgCache!, app)
-const config = path.join(xdgConfig!, app)
-const state = path.join(xdgState!, app)
+const home = process.env.OPENCODE_TEST_HOME ?? os.homedir()
+const root = path.join(home, ".lxz")
+const data = path.join(root, "data")
+const cache = path.join(root, "cache")
+const config = path.join(root, "config")
+const state = path.join(root, "state")
 
 const paths = {
   get home() {
-    return process.env.OPENCODE_TEST_HOME ?? os.homedir()
+    return home
   },
+  root,
   data,
   bin: path.join(cache, "bin"),
   log: path.join(data, "log"),
@@ -39,6 +40,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Gl
 
 export interface Interface {
   readonly home: string
+  readonly root: string
   readonly data: string
   readonly cache: string
   readonly config: string
@@ -52,6 +54,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     return Service.of({
       home: Path.home,
+      root: Path.root,
       data: Path.data,
       cache: Path.cache,
       config: Path.config,

@@ -809,12 +809,15 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--spacing-sm);
 }
 
 .agent-selector {
     display: flex;
     gap: var(--spacing-xs);
     align-items: center;
+    min-width: 0;
+    flex: 1;
 }
 
 .toolbar-btn {
@@ -840,7 +843,8 @@ body {
 }
 
 /* Agent 切换按钮 */
-.agent-toggle {
+.agent-toggle,
+.model-toggle {
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
@@ -853,36 +857,53 @@ body {
     font-weight: 500;
     cursor: pointer;
     transition: all var(--transition-fast);
+    max-width: 180px;
+    min-width: 0;
 }
 
-.agent-toggle:hover {
+.agent-toggle span:last-child,
+.model-toggle span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-toggle:hover,
+.model-toggle:hover {
     color: var(--text-primary);
     background: var(--bg-hover);
     border-color: var(--border-strong);
 }
 
-.agent-toggle.active {
+.agent-toggle.active,
+.model-toggle.active {
     color: var(--accent-secondary);
     border-color: var(--accent-primary);
 }
 
-.agent-toggle .toggle-icon {
+.agent-toggle .toggle-icon,
+.model-toggle .toggle-icon {
     font-size: 10px;
     opacity: 0.7;
     transition: transform var(--transition-fast);
+    flex-shrink: 0;
 }
 
-.agent-toggle:hover .toggle-icon {
+.agent-toggle:hover .toggle-icon,
+.model-toggle:hover .toggle-icon {
     transform: translateY(-1px);
 }
 
 /* Agent 下拉菜单容器 */
-.agent-dropdown {
+.agent-dropdown,
+.model-dropdown {
     position: relative;
+    min-width: 0;
 }
 
 /* Agent 弹出菜单 */
-.agent-menu {
+.agent-menu,
+.model-menu {
     position: absolute;
     bottom: 100%;
     left: 0;
@@ -893,8 +914,15 @@ body {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-xl);
     min-width: 160px;
+    max-width: 320px;
+    max-height: 340px;
     overflow: hidden;
+    overflow-y: auto;
     z-index: 100;
+}
+
+.model-menu {
+    min-width: 280px;
 }
 
 @keyframes slideUp {
@@ -909,7 +937,8 @@ body {
     }
 }
 
-.agent-menu-item {
+.agent-menu-item,
+.model-menu-item {
     width: 100%;
     display: flex;
     align-items: center;
@@ -925,11 +954,21 @@ body {
     text-align: left;
 }
 
-.agent-menu-item:hover {
+.model-menu-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 14px;
+    position: relative;
+}
+
+.agent-menu-item:hover,
+.model-menu-item:hover {
     background: rgba(139, 92, 246, 0.15);
 }
 
-.agent-menu-item.active {
+.agent-menu-item.active,
+.model-menu-item.active {
     color: var(--accent-secondary);
     background: rgba(139, 92, 246, 0.1);
 }
@@ -938,10 +977,36 @@ body {
     font-size: 16px;
 }
 
-.agent-menu-item .check-icon {
+.agent-menu-item .check-icon,
+.model-menu-item .check-icon {
     margin-left: auto;
     color: var(--accent-primary);
     font-size: 14px;
+}
+
+.model-menu-item .check-icon {
+    position: absolute;
+    right: 14px;
+    top: 12px;
+}
+
+.model-menu-main {
+    display: block;
+    max-width: 230px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.model-menu-meta {
+    display: block;
+    max-width: 230px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 400;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ========================================

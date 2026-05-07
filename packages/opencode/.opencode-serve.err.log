@@ -1,0 +1,5 @@
+Performing one time database migration, may take a few minutes...
+sqlite-migration:0
+sqlite-migration:100
+sqlite-migration:done
+Database migration complete.

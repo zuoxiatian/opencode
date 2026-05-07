@@ -1,6 +1,6 @@
-import { createSignal, For, Show, createEffect, onCleanup, onMount } from "solid-js"
+import { createSignal, For, Show, createEffect, createMemo, onCleanup, onMount } from "solid-js"
 import { useSDK, type DiscussIssue } from "../context/sdk"
-import type { Event } from "@opencode-ai/sdk/v2/client"
+import type { Agent, Event, Provider } from "@opencode-ai/sdk/v2/client"
 
 interface Message {
     id: string
@@ -16,6 +16,69 @@ interface ToolCall {
     status: "pending" | "running" | "completed" | "error"
     title?: string
     output?: string
+}
+
+interface AgentOption {
+    name: string
+    description?: string
+    mode: "primary" | "all"
+    model?: ModelSelection
+}
+
+interface ModelSelection {
+    providerID: string
+    modelID: string
+}
+
+interface ModelOption extends ModelSelection {
+    providerName: string
+    modelName: string
+    context: number
+    isDefault: boolean
+}
+
+function isSelectableAgent(agent: Agent): agent is Agent & { mode: "primary" | "all" } {
+    return agent.mode !== "subagent" && agent.hidden !== true
+}
+
+function sameModel(a: ModelSelection, b: ModelSelection) {
+    return a.providerID === b.providerID && a.modelID === b.modelID
+}
+
+function buildModelOptions(providers: Provider[], defaults: Record<string, string>) {
+    const options = providers.flatMap((provider) =>
+        Object.values(provider.models)
+            .filter((model) => model.capabilities.output.text && model.status !== "deprecated")
+            .map((model): ModelOption => ({
+                providerID: provider.id,
+                modelID: model.id,
+                providerName: provider.name,
+                modelName: model.name,
+                context: model.limit.context,
+                isDefault: defaults[provider.id] === model.id,
+            })),
+    )
+    if (options.length) return options
+    return providers.flatMap((provider) =>
+        Object.values(provider.models)
+            .filter((model) => model.capabilities.output.text)
+            .map((model): ModelOption => ({
+                providerID: provider.id,
+                modelID: model.id,
+                providerName: provider.name,
+                modelName: model.name,
+                context: model.limit.context,
+                isDefault: defaults[provider.id] === model.id,
+            })),
+    )
+}
+
+function pickDefaultAgent(agents: AgentOption[]) {
+    return agents.find((agent) => agent.name === "plan")?.name ?? agents.find((agent) => agent.name === "build")?.name ?? agents[0]?.name ?? "build"
+}
+
+function pickDefaultModel(models: ModelOption[], defaults: Record<string, string>) {
+    return models.find((model) => defaults[model.providerID] === model.modelID) ?? models[0]
 }
 
 // 构建讨论问题的上下文模板
@@ -55,18 +118,26 @@ export function ChatPanel() {
     const [streamingContent, setStreamingContent] = createSignal("")
     const [toolCalls, setToolCalls] = createSignal<ToolCall[]>([])
     const [sessionStatus, setSessionStatus] = createSignal<"idle" | "busy" | "retry">("idle")
-    const [currentAgent, setCurrentAgent] = createSignal<"pdf-audit" | "build">("pdf-audit") // Agent 模式
-    const [showAgentMenu, setShowAgentMenu] = createSignal(false) // Agent 选择菜单
+    const [agents, setAgents] = createSignal<AgentOption[]>([])
+    const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
+    const [currentAgent, setCurrentAgent] = createSignal("plan")
+    const [currentModel, setCurrentModel] = createSignal<ModelSelection | null>(null)
+    const [showAgentMenu, setShowAgentMenu] = createSignal(false)
+    const [showModelMenu, setShowModelMenu] = createSignal(false)
     // 跟踪消息角色（messageID -> role）
     const messageRoles = new Map<string, "user" | "assistant">()
     let messagesContainer: HTMLDivElement | undefined
     let agentDropdownRef: HTMLDivElement | undefined
+    let modelDropdownRef: HTMLDivElement | undefined
     let unsubscribe: (() => void) | null = null
 
     // 点击外部关闭菜单
     const handleClickOutside = (e: MouseEvent) => {
         if (showAgentMenu() && agentDropdownRef && !agentDropdownRef.contains(e.target as Node)) {
             setShowAgentMenu(false)
+        }
+        if (showModelMenu() && modelDropdownRef && !modelDropdownRef.contains(e.target as Node)) {
+            setShowModelMenu(false)
         }
     }
 
@@ -91,6 +162,61 @@ export function ChatPanel() {
         streamingContent()
         toolCalls()
         scrollToBottom()
+    })
+
+    const currentAgentInfo = createMemo(() => agents().find((agent) => agent.name === currentAgent()))
+
+    const currentModelInfo = createMemo(() => {
+        const model = currentModel()
+        if (!model) return
+        return modelOptions().find((option) => sameModel(option, model))
+    })
+
+    const modelLabel = createMemo(() => {
+        const model = currentModelInfo()
+        if (!model) return "默认模型"
+        return model.modelName
+    })
+
+    const loadChatOptions = async () => {
+        try {
+            const [providersResult, agentsResult] = await Promise.all([
+                sdk.client.config.providers(undefined, { throwOnError: true }),
+                sdk.client.app.agents(undefined, { throwOnError: true }),
+            ])
+            const defaults = providersResult.data.default
+            const nextAgents = agentsResult.data
+                .filter(isSelectableAgent)
+                .map((agent): AgentOption => ({
+                    name: agent.name,
+                    description: agent.description,
+                    mode: agent.mode,
+                    model: agent.model,
+                }))
+            const nextModels = buildModelOptions(providersResult.data.providers, defaults)
+
+            setAgents(nextAgents)
+            setModelOptions(nextModels)
+            setCurrentAgent((prev) => nextAgents.some((agent) => agent.name === prev) ? prev : pickDefaultAgent(nextAgents))
+            setCurrentModel((prev) => {
+                if (prev && nextModels.some((model) => sameModel(model, prev))) return prev
+                return pickDefaultModel(nextModels, defaults) ?? null
+            })
+        } catch (error) {
+            console.error("加载模型和模式失败:", error)
+        }
+    }
+
+    const applyAgent = (agent: AgentOption) => {
+        setCurrentAgent(agent.name)
+        if (agent.model && modelOptions().some((model) => sameModel(model, agent.model!))) {
+            setCurrentModel(agent.model)
+        }
+        setShowAgentMenu(false)
+    }
+
+    onMount(() => {
+        void loadChatOptions()
     })
 
     // 构建认证头
@@ -438,6 +564,7 @@ export function ChatPanel() {
                 headers,
                 body: JSON.stringify({
                     agent: currentAgent(), // 使用选中的 Agent
+                    ...(currentModel() ? { model: currentModel() } : {}),
                     parts: [{ type: "text", text: messageWithFile }],
                 }),
             })
@@ -696,30 +823,53 @@ export function ChatPanel() {
                                 title="切换模式"
                             >
                                 <span class="toggle-icon">∧</span>
-                                <span>{currentAgent() === "pdf-audit" ? "PDF审核" : "通用"}</span>
+                                <span>{currentAgentInfo()?.name ?? currentAgent()}</span>
                             </button>
                             <Show when={showAgentMenu()}>
                                 <div class="agent-menu">
-                                    <button
-                                        class={`agent-menu-item ${currentAgent() === "pdf-audit" ? "active" : ""}`}
-                                        onClick={() => { setCurrentAgent("pdf-audit"); setShowAgentMenu(false); }}
-                                    >
-                                        <span class="menu-icon">📕</span>
-                                        <span>PDF审核</span>
-                                        <Show when={currentAgent() === "pdf-audit"}>
-                                            <span class="check-icon">✓</span>
-                                        </Show>
-                                    </button>
-                                    <button
-                                        class={`agent-menu-item ${currentAgent() === "build" ? "active" : ""}`}
-                                        onClick={() => { setCurrentAgent("build"); setShowAgentMenu(false); }}
-                                    >
-                                        <span class="menu-icon">🔧</span>
-                                        <span>通用</span>
-                                        <Show when={currentAgent() === "build"}>
-                                            <span class="check-icon">✓</span>
-                                        </Show>
-                                    </button>
+                                    <For each={agents()}>
+                                        {(agent) => (
+                                            <button
+                                                class={`agent-menu-item ${currentAgent() === agent.name ? "active" : ""}`}
+                                                onClick={() => applyAgent(agent)}
+                                                title={agent.description}
+                                            >
+                                                <span class="menu-icon">{agent.name === "plan" ? "◇" : "▣"}</span>
+                                                <span>{agent.name}</span>
+                                                <Show when={currentAgent() === agent.name}>
+                                                    <span class="check-icon">✓</span>
+                                                </Show>
+                                            </button>
+                                        )}
+                                    </For>
+                                </div>
+                            </Show>
+                        </div>
+                        <div class="model-dropdown" ref={modelDropdownRef}>
+                            <button
+                                class="model-toggle"
+                                onClick={() => setShowModelMenu(!showModelMenu())}
+                                title={currentModelInfo() ? `${currentModelInfo()?.providerName}/${currentModelInfo()?.modelID}` : "选择模型"}
+                            >
+                                <span class="toggle-icon">⌁</span>
+                                <span>{modelLabel()}</span>
+                            </button>
+                            <Show when={showModelMenu()}>
+                                <div class="model-menu">
+                                    <For each={modelOptions()}>
+                                        {(model) => (
+                                            <button
+                                                class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
+                                                onClick={() => { setCurrentModel(model); setShowModelMenu(false); }}
+                                            >
+                                                <span class="model-menu-main">{model.modelName}</span>
+                                                <span class="model-menu-meta">{model.providerName}{model.isDefault ? " · 默认" : ""}</span>
+                                                <Show when={currentModel() && sameModel(model, currentModel()!)}>
+                                                    <span class="check-icon">✓</span>
+                                                </Show>
+                                            </button>
+                                        )}
+                                    </For>
                                 </div>
                             </Show>
                         </div>
