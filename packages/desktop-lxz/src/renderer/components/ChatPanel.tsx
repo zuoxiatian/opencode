@@ -102,7 +102,7 @@ function buildModelOptions(providers: Provider[], defaults: Record<string, strin
 }
 
 function pickDefaultAgent(agents: AgentOption[]) {
-    return agents.find((agent) => agent.name === "plan")?.name ?? agents.find((agent) => agent.name === "build")?.name ?? agents[0]?.name ?? "build"
+    return agents.find((agent) => agent.name === "build")?.name ?? agents[0]?.name ?? "build"
 }
 
 function pickDefaultModel(models: ModelOption[], defaults: Record<string, string>) {
@@ -148,7 +148,7 @@ export function ChatPanel() {
     const [sessionStatus, setSessionStatus] = createSignal<"idle" | "busy" | "retry">("idle")
     const [agents, setAgents] = createSignal<AgentOption[]>([])
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
-    const [currentAgent, setCurrentAgent] = createSignal("plan")
+    const [currentAgent, setCurrentAgent] = createSignal("build")
     const [currentModel, setCurrentModel] = createSignal<ModelSelection | null>(null)
     const [showAgentMenu, setShowAgentMenu] = createSignal(false)
     const [showModelMenu, setShowModelMenu] = createSignal(false)

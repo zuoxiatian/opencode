@@ -19,7 +19,7 @@ interface AppProps {
 export function App(props: AppProps) {
     const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false)
     const [chatCollapsed, setChatCollapsed] = createSignal(false)
-    const [contentCollapsed, setContentCollapsed] = createSignal(false)
+    const [contentCollapsed, setContentCollapsed] = createSignal(true)
     const [folderWidth, setFolderWidth] = createSignal(220)
     const [chatWidth, setChatWidth] = createSignal(400)
     const [isDragging, setIsDragging] = createSignal<"folder" | "chat" | null>(null)

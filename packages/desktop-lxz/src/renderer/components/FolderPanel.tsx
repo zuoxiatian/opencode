@@ -31,7 +31,9 @@ export function FolderPanel() {
         const saved = localStorage.getItem(RECENT_FOLDERS_KEY)
         if (saved) {
             try {
-                setRecentFolders(JSON.parse(saved))
+                const folders = JSON.parse(saved) as string[]
+                setRecentFolders(folders)
+                setCollapsedFolders(new Set(folders))
             } catch (error) {
                 console.error("无法解析最近文件夹:", error)
             }
@@ -95,6 +97,7 @@ export function FolderPanel() {
     const handleOpenFolder = async () => {
         const folder = await window.electronAPI.pickDirectory()
         if (!folder) return
+        setCollapsedFolders((prev) => new Set(prev).add(folder))
         activateFolder(folder)
         saveRecentFolders([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 20))
     }
