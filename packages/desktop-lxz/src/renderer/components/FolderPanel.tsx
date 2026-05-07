@@ -14,9 +14,11 @@ export function FolderPanel() {
     const sdk = useSDK()
     const [recentFolders, setRecentFolders] = createSignal<string[]>([])
     const [files, setFiles] = createSignal<FileItem[]>([])
-    const [sessions, setSessions] = createSignal<Session[]>([])
+    const [sessionsByFolder, setSessionsByFolder] = createSignal<Record<string, Session[]>>({})
     const [isLoadingFiles, setIsLoadingFiles] = createSignal(false)
-    const [isLoadingSessions, setIsLoadingSessions] = createSignal(false)
+    const [loadingFolders, setLoadingFolders] = createSignal<Set<string>>(new Set())
+    const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
+    const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
     const [showFiles, setShowFiles] = createSignal(false)
 
     onMount(() => {
@@ -33,20 +35,14 @@ export function FolderPanel() {
         const folder = sdk.directory()
         if (!folder) {
             setFiles([])
-            setSessions([])
             return
         }
         void loadFiles(folder)
     })
 
     createEffect(() => {
-        const folder = sdk.directory()
         sdk.sessionListVersion()
-        if (!folder) {
-            setSessions([])
-            return
-        }
-        void loadSessions(folder)
+        void Promise.all(recentFolders().map(loadSessions))
     })
 
     const loadFiles = async (folder: string) => {
@@ -64,34 +60,51 @@ export function FolderPanel() {
     }
 
     const loadSessions = async (folder: string) => {
-        setIsLoadingSessions(true)
+        setLoadingFolders((prev) => new Set(prev).add(folder))
         try {
-            setSessions((await sdk.client.session.list({
+            const result = await sdk.client.session.list({
                 directory: folder,
                 roots: true,
                 limit: 50,
-            }, { throwOnError: true })).data)
+            }, { throwOnError: true })
+            setSessionsByFolder((prev) => ({ ...prev, [folder]: result.data }))
         } catch (error) {
             console.error("加载对话记录失败:", error)
-            setSessions([])
+            setSessionsByFolder((prev) => ({ ...prev, [folder]: [] }))
         } finally {
-            setIsLoadingSessions(false)
+            setLoadingFolders((prev) => new Set([...prev].filter((item) => item !== folder)))
         }
     }
 
     const handleOpenFolder = async () => {
         const folder = await window.electronAPI.pickDirectory()
-        if (folder) selectFolder(folder)
+        if (!folder) return
+        activateFolder(folder)
+        saveRecentFolders([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 20))
     }
 
-    const selectFolder = (folder: string) => {
+    const activateFolder = (folder: string) => {
         sdk.setDirectory(folder)
         setShowFiles(false)
-        setRecentFolders([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 10))
-        localStorage.setItem(
-            RECENT_FOLDERS_KEY,
-            JSON.stringify([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 10)),
-        )
+        void loadSessions(folder)
+    }
+
+    const saveRecentFolders = (folders: string[]) => {
+        setRecentFolders(folders)
+        localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(folders))
+    }
+
+    const createSessionForFolder = async (folder: string, event: MouseEvent) => {
+        event.stopPropagation()
+        try {
+            const result = await sdk.client.session.create({ directory: folder }, { throwOnError: true })
+            activateFolder(folder)
+            sdk.setSelectedSession(result.data)
+            setSessionsByFolder((prev) => ({ ...prev, [folder]: [result.data, ...(prev[folder] ?? [])] }))
+            sdk.refreshSessionList()
+        } catch (error) {
+            console.error("创建会话失败:", error)
+        }
     }
 
     const getFolderName = (folder: string) => folder.split(/[/\\]/).pop() || folder
@@ -108,6 +121,35 @@ export function FolderPanel() {
     const getSessionTitle = (session: Session) => {
         if (!session.title.startsWith("New session - ")) return session.title
         return "新对话"
+    }
+
+    const visibleSessions = (folder: string) => {
+        const list = sessionsByFolder()[folder] ?? []
+        if (expandedSessionFolders().has(folder)) return list
+        return list.slice(0, 5)
+    }
+
+    const isFolderExpanded = (folder: string) => !collapsedFolders().has(folder)
+
+    const toggleFolder = (folder: string) => {
+        activateFolder(folder)
+        const next = new Set(collapsedFolders())
+        if (next.has(folder)) {
+            next.delete(folder)
+        } else {
+            next.add(folder)
+        }
+        setCollapsedFolders(next)
+    }
+
+    const toggleSessionLimit = (folder: string) => {
+        const next = new Set(expandedSessionFolders())
+        if (next.has(folder)) {
+            next.delete(folder)
+        } else {
+            next.add(folder)
+        }
+        setExpandedSessionFolders(next)
     }
 
     const getFileIcon = (file: FileItem) => {
@@ -141,7 +183,7 @@ export function FolderPanel() {
                 </button>
             </div>
 
-            <div class="folder-panel-content folder-history-layout">
+            <div class="folder-panel-content project-history-layout">
                 <Show
                     when={recentFolders().length > 0}
                     fallback={
@@ -151,45 +193,63 @@ export function FolderPanel() {
                         </div>
                     }
                 >
-                    <div class="folder-history-section">
+                    <div class="project-section-title">项目</div>
+                    <div class="project-list">
                         <For each={recentFolders()}>
                             {(folder) => (
-                                <button
-                                    class={`history-folder-item ${folder === sdk.directory() ? "active" : ""}`}
-                                    onClick={() => selectFolder(folder)}
-                                    title={folder}
-                                >
-                                    <span class="history-folder-icon">📁</span>
-                                    <span class="history-folder-name">{getFolderName(folder)}</span>
-                                </button>
+                                <div class="project-group">
+                                    <div
+                                        class={`project-folder-row ${folder === sdk.directory() ? "active" : ""}`}
+                                        onClick={() => toggleFolder(folder)}
+                                        title={folder}
+                                    >
+                                        <span class="project-folder-icon">{isFolderExpanded(folder) ? "▾" : "▸"}</span>
+                                        <span class="project-folder-mark" aria-hidden="true"></span>
+                                        <span class="project-folder-name">{getFolderName(folder)}</span>
+                                        <button
+                                            class="project-new-session"
+                                            onClick={(event) => createSessionForFolder(folder, event)}
+                                            title="新建会话"
+                                        >
+                                            ⊕
+                                        </button>
+                                    </div>
+
+                                    <Show when={isFolderExpanded(folder)}>
+                                        <div class="project-conversation-list">
+                                            <Show when={loadingFolders().has(folder)}>
+                                                <div class="project-conversation-empty">加载中...</div>
+                                            </Show>
+                                            <Show when={!loadingFolders().has(folder) && (sessionsByFolder()[folder]?.length ?? 0) === 0}>
+                                                <div class="project-conversation-empty">暂无对话</div>
+                                            </Show>
+                                            <For each={visibleSessions(folder)}>
+                                                {(session) => (
+                                                    <button
+                                                        class={`project-conversation-item ${sdk.selectedSession()?.id === session.id ? "active" : ""}`}
+                                                        onClick={() => { activateFolder(folder); sdk.setSelectedSession(session) }}
+                                                        title={session.title}
+                                                    >
+                                                        <span class="project-conversation-title">{getSessionTitle(session)}</span>
+                                                        <span class="project-conversation-time">{formatRelativeTime(session.time.updated)}</span>
+                                                    </button>
+                                                )}
+                                            </For>
+                                            <Show when={(sessionsByFolder()[folder]?.length ?? 0) > 5}>
+                                                <button class="project-expand" onClick={() => toggleSessionLimit(folder)}>
+                                                    {expandedSessionFolders().has(folder) ? "收起" : "展开显示"}
+                                                </button>
+                                            </Show>
+                                        </div>
+                                    </Show>
+                                </div>
                             )}
                         </For>
                     </div>
                 </Show>
 
                 <Show when={sdk.directory()}>
-                    <div class="conversation-section">
-                        <div class="conversation-list">
-                            <Show when={isLoadingSessions()}>
-                                <div class="conversation-empty">加载对话记录...</div>
-                            </Show>
-                            <Show when={!isLoadingSessions() && sessions().length === 0}>
-                                <div class="conversation-empty">当前文件夹还没有对话</div>
-                            </Show>
-                            <For each={sessions()}>
-                                {(session) => (
-                                    <button
-                                        class={`conversation-item ${sdk.selectedSession()?.id === session.id ? "active" : ""}`}
-                                        onClick={() => sdk.setSelectedSession(session)}
-                                        title={session.title}
-                                    >
-                                        <span class="conversation-title">{getSessionTitle(session)}</span>
-                                        <span class="conversation-time">{formatRelativeTime(session.time.updated)}</span>
-                                    </button>
-                                )}
-                            </For>
-                        </div>
-
+                    <div class="file-preview-section">
                         <button class="file-toggle" onClick={() => setShowFiles(!showFiles())}>
                             <span>{showFiles() ? "▾" : "▸"}</span>
                             <span>文件预览</span>
