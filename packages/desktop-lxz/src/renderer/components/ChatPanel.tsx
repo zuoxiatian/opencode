@@ -75,6 +75,12 @@ function sameModel(a: ModelSelection, b: ModelSelection) {
     return a.providerID === b.providerID && a.modelID === b.modelID
 }
 
+function sortModelOptions(options: ModelOption[]) {
+    return options.sort(
+        (a, b) => Number(a.providerName.toLowerCase() === "opencode zen") - Number(b.providerName.toLowerCase() === "opencode zen"),
+    )
+}
+
 function buildModelOptions(providers: Provider[], defaults: Record<string, string>) {
     const options = providers.flatMap((provider) =>
         Object.values(provider.models)
@@ -88,18 +94,20 @@ function buildModelOptions(providers: Provider[], defaults: Record<string, strin
                 isDefault: defaults[provider.id] === model.id,
             })),
     )
-    if (options.length) return options
-    return providers.flatMap((provider) =>
-        Object.values(provider.models)
-            .filter((model) => model.capabilities.output.text)
-            .map((model): ModelOption => ({
-                providerID: provider.id,
-                modelID: model.id,
-                providerName: provider.name,
-                modelName: model.name,
-                context: model.limit.context,
-                isDefault: defaults[provider.id] === model.id,
-            })),
+    if (options.length) return sortModelOptions(options)
+    return sortModelOptions(
+        providers.flatMap((provider) =>
+            Object.values(provider.models)
+                .filter((model) => model.capabilities.output.text)
+                .map((model): ModelOption => ({
+                    providerID: provider.id,
+                    modelID: model.id,
+                    providerName: provider.name,
+                    modelName: model.name,
+                    context: model.limit.context,
+                    isDefault: defaults[provider.id] === model.id,
+                })),
+        ),
     )
 }
 
