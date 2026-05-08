@@ -1,7 +1,8 @@
 import { createSignal, For, Show, createEffect, createMemo, onCleanup, onMount } from "solid-js"
 import { useSDK, type DiscussIssue } from "../context/sdk"
-import type { Agent, Event, Part, Provider } from "@opencode-ai/sdk/v2/client"
+import type { Agent, Event, Part, PermissionRequest, Provider, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 import { Markdown } from "@opencode-ai/ui/markdown"
+import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
 
 interface Message {
     id: string
@@ -28,6 +29,7 @@ interface ToolCall {
     status: "pending" | "running" | "completed" | "error"
     title?: string
     output?: string
+    error?: string
 }
 
 interface AgentOption {
@@ -215,6 +217,9 @@ export function ChatPanel() {
     const [currentModel, setCurrentModel] = createSignal<ModelSelection | null>(null)
     const [showAgentMenu, setShowAgentMenu] = createSignal(false)
     const [showModelMenu, setShowModelMenu] = createSignal(false)
+    const [permissionRequests, setPermissionRequests] = createSignal<PermissionRequest[]>([])
+    const [questionRequests, setQuestionRequests] = createSignal<QuestionRequest[]>([])
+    const [requestResponding, setRequestResponding] = createSignal<string | null>(null)
     // 跟踪消息角色（messageID -> role）
     const messageRoles = new Map<string, "user" | "assistant">()
     const partTypes = new Map<string, Part["type"]>()
@@ -262,6 +267,9 @@ export function ChatPanel() {
         setStreamingReasoningText("")
         setStreamingReasoningHeading("")
         setToolCalls([])
+        setPermissionRequests([])
+        setQuestionRequests([])
+        setRequestResponding(null)
         setSessionStatus("idle")
         setIsLoading(false)
     }
@@ -283,6 +291,20 @@ export function ChatPanel() {
         if (!model) return
         return modelOptions().find((option) => sameModel(option, model))
     })
+
+    const activePermissionRequest = createMemo(() => {
+        const currentSessionId = sessionId()
+        if (!currentSessionId) return
+        return permissionRequests().find((request) => request.sessionID === currentSessionId)
+    })
+
+    const activeQuestionRequest = createMemo(() => {
+        const currentSessionId = sessionId()
+        if (!currentSessionId) return
+        return questionRequests().find((request) => request.sessionID === currentSessionId)
+    })
+
+    const hasPendingRequest = createMemo(() => Boolean(activePermissionRequest() || activeQuestionRequest()))
 
     const modelLabel = createMemo(() => {
         const model = currentModelInfo()
@@ -355,6 +377,45 @@ export function ChatPanel() {
         return headers
     }
 
+    const upsertPermissionRequest = (request: PermissionRequest) => {
+        setPermissionRequests((current) => {
+            const existing = current.find((item) => item.id === request.id)
+            if (existing) return current.map((item) => item.id === request.id ? request : item)
+            return [...current, request]
+        })
+    }
+
+    const removePermissionRequest = (requestID: string) => {
+        setPermissionRequests((current) => current.filter((item) => item.id !== requestID))
+        setRequestResponding((current) => current === requestID ? null : current)
+    }
+
+    const upsertQuestionRequest = (request: QuestionRequest) => {
+        setQuestionRequests((current) => {
+            const existing = current.find((item) => item.id === request.id)
+            if (existing) return current.map((item) => item.id === request.id ? request : item)
+            return [...current, request]
+        })
+    }
+
+    const removeQuestionRequest = (requestID: string) => {
+        setQuestionRequests((current) => current.filter((item) => item.id !== requestID))
+        setRequestResponding((current) => current === requestID ? null : current)
+    }
+
+    const loadPendingRequests = async (currentSessionId: string) => {
+        try {
+            const [permissions, questions] = await Promise.all([
+                sdk.client.permission.list(undefined, { throwOnError: true }),
+                sdk.client.question.list(undefined, { throwOnError: true }),
+            ])
+            setPermissionRequests(permissions.data.filter((request) => request.sessionID === currentSessionId))
+            setQuestionRequests(questions.data.filter((request) => request.sessionID === currentSessionId))
+        } catch (error) {
+            console.error("加载待处理询问和权限失败:", error)
+        }
+    }
+
     // 处理 SSE 事件
     const handleSSEEvent = (event: Event, eventDirectory?: string) => {
         const currentSessionId = sessionId()
@@ -374,6 +435,31 @@ export function ChatPanel() {
         switch (event.type) {
             case "session.created":
             case "session.updated": {
+                break
+            }
+
+            case "permission.asked": {
+                if (event.properties.sessionID !== currentSessionId) return
+                upsertPermissionRequest(event.properties)
+                break
+            }
+
+            case "permission.replied": {
+                if (event.properties.sessionID !== currentSessionId) return
+                removePermissionRequest(event.properties.requestID)
+                break
+            }
+
+            case "question.asked": {
+                if (event.properties.sessionID !== currentSessionId) return
+                upsertQuestionRequest(event.properties)
+                break
+            }
+
+            case "question.replied":
+            case "question.rejected": {
+                if (event.properties.sessionID !== currentSessionId) return
+                removeQuestionRequest(event.properties.requestID)
                 break
             }
 
@@ -438,6 +524,7 @@ export function ChatPanel() {
                                         status: state.status,
                                         title: 'title' in state ? state.title : t.title,
                                         output: 'output' in state ? state.output : t.output,
+                                        error: 'error' in state ? state.error : t.error,
                                     }
                                     : t
                             )
@@ -448,6 +535,7 @@ export function ChatPanel() {
                                 status: state.status,
                                 title: 'title' in state ? state.title : undefined,
                                 output: 'output' in state ? state.output : undefined,
+                                error: 'error' in state ? state.error : undefined,
                             }]
                         }
                     })
@@ -576,7 +664,10 @@ export function ChatPanel() {
         resetConversation()
         loadedSelectedSessionId = nextSessionId
         setSessionId(nextSessionId)
-        await loadSessionMessages(nextSessionId)
+        await Promise.all([
+            loadSessionMessages(nextSessionId),
+            loadPendingRequests(nextSessionId),
+        ])
     }
 
     // 加载会话历史消息
@@ -652,9 +743,55 @@ export function ChatPanel() {
         sdk.refreshSessionList()
     }
 
+    const handlePermissionDecision = async (reply: "once" | "always" | "reject") => {
+        const request = activePermissionRequest()
+        if (!request || requestResponding()) return
+        setRequestResponding(request.id)
+        try {
+            await sdk.client.permission.respond({
+                sessionID: request.sessionID,
+                permissionID: request.id,
+                response: reply,
+            }, { throwOnError: true })
+            removePermissionRequest(request.id)
+        } catch (error) {
+            console.error("权限回复失败:", error)
+        } finally {
+            setRequestResponding((current) => current === request.id ? null : current)
+        }
+    }
+
+    const handleQuestionSubmit = async (answers: QuestionAnswer[]) => {
+        const request = activeQuestionRequest()
+        if (!request || requestResponding()) return
+        setRequestResponding(request.id)
+        try {
+            await sdk.client.question.reply({ requestID: request.id, answers }, { throwOnError: true })
+            removeQuestionRequest(request.id)
+        } catch (error) {
+            console.error("询问回复失败:", error)
+        } finally {
+            setRequestResponding((current) => current === request.id ? null : current)
+        }
+    }
+
+    const handleQuestionReject = async () => {
+        const request = activeQuestionRequest()
+        if (!request || requestResponding()) return
+        setRequestResponding(request.id)
+        try {
+            await sdk.client.question.reject({ requestID: request.id }, { throwOnError: true })
+            removeQuestionRequest(request.id)
+        } catch (error) {
+            console.error("询问忽略失败:", error)
+        } finally {
+            setRequestResponding((current) => current === request.id ? null : current)
+        }
+    }
+
     const handleSend = async () => {
         const text = inputText().trim()
-        if (!text || isLoading()) return
+        if (!text || isLoading() || hasPendingRequest()) return
 
         if (!sdk.directory()) {
             addMessage("assistant", "请先在左侧选择一个文件夹。")
@@ -777,6 +914,10 @@ export function ChatPanel() {
         }
     }
 
+    const cleanToolError = (error: string) => {
+        return error.replace(/^Error:\s*/, "").trim()
+    }
+
     // 清空对话 - 创建当前文件夹下的新会话
     const handleClearMessages = async () => {
         if (!sdk.directory() || isLoading()) return
@@ -881,7 +1022,12 @@ export function ChatPanel() {
                                         {(tool) => (
                                             <div class={`tool-call ${tool.status}`}>
                                                 <span class="tool-icon">{getToolStatusIcon(tool.status)}</span>
-                                                <span class="tool-name">{tool.title || tool.tool}</span>
+                                                <span class="tool-body">
+                                                    <span class="tool-name">{tool.title || tool.tool}</span>
+                                                    <Show when={tool.status === "error" && tool.error}>
+                                                        {(error) => <span class="tool-error-text">{cleanToolError(error())}</span>}
+                                                    </Show>
+                                                </span>
                                             </div>
                                         )}
                                     </For>
@@ -930,15 +1076,40 @@ export function ChatPanel() {
                 </Show>
             </div>
 
+            <Show when={activeQuestionRequest()}>
+                {(request) => (
+                    <div class="chat-prompt-dock">
+                        <SessionQuestionDock
+                            request={request()}
+                            responding={requestResponding() === request().id}
+                            onSubmit={handleQuestionSubmit}
+                            onReject={handleQuestionReject}
+                        />
+                    </div>
+                )}
+            </Show>
+
+            <Show when={activePermissionRequest()}>
+                {(request) => (
+                    <div class="chat-prompt-dock">
+                        <SessionPermissionDock
+                            request={request()}
+                            responding={requestResponding() === request().id}
+                            onDecide={handlePermissionDecision}
+                        />
+                    </div>
+                )}
+            </Show>
+
             <div class="chat-composer-wrap">
                 <div class="chat-input-container">
                     <textarea
                         class="chat-input"
-                        placeholder={sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
+                        placeholder={hasPendingRequest() ? "请先处理上方询问或权限请求" : sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
                         value={inputText()}
                         onInput={(e) => setInputText(e.currentTarget.value)}
                         onKeyDown={handleKeyDown}
-                        disabled={isLoading() || !sdk.directory()}
+                        disabled={isLoading() || hasPendingRequest() || !sdk.directory()}
                         rows={1}
                     />
                     <div class="chat-toolbar">
@@ -1010,7 +1181,7 @@ export function ChatPanel() {
                                 <button
                                     class="send-btn"
                                     onClick={handleSend}
-                                    disabled={!inputText().trim() || !sdk.directory()}
+                                    disabled={!inputText().trim() || hasPendingRequest() || !sdk.directory()}
                                     title="发送消息"
                                     aria-label="发送消息"
                                 >

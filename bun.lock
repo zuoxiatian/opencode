@@ -306,6 +306,7 @@
       "version": "1.0.0",
       "dependencies": {
         "@opencode-ai/sdk": "workspace:*",
+        "@opencode-ai/ui": "workspace:*",
         "pdfjs-dist": "5.4.530",
         "solid-js": "^1.8.0",
       },

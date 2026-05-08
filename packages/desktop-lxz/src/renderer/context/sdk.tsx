@@ -117,7 +117,8 @@ export function SDKProvider(props: SDKProviderProps) {
 
     // 创建带认证的 fetch 函数
     const authenticatedFetch: typeof fetch = async (input, init) => {
-        const headers = new Headers(init?.headers)
+        const headers = new Headers(input instanceof Request ? input.headers : undefined)
+        new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
 
         if (props.serverInfo.password) {
             const credentials = btoa(`opencode:${props.serverInfo.password}`)
