@@ -476,6 +476,7 @@
         "opencode-poe-auth": "0.0.1",
         "opentui-spinner": "catalog:",
         "partial-json": "0.1.7",
+        "pdfjs-dist": "5.4.530",
         "remeda": "catalog:",
         "semver": "^7.6.3",
         "solid-js": "catalog:",

@@ -187,6 +187,8 @@ for (const item of targets) {
   const rootPath = path.resolve(dir, "../../node_modules/@opentui/core/parser.worker.js")
   const parserWorker = fs.realpathSync(fs.existsSync(localPath) ? localPath : rootPath)
   const workerPath = "./src/cli/cmd/tui/worker.ts"
+  const officeReadWorkerPath = "./src/tool/office-read/worker.ts"
+  const pdfReadWorkerPath = "./src/tool/pdf-read/worker.ts"
 
   // Use platform-specific bunfs root path based on target OS
   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
@@ -211,12 +213,21 @@ for (const item of targets) {
       windows: {},
     },
     files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
-    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
+    entrypoints: [
+      "./src/index.ts",
+      parserWorker,
+      workerPath,
+      officeReadWorkerPath,
+      pdfReadWorkerPath,
+      ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : []),
+    ],
     define: {
       OPENCODE_VERSION: `'${Script.version}'`,
       OPENCODE_MIGRATIONS: JSON.stringify(migrations),
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
       OPENCODE_WORKER_PATH: workerPath,
+      OPENCODE_OFFICE_READ_WORKER_PATH: officeReadWorkerPath,
+      OPENCODE_PDF_READ_WORKER_PATH: pdfReadWorkerPath,
       OPENCODE_CHANNEL: `'${Script.channel}'`,
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
     },

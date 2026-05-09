@@ -16,6 +16,8 @@ import { Tool } from "@/tool/tool"
 import { GlobTool } from "../../tool/glob"
 import { GrepTool } from "../../tool/grep"
 import { ReadTool } from "../../tool/read"
+import { OfficeReadTool } from "../../tool/office-read/index"
+import { PdfReadTool } from "../../tool/pdf-read/index"
 import { WebFetchTool } from "../../tool/webfetch"
 import { EditTool } from "../../tool/edit"
 import { WriteTool } from "../../tool/write"
@@ -112,6 +114,34 @@ function read(info: ToolProps<typeof ReadTool>) {
   inline({
     icon: "→",
     title: `Read ${file}`,
+    ...(description && { description }),
+  })
+}
+
+function officeRead(info: ToolProps<typeof OfficeReadTool>) {
+  const file = normalizePath(info.input.filePath)
+  const pairs = Object.entries(info.input).filter(([key, value]) => {
+    if (key === "filePath") return false
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+  })
+  const description = pairs.length ? `[${pairs.map(([key, value]) => `${key}=${value}`).join(", ")}]` : undefined
+  inline({
+    icon: "→",
+    title: `Read Office ${file}`,
+    ...(description && { description }),
+  })
+}
+
+function pdfRead(info: ToolProps<typeof PdfReadTool>) {
+  const file = normalizePath(info.input.filePath)
+  const pairs = Object.entries(info.input).filter(([key, value]) => {
+    if (key === "filePath") return false
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+  })
+  const description = pairs.length ? `[${pairs.map(([key, value]) => `${key}=${value}`).join(", ")}]` : undefined
+  inline({
+    icon: "→",
+    title: `Read PDF ${file}`,
     ...(description && { description }),
   })
 }
@@ -412,6 +442,8 @@ export const RunCommand = cmd({
           if (part.tool === "glob") return glob(props<typeof GlobTool>(part))
           if (part.tool === "grep") return grep(props<typeof GrepTool>(part))
           if (part.tool === "read") return read(props<typeof ReadTool>(part))
+          if (part.tool === "office_read") return officeRead(props<typeof OfficeReadTool>(part))
+          if (part.tool === "pdf_read") return pdfRead(props<typeof PdfReadTool>(part))
           if (part.tool === "write") return write(props<typeof WriteTool>(part))
           if (part.tool === "webfetch") return webfetch(props<typeof WebFetchTool>(part))
           if (part.tool === "edit") return edit(props<typeof EditTool>(part))

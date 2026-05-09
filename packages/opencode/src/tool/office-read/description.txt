@@ -1,0 +1,13 @@
+Read Office documents from the local filesystem.
+
+Usage:
+- Use this tool when the regular read tool reports an Office document as binary.
+- Supports modern Microsoft Office files: .docx, .xlsx, and .pptx.
+- Also supports OpenDocument files: .odt, .ods, and .odp.
+- The filePath parameter should be an absolute path.
+- By default, this tool returns up to 2000 extracted text lines from the start of the document.
+- The offset parameter is the line number to start from (1-indexed).
+- To read later sections, call this tool again with a larger offset.
+- For spreadsheet files, pass sheet to read a single worksheet by sheet name.
+- Contents are returned with each extracted line prefixed by its line number as `<line>: <content>`.
+- Call this tool in parallel when you know there are multiple Office documents you want to read.

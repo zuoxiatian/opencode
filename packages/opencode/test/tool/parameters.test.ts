@@ -17,6 +17,7 @@ import { Parameters as Glob } from "../../src/tool/glob"
 import { Parameters as Grep } from "../../src/tool/grep"
 import { Parameters as Invalid } from "../../src/tool/invalid"
 import { Parameters as Lsp } from "../../src/tool/lsp"
+import { Parameters as PdfRead } from "../../src/tool/pdf-read/index"
 import { Parameters as Plan } from "../../src/tool/plan"
 import { Parameters as Question } from "../../src/tool/question"
 import { Parameters as Read } from "../../src/tool/read"
@@ -43,6 +44,7 @@ describe("tool parameters", () => {
     test("grep", () => expect(toJsonSchema(Grep)).toMatchSnapshot())
     test("invalid", () => expect(toJsonSchema(Invalid)).toMatchSnapshot())
     test("lsp", () => expect(toJsonSchema(Lsp)).toMatchSnapshot())
+    test("pdf_read", () => expect(toJsonSchema(PdfRead)).toMatchSnapshot())
     test("plan", () => expect(toJsonSchema(Plan)).toMatchSnapshot())
     test("question", () => expect(toJsonSchema(Question)).toMatchSnapshot())
     test("read", () => expect(toJsonSchema(Read)).toMatchSnapshot())
@@ -203,6 +205,21 @@ describe("tool parameters", () => {
       const parsed = parse(Read, { filePath: "/a", offset: 10, limit: 100 })
       expect(parsed.offset).toBe(10)
       expect(parsed.limit).toBe(100)
+    })
+  })
+
+  describe("pdf_read", () => {
+    test("accepts filePath-only", () => {
+      expect(parse(PdfRead, { filePath: "/a.pdf" }).filePath).toBe("/a.pdf")
+    })
+    test("accepts optional page + offset + limit", () => {
+      const parsed = parse(PdfRead, { filePath: "/a.pdf", page: 2, offset: 10, limit: 100 })
+      expect(parsed.page).toBe(2)
+      expect(parsed.offset).toBe(10)
+      expect(parsed.limit).toBe(100)
+    })
+    test("rejects missing filePath", () => {
+      expect(accepts(PdfRead, {})).toBe(false)
     })
   })
 

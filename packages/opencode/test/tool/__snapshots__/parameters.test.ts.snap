@@ -224,6 +224,33 @@ exports[`tool parameters JSON Schema (wire shape) lsp 1`] = `
 }
 `;
 
+exports[`tool parameters JSON Schema (wire shape) pdf_read 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "filePath": {
+      "description": "The absolute path to the PDF file to read",
+      "type": "string",
+    },
+    "limit": {
+      "description": "The maximum number of extracted text lines to read (defaults to 2000)",
+      "type": "number",
+    },
+    "offset": {
+      "description": "The extracted text line number to start reading from (1-indexed)",
+      "type": "number",
+    },
+    "page": {
+      "description": "Optional PDF page number to read (1-indexed)",
+      "type": "number",
+    },
+  },
+  "required": [
+    "filePath",
+  ],
+  "type": "object",
+}
+`;
 
 exports[`tool parameters JSON Schema (wire shape) plan 1`] = `
 {

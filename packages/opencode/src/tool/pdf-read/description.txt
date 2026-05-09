@@ -1,0 +1,12 @@
+Read text from PDF files on the local filesystem.
+
+Usage:
+- Use this tool when you need extracted PDF text instead of a PDF file attachment.
+- Supports .pdf files.
+- The filePath parameter should be an absolute path.
+- By default, this tool extracts text from all pages and returns up to 2000 lines from the start.
+- Pass page to read a single PDF page by page number (1-indexed).
+- The offset parameter is the extracted text line number to start reading from (1-indexed).
+- To read later sections, call this tool again with a larger offset.
+- Contents are returned with each extracted line prefixed by its line number as `<line>: <content>`.
+- Call this tool in parallel when you know there are multiple PDFs or pages you want to read.
