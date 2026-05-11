@@ -27,6 +27,18 @@ export function FolderPanel() {
 
     const projectFolders = () => projects().map((project) => project.worktree)
 
+    const projectActivityTime = (project: Project) =>
+        Math.max(project.time.updated, ...(sessionsByFolder()[project.worktree] ?? []).map((session) => session.time.updated))
+
+    const sortedProjectFolders = () =>
+        projects()
+            .toSorted((a, b) => {
+                const diff = projectActivityTime(b) - projectActivityTime(a)
+                if (diff !== 0) return diff
+                return getFolderName(a.worktree).localeCompare(getFolderName(b.worktree))
+            })
+            .map((project) => project.worktree)
+
     const loadProjects = async () => {
         try {
             const result = await sdk.client.project.list(undefined, { throwOnError: true })
@@ -254,7 +266,7 @@ export function FolderPanel() {
 
             <div class="folder-panel-content project-history-layout">
                 <Show
-                    when={projectFolders().length > 0}
+                    when={sortedProjectFolders().length > 0}
                     fallback={
                         <div class="empty-state">
                             <div class="empty-state-title">还没有打开任何文件夹</div>
@@ -264,7 +276,7 @@ export function FolderPanel() {
                 >
                     <div class="project-section-title">项目</div>
                     <div class="project-list">
-                        <For each={projectFolders()}>
+                        <For each={sortedProjectFolders()}>
                             {(folder) => (
                                 <div class="project-group">
                                     <div
