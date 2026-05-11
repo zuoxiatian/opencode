@@ -27,11 +27,17 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
   - Removed upward project scanning for external `.claude` and `.agents` folders.
   - External skills now scan only `~/.lxz/skills/**/SKILL.md`.
 
+- `packages/opencode/src/server/routes/instance/middleware.ts`
+  - Added a default project directory for instance requests that do not include `directory` or `x-opencode-directory`.
+  - The default directory is `~/Documents/LongwiseTechAgent`.
+  - The directory is created before the instance is initialized, so the first no-directory request registers this folder instead of the server process working directory.
+
 ## Existing code paths affected by the new root
 
 - Session database remains defined in `packages/opencode/src/storage/db.ts`, but `Global.Path.data` now points to `~/.lxz/data`, so the default database becomes `~/.lxz/data/opencode.db`.
 - Recent model selection remains defined in `packages/opencode/src/provider/provider.ts`, but `Global.Path.state` now points to `~/.lxz/state`, so the recent model file becomes `~/.lxz/state/model.json`.
 - Global config loading remains defined in `packages/opencode/src/config/config.ts` and `packages/opencode/src/config/paths.ts`, but `Global.Path.config` now points to `~/.lxz/config`.
+- Instance route requests without an explicit directory now default to `~/Documents/LongwiseTechAgent`, created by `packages/opencode/src/server/routes/instance/middleware.ts`.
 
 ## Where to configure models and skills
 
