@@ -1,36 +1,18 @@
-import { createSignal, For, Show, createEffect, createMemo, onCleanup, onMount } from "solid-js"
+import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch } from "solid-js"
+import { reconcile } from "solid-js/store"
 import { useSDK, type DiscussIssue } from "../context/sdk"
-import type { Agent, Event, Part, PermissionRequest, Provider, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type {
+    Agent,
+    Message,
+    Part,
+    PermissionRequest,
+    Provider,
+    QuestionAnswer,
+    QuestionRequest,
+    SessionStatus,
+} from "@opencode-ai/sdk/v2/client"
 import { Markdown } from "@opencode-ai/ui/markdown"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
-
-interface Message {
-    id: string
-    role: "user" | "assistant"
-    content: string
-    timestamp: number
-}
-
-interface SessionMessage {
-    info: {
-        id: string
-        role: "user" | "assistant"
-        time?: {
-            created?: number
-        }
-    }
-    parts?: Part[]
-}
-
-// 工具调用状态
-interface ToolCall {
-    id: string
-    tool: string
-    status: "pending" | "running" | "completed" | "error"
-    title?: string
-    output?: string
-    error?: string
-}
 
 interface AgentOption {
     name: string
@@ -156,7 +138,7 @@ function reasoningHeading(text: string) {
 
 function ReasoningBlock(props: { text: string; heading?: string; streaming?: boolean; cacheKey: string }) {
     const [open, setOpen] = createSignal(false)
-    const heading = createMemo(() => props.heading || reasoningHeading(props.text) || "···")
+    const heading = createMemo(() => props.heading || reasoningHeading(props.text) || "")
 
     return (
         <div class="chat-reasoning" data-open={open() ? "true" : "false"}>
@@ -178,6 +160,29 @@ function ReasoningBlock(props: { text: string; heading?: string; streaming?: boo
             </Show>
         </div>
     )
+}
+
+function getToolStatusIcon(status: string) {
+    switch (status) {
+        case "pending": return "..."
+        case "running": return ">"
+        case "completed": return "✓"
+        case "error": return "!"
+        default: return "-"
+    }
+}
+
+function cleanToolError(error: string) {
+    return error.replace(/^Error:\s*/, "").trim()
+}
+
+function partKey(part: Part) {
+    return part.id
+}
+
+function isStreamingPart(part: Part) {
+    if (part.type === "tool") return part.state.status === "pending" || part.state.status === "running"
+    return false
 }
 
 // 构建讨论问题的上下文模板
@@ -210,34 +215,59 @@ function buildIssueContext(issue: DiscussIssue): string {
 
 export function ChatPanel() {
     const sdk = useSDK()
-    const [messages, setMessages] = createSignal<Message[]>([])
     const [inputText, setInputText] = createSignal("")
-    const [isLoading, setIsLoading] = createSignal(false)
-    const [sessionId, setSessionId] = createSignal<string | null>(null)
-    const [streamingContent, setStreamingContent] = createSignal("")
-    const [streamingReasoningText, setStreamingReasoningText] = createSignal("")
-    const [streamingReasoningHeading, setStreamingReasoningHeading] = createSignal("")
-    const [toolCalls, setToolCalls] = createSignal<ToolCall[]>([])
-    const [sessionStatus, setSessionStatus] = createSignal<"idle" | "busy" | "retry">("idle")
     const [agents, setAgents] = createSignal<AgentOption[]>([])
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
     const [currentAgent, setCurrentAgent] = createSignal("build")
     const [currentModel, setCurrentModel] = createSignal<ModelSelection | null>(null)
     const [showAgentMenu, setShowAgentMenu] = createSignal(false)
     const [showModelMenu, setShowModelMenu] = createSignal(false)
-    const [permissionRequests, setPermissionRequests] = createSignal<PermissionRequest[]>([])
-    const [questionRequests, setQuestionRequests] = createSignal<QuestionRequest[]>([])
     const [requestResponding, setRequestResponding] = createSignal<string | null>(null)
-    // 跟踪消息角色（messageID -> role）
-    const messageRoles = new Map<string, "user" | "assistant">()
-    const partTypes = new Map<string, Part["type"]>()
-    const reasoningTexts = new Map<string, string>()
+    const [sendError, setSendError] = createSignal<string | null>(null)
+    const loadedSessions = new Set<string>()
+    const loadingSessions = new Set<string>()
     let messagesContainer: HTMLDivElement | undefined
     let agentDropdownRef: HTMLDivElement | undefined
     let modelDropdownRef: HTMLDivElement | undefined
-    let unsubscribe: (() => void) | null = null
-    let loadedSelectedSessionId: string | null = null
-    let finalizedStreamingContent = ""
+
+    // 当前选中的会话 ID 派生自 SDK 的 selectedSession
+    const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
+
+    // 当前会话的消息列表
+    const messages = createMemo<Message[]>(() => {
+        const sid = currentSessionId()
+        if (!sid) return []
+        return sdk.store.message[sid] ?? []
+    })
+
+    // 取某条消息的可见 parts（与 reducer 的 SKIP_PARTS 一致，保留 text/reasoning/tool 等）
+    const partsOf = (messageID: string) => sdk.store.part[messageID] ?? []
+
+    // 当前会话的状态（idle / busy / retry）
+    const sessionStatus = createMemo<SessionStatus | undefined>(() => {
+        const sid = currentSessionId()
+        if (!sid) return undefined
+        return sdk.store.session_status[sid]
+    })
+
+    const isBusy = createMemo(() => sessionStatus()?.type === "busy")
+    const isLoading = isBusy
+
+    const activePermissionRequest = createMemo<PermissionRequest | undefined>(() => {
+        const sid = currentSessionId()
+        if (!sid) return undefined
+        const list = sdk.store.permission[sid]
+        return list && list.length > 0 ? list[0] : undefined
+    })
+
+    const activeQuestionRequest = createMemo<QuestionRequest | undefined>(() => {
+        const sid = currentSessionId()
+        if (!sid) return undefined
+        const list = sdk.store.question[sid]
+        return list && list.length > 0 ? list[0] : undefined
+    })
+
+    const hasPendingRequest = createMemo(() => Boolean(activePermissionRequest() || activeQuestionRequest()))
 
     // 点击外部关闭菜单
     const handleClickOutside = (e: MouseEvent) => {
@@ -264,32 +294,16 @@ export function ChatPanel() {
         }
     }
 
-    const resetConversation = () => {
-        messageRoles.clear()
-        partTypes.clear()
-        reasoningTexts.clear()
-        finalizedStreamingContent = ""
-        setSessionId(null)
-        setMessages([])
-        setStreamingContent("")
-        setStreamingReasoningText("")
-        setStreamingReasoningHeading("")
-        setToolCalls([])
-        setPermissionRequests([])
-        setQuestionRequests([])
-        setRequestResponding(null)
-        setSessionStatus("idle")
-        setIsLoading(false)
-    }
-
-    // 当消息更新时滚动到底部
+    // 消息列表或当前会话流式状态变化时滚动到底部
     createEffect(() => {
-        messages()
-        streamingContent()
-        streamingReasoningText()
-        streamingReasoningHeading()
-        toolCalls()
-        scrollToBottom()
+        const list = messages()
+        // 也跟踪最后一条 assistant 消息的 parts（流式追加 part 时也要滚动）
+        if (list.length > 0) {
+            const last = list[list.length - 1]
+            if (last.role === "assistant") sdk.store.part[last.id]
+        }
+        isBusy()
+        queueMicrotask(scrollToBottom)
     })
 
     const currentAgentInfo = createMemo(() => agents().find((agent) => agent.name === currentAgent()))
@@ -299,20 +313,6 @@ export function ChatPanel() {
         if (!model) return
         return modelOptions().find((option) => sameModel(option, model))
     })
-
-    const activePermissionRequest = createMemo(() => {
-        const currentSessionId = sessionId()
-        if (!currentSessionId) return
-        return permissionRequests().find((request) => request.sessionID === currentSessionId)
-    })
-
-    const activeQuestionRequest = createMemo(() => {
-        const currentSessionId = sessionId()
-        if (!currentSessionId) return
-        return questionRequests().find((request) => request.sessionID === currentSessionId)
-    })
-
-    const hasPendingRequest = createMemo(() => Boolean(activePermissionRequest() || activeQuestionRequest()))
 
     const modelLabel = createMemo(() => {
         const model = currentModelInfo()
@@ -385,273 +385,70 @@ export function ChatPanel() {
         return headers
     }
 
-    const upsertPermissionRequest = (request: PermissionRequest) => {
-        setPermissionRequests((current) => {
-            const existing = current.find((item) => item.id === request.id)
-            if (existing) return current.map((item) => item.id === request.id ? request : item)
-            return [...current, request]
-        })
-    }
-
-    const removePermissionRequest = (requestID: string) => {
-        setPermissionRequests((current) => current.filter((item) => item.id !== requestID))
-        setRequestResponding((current) => current === requestID ? null : current)
-    }
-
-    const upsertQuestionRequest = (request: QuestionRequest) => {
-        setQuestionRequests((current) => {
-            const existing = current.find((item) => item.id === request.id)
-            if (existing) return current.map((item) => item.id === request.id ? request : item)
-            return [...current, request]
-        })
-    }
-
-    const removeQuestionRequest = (requestID: string) => {
-        setQuestionRequests((current) => current.filter((item) => item.id !== requestID))
-        setRequestResponding((current) => current === requestID ? null : current)
-    }
-
-    const loadPendingRequests = async (currentSessionId: string) => {
-        try {
-            const [permissions, questions] = await Promise.all([
-                sdk.client.permission.list(undefined, { throwOnError: true }),
-                sdk.client.question.list(undefined, { throwOnError: true }),
-            ])
-            setPermissionRequests(permissions.data.filter((request) => request.sessionID === currentSessionId))
-            setQuestionRequests(questions.data.filter((request) => request.sessionID === currentSessionId))
-        } catch (error) {
-            console.error("加载待处理询问和权限失败:", error)
-        }
-    }
-
-    // 处理 SSE 事件
-    const handleSSEEvent = (event: Event, eventDirectory?: string) => {
-        const currentSessionId = sessionId()
-
-        // 打印所有收到的事件（即使没有 sessionId）
-        console.log("=== 收到 SSE 事件 ===")
-        console.log("  类型:", event.type)
-        console.log("  目录:", eventDirectory)
-        console.log("  完整事件:", JSON.stringify(event, null, 2))
-        console.log("  当前 sessionId:", currentSessionId)
-
-        if (!currentSessionId) {
-            console.log("  跳过: 没有当前 sessionId")
+    // 加载历史会话（只在 store 没有该会话数据时拉一次）
+    const loadSession = async (sessionId: string) => {
+        if (loadedSessions.has(sessionId) || loadingSessions.has(sessionId)) return
+        if (sdk.store.message[sessionId] !== undefined) {
+            loadedSessions.add(sessionId)
             return
         }
+        loadingSessions.add(sessionId)
+        try {
+            const { serverInfo } = sdk
+            const headers = getHeaders()
 
-        switch (event.type) {
-            case "session.created":
-            case "session.updated": {
-                break
-            }
+            const [messagesResponse, permissions, questions] = await Promise.all([
+                fetch(`${serverInfo.url}/session/${sessionId}/message?limit=50`, { headers }),
+                sdk.client.permission.list(undefined, { throwOnError: false }).catch(() => undefined),
+                sdk.client.question.list(undefined, { throwOnError: false }).catch(() => undefined),
+            ])
 
-            case "permission.asked": {
-                if (event.properties.sessionID !== currentSessionId) return
-                upsertPermissionRequest(event.properties)
-                break
-            }
-
-            case "permission.replied": {
-                if (event.properties.sessionID !== currentSessionId) return
-                removePermissionRequest(event.properties.requestID)
-                break
-            }
-
-            case "question.asked": {
-                if (event.properties.sessionID !== currentSessionId) return
-                upsertQuestionRequest(event.properties)
-                break
-            }
-
-            case "question.replied":
-            case "question.rejected": {
-                if (event.properties.sessionID !== currentSessionId) return
-                removeQuestionRequest(event.properties.requestID)
-                break
-            }
-
-            // message.updated 用于记录消息的角色
-            case "message.updated": {
-                const { info } = event.properties
-                if (info.sessionID !== currentSessionId) return
-
-                // 记录消息的角色
-                messageRoles.set(info.id, info.role as "user" | "assistant")
-                console.log(`记录消息角色: ${info.id} -> ${info.role}`)
-
-                // 处理错误
-                if (info.role === "assistant" && 'error' in info && info.error) {
-                    const errorMsg = info.error.data?.message || "未知错误"
-                    addMessage("assistant", `错误: ${errorMsg}`)
-                    setIsLoading(false)
-                    setStreamingContent("")
-                    setStreamingReasoningText("")
-                    setStreamingReasoningHeading("")
-                    setToolCalls([])
-                }
-                break
-            }
-
-            case "message.part.updated": {
-                const { part } = event.properties
-
-                // 检查是否是当前会话的消息
-                if (part.sessionID !== currentSessionId) {
-                    return
-                }
-
-                // 获取消息角色，如果未知则假设是 assistant（因为用户消息通常先收到 message.updated）
-                partTypes.set(part.id, part.type)
-                const role = messageRoles.get(part.messageID) || "assistant"
-                console.log(`message.part.updated - messageID: ${part.messageID}, role: ${role}, type: ${part.type}`)
-
-                // 只处理 assistant 的消息
-                if (role !== "assistant") {
-                    console.log("跳过用户消息的 part.updated")
-                    return
-                }
-
-                if (part.type === "text") {
-                    console.log("处理 AI 文本消息:", `full: ${part.text}`)
-                    setStreamingContent(part.text)
-                } else if (part.type === "reasoning") {
-                    reasoningTexts.set(part.id, part.text)
-                    setStreamingReasoningText(Array.from(reasoningTexts.values()).filter(Boolean).join("\n\n"))
-                    setStreamingReasoningHeading(reasoningHeading(part.text) ?? "")
-                } else if (part.type === "tool") {
-                    console.log("处理工具调用:", part.tool, part.state?.status)
-                    const { callID, tool, state } = part
-                    setToolCalls(prev => {
-                        const existing = prev.find(t => t.id === callID)
-                        if (existing) {
-                            return prev.map(t =>
-                                t.id === callID
-                                    ? {
-                                        ...t,
-                                        status: state.status,
-                                        title: 'title' in state ? state.title : t.title,
-                                        output: 'output' in state ? state.output : t.output,
-                                        error: 'error' in state ? state.error : t.error,
-                                    }
-                                    : t
-                            )
-                        } else {
-                            return [...prev, {
-                                id: callID,
-                                tool,
-                                status: state.status,
-                                title: 'title' in state ? state.title : undefined,
-                                output: 'output' in state ? state.output : undefined,
-                                error: 'error' in state ? state.error : undefined,
-                            }]
+            if (messagesResponse.ok) {
+                const data = await messagesResponse.json() as Array<{ info: Message; parts?: Part[] }>
+                batch(() => {
+                    const nextMessages: Message[] = []
+                    const nextParts: Record<string, Part[]> = {}
+                    for (const item of data) {
+                        if (!item?.info?.id) continue
+                        nextMessages.push(item.info)
+                        if (item.parts && item.parts.length > 0) {
+                            nextParts[item.info.id] = item.parts
                         }
-                    })
-                } else {
-                    console.log("其他 part 类型:", part.type)
-                }
-                break
-            }
-
-            case "message.part.delta": {
-                const { sessionID, messageID, partID, field, delta } = event.properties
-                if (sessionID !== currentSessionId) return
-
-                const role = messageRoles.get(messageID) || "assistant"
-                if (role !== "assistant") return
-
-                if (field === "text") {
-                    if (partTypes.get(partID) === "reasoning") {
-                        const text = (reasoningTexts.get(partID) ?? "") + delta
-                        reasoningTexts.set(partID, text)
-                        setStreamingReasoningText(Array.from(reasoningTexts.values()).filter(Boolean).join("\n\n"))
-                        setStreamingReasoningHeading(reasoningHeading(text) ?? "")
-                        return
                     }
-
-                    console.log("处理 AI 文本增量:", delta)
-                    setStreamingContent(prev => prev + delta)
-                }
-                break
+                    nextMessages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+                    sdk.setStore("message", sessionId, reconcile(nextMessages, { key: "id" }))
+                    for (const [messageID, parts] of Object.entries(nextParts)) {
+                        sdk.setStore("part", messageID, reconcile(parts, { key: "id" }))
+                    }
+                })
             }
 
-            case "session.status": {
-                const { sessionID, status } = event.properties
-                if (sessionID !== currentSessionId) return
-
-                console.log("会话状态变更:", status.type)
-                setSessionStatus(status.type)
-                if (status.type === "idle") {
-                    finalizeMessage()
-                }
-                break
+            if (permissions?.data) {
+                const list = permissions.data.filter((request) => request.sessionID === sessionId)
+                sdk.setStore("permission", sessionId, reconcile(list, { key: "id" }))
+            }
+            if (questions?.data) {
+                const list = questions.data.filter((request) => request.sessionID === sessionId)
+                sdk.setStore("question", sessionId, reconcile(list, { key: "id" }))
             }
 
-            case "session.idle": {
-                const { sessionID } = event.properties
-                if (sessionID !== currentSessionId) return
-                console.log("会话空闲")
-                finalizeMessage()
-                break
-            }
+            loadedSessions.add(sessionId)
+        } catch (error) {
+            console.error("加载会话消息失败:", error)
+        } finally {
+            loadingSessions.delete(sessionId)
         }
     }
 
-    // 完成消息
-    const finalizeMessage = () => {
-        const content = streamingContent()
-        if (content && content !== finalizedStreamingContent) {
-            finalizedStreamingContent = content
-            addMessage("assistant", content)
-        }
-        setStreamingContent("")
-        setStreamingReasoningText("")
-        setStreamingReasoningHeading("")
-        setToolCalls([])
-        setIsLoading(false)
-    }
-
-    // 订阅 SSE 事件
-    const subscribeEvents = () => {
-        if (unsubscribe) {
-            unsubscribe()
-        }
-        unsubscribe = sdk.subscribeToEvents(handleSSEEvent)
-    }
-
-    // 取消订阅
-    const unsubscribeEvents = () => {
-        if (unsubscribe) {
-            unsubscribe()
-            unsubscribe = null
-        }
-    }
-
-    // 组件卸载时取消订阅
-    onCleanup(() => {
-        unsubscribeEvents()
-    })
-
-    // 组件挂载时立即订阅事件
-    onMount(() => {
-        console.log("ChatPanel 挂载，开始订阅 SSE 事件")
-        subscribeEvents()
-    })
-
-    // 当目录变化时重置会话状态（不取消订阅）
+    // 切换到一个未加载过的会话时按需拉一次历史
     createEffect(() => {
-        const dir = sdk.directory()
-        if (dir) {
-            resetConversation()
+        const sid = currentSessionId()
+        if (!sid) return
+        if (sdk.store.message[sid] === undefined) {
+            void loadSession(sid)
         }
-    })
-
-    // 当选中历史对话变化时，恢复会话
-    createEffect(() => {
-        const session = sdk.selectedSession()
-        if (!session || session.id === loadedSelectedSessionId) return
-        loadedSelectedSessionId = session.id
-        void loadSession(session.id)
+        // 切换会话清理之前的发送错误提示
+        setSendError(null)
     })
 
     // 当有讨论问题传入时，自动填充输入框
@@ -661,53 +458,9 @@ export function ChatPanel() {
             const context = buildIssueContext(issue)
             setInputText(context)
             console.log("讨论问题:", issue.title)
-            // 清除讨论问题状态，避免重复触发
             sdk.setDiscussIssue(null)
         }
     })
-
-    const isTextPart = (part: Part): part is Part & { type: "text"; text: string } => part.type === "text"
-
-    const loadSession = async (nextSessionId: string) => {
-        resetConversation()
-        loadedSelectedSessionId = nextSessionId
-        setSessionId(nextSessionId)
-        await Promise.all([
-            loadSessionMessages(nextSessionId),
-            loadPendingRequests(nextSessionId),
-        ])
-    }
-
-    // 加载会话历史消息
-    const loadSessionMessages = async (sessionId: string) => {
-        try {
-            const { serverInfo } = sdk
-            const headers = getHeaders()
-
-            const response = await fetch(
-                `${serverInfo.url}/session/${sessionId}/message?limit=50`,
-                { headers }
-            )
-
-            if (response.ok) {
-                const messagesData = await response.json() as SessionMessage[]
-                setMessages(messagesData
-                    .map((msg) => ({
-                        info: msg.info,
-                        content: msg.parts?.filter(isTextPart).map((part) => part.text).join("\n") ?? "",
-                    }))
-                    .filter((msg): msg is { info: SessionMessage["info"]; content: string } => Boolean(msg.content))
-                    .map((msg) => ({
-                        id: msg.info.id,
-                        role: msg.info.role,
-                        content: msg.content,
-                        timestamp: msg.info.time?.created || Date.now(),
-                    })))
-            }
-        } catch (error) {
-            console.error("加载会话消息失败:", error)
-        }
-    }
 
     // 为当前文件夹创建新会话
     const createNewSessionForFolder = async (title?: string) => {
@@ -723,13 +476,11 @@ export function ChatPanel() {
 
             if (response.ok) {
                 const data = await response.json()
-                const newSessionId = data.id
-                loadedSelectedSessionId = newSessionId
-                setSessionId(newSessionId)
+                loadedSessions.add(data.id)
                 sdk.setSelectedSession(data)
                 sdk.refreshSessionList()
-                console.log(`为文件夹 ${sdk.directory()} 创建新会话: ${newSessionId}`)
-                return newSessionId
+                console.log(`为文件夹 ${sdk.directory()} 创建新会话: ${data.id}`)
+                return data.id as string
             }
         } catch (error) {
             console.error("创建会话失败:", error)
@@ -737,13 +488,14 @@ export function ChatPanel() {
         return null
     }
 
-    const ensureInitialSessionTitle = async (currentSessionId: string, text: string) => {
+    const ensureInitialSessionTitle = async (sid: string, text: string) => {
         const session = sdk.selectedSession()
-        if (session?.id === currentSessionId && !isDefaultSessionTitle(session.title)) return
-        if (messages().filter((message) => message.role === "user").length > 1) return
+        if (session?.id === sid && !isDefaultSessionTitle(session.title)) return
+        const userMessageCount = messages().filter((message) => message.role === "user").length
+        if (userMessageCount > 1) return
 
         const result = await sdk.client.session.update({
-            sessionID: currentSessionId,
+            sessionID: sid,
             title: createInitialSessionTitle(text),
         }, { throwOnError: false })
         if (!result.data) return
@@ -761,7 +513,6 @@ export function ChatPanel() {
                 permissionID: request.id,
                 response: reply,
             }, { throwOnError: true })
-            removePermissionRequest(request.id)
         } catch (error) {
             console.error("权限回复失败:", error)
         } finally {
@@ -775,7 +526,6 @@ export function ChatPanel() {
         setRequestResponding(request.id)
         try {
             await sdk.client.question.reply({ requestID: request.id, answers }, { throwOnError: true })
-            removeQuestionRequest(request.id)
         } catch (error) {
             console.error("询问回复失败:", error)
         } finally {
@@ -789,7 +539,6 @@ export function ChatPanel() {
         setRequestResponding(request.id)
         try {
             await sdk.client.question.reject({ requestID: request.id }, { throwOnError: true })
-            removeQuestionRequest(request.id)
         } catch (error) {
             console.error("询问忽略失败:", error)
         } finally {
@@ -802,39 +551,31 @@ export function ChatPanel() {
         if (!text || isLoading() || hasPendingRequest()) return
 
         if (!sdk.directory()) {
-            addMessage("assistant", "请先在左侧选择一个文件夹。")
+            setSendError("请先在左侧选择一个文件夹。")
             return
         }
 
-        addMessage("user", text)
         setInputText("")
-        setIsLoading(true)
-        setStreamingContent("")
-        setStreamingReasoningText("")
-        setStreamingReasoningHeading("")
-        setToolCalls([])
+        setSendError(null)
 
         try {
             const { serverInfo } = sdk
             const headers = getHeaders()
 
-            let currentSessionId = sessionId()
-            if (!currentSessionId) {
-                currentSessionId = await createNewSessionForFolder(createInitialSessionTitle(text))
+            let sid = currentSessionId()
+            if (!sid) {
+                sid = await createNewSessionForFolder(createInitialSessionTitle(text))
             }
-            if (!currentSessionId) throw new Error("创建会话失败")
+            if (!sid) throw new Error("创建会话失败")
 
-            // 发送消息 - 使用 message 端点（可以正常触发 SSE 事件）
             const selectedFile = sdk.selectedFile()
-            await ensureInitialSessionTitle(currentSessionId, text)
+            await ensureInitialSessionTitle(sid, text)
             const messageWithContext = selectedFile && !selectedFile.isDirectory
                 ? `[当前文件夹: ${sdk.directory()}]\n[当前文件: ${selectedFile.path}]\n\n${text}`
                 : `[当前文件夹: ${sdk.directory()}]\n\n${text}`
-            console.log("发送异步消息到:", `${serverInfo.url}/session/${currentSessionId}/prompt_async`)
-            console.log("请求内容:", { parts: [{ type: "text", text: messageWithContext }] })
-            console.log("请求头:", headers)
+            console.log("发送异步消息到:", `${serverInfo.url}/session/${sid}/prompt_async`)
 
-            const messageResponse = await fetch(`${serverInfo.url}/session/${currentSessionId}/prompt_async`, {
+            const messageResponse = await fetch(`${serverInfo.url}/session/${sid}/prompt_async`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({
@@ -854,25 +595,8 @@ export function ChatPanel() {
         } catch (error) {
             console.error("发送消息失败:", error)
             const errorMessage = error instanceof Error ? error.message : "未知错误"
-            addMessage("assistant", `发送失败: ${errorMessage}`)
-            setIsLoading(false)
-            setStreamingContent("")
-            setStreamingReasoningText("")
-            setStreamingReasoningHeading("")
-            setToolCalls([])
+            setSendError(`发送失败: ${errorMessage}`)
         }
-    }
-
-    const addMessage = (role: "user" | "assistant", content: string) => {
-        setMessages((prev) => [
-            ...prev,
-            {
-                id: Date.now().toString(),
-                role,
-                content,
-                timestamp: Date.now(),
-            },
-        ])
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -882,48 +606,27 @@ export function ChatPanel() {
         }
     }
 
-    // 停止执行
     const handleAbort = async () => {
-        const currentSessionId = sessionId()
-        if (!currentSessionId) return
+        const sid = currentSessionId()
+        if (!sid) return
 
         try {
             const { serverInfo } = sdk
             const headers = getHeaders()
 
-            const response = await fetch(`${serverInfo.url}/session/${currentSessionId}/abort`, {
+            const response = await fetch(`${serverInfo.url}/session/${sid}/abort`, {
                 method: "POST",
                 headers,
             })
 
             if (response.ok) {
                 console.log("会话已中止")
-                setIsLoading(false)
-                setStreamingContent("")
-                setStreamingReasoningText("")
-                setStreamingReasoningHeading("")
-                setToolCalls([])
             } else {
                 console.error("中止会话失败:", response.status)
             }
         } catch (error) {
             console.error("中止会话失败:", error)
         }
-    }
-
-    // 格式化工具状态显示
-    const getToolStatusIcon = (status: string) => {
-        switch (status) {
-            case "pending": return "..."
-            case "running": return ">"
-            case "completed": return "✓"
-            case "error": return "!"
-            default: return "-"
-        }
-    }
-
-    const cleanToolError = (error: string) => {
-        return error.replace(/^Error:\s*/, "").trim()
     }
 
     // 清空对话 - 创建当前文件夹下的新会话
@@ -934,7 +637,6 @@ export function ChatPanel() {
             const { serverInfo } = sdk
             const headers = getHeaders()
 
-            // 创建新会话
             const response = await fetch(`${serverInfo.url}/session`, {
                 method: "POST",
                 headers,
@@ -943,20 +645,10 @@ export function ChatPanel() {
 
             if (response.ok) {
                 const newSession = await response.json()
-                const newSessionId = newSession.id
-
-                setSessionId(newSessionId)
+                loadedSessions.add(newSession.id)
                 sdk.setSelectedSession(newSession)
                 sdk.refreshSessionList()
-
-                // 清空 UI 上的消息
-                setMessages([])
-                setStreamingContent("")
-                setStreamingReasoningText("")
-                setStreamingReasoningHeading("")
-                setToolCalls([])
-
-                console.log(`已清空对话，新会话 ID: ${newSessionId}`)
+                console.log(`已清空对话，新会话 ID: ${newSession.id}`)
             } else {
                 console.error("创建新会话失败:", response.status)
             }
@@ -964,6 +656,40 @@ export function ChatPanel() {
             console.error("清空对话失败:", error)
         }
     }
+
+    // 拼接用户消息中所有 text part（用户消息按整段渲染，不按 part 分块）
+    const userMessageText = (parts: Part[]): string => {
+        return parts
+            .filter((part): part is Part & { type: "text"; text: string } => part.type === "text")
+            .map((part) => part.text)
+            .join("\n")
+    }
+
+    // 一个 part 是否应该在 chat-turn 中被渲染（与 reducer 的 SKIP_PARTS 一致）
+    const isVisiblePart = (part: Part) => part.type === "text" || part.type === "reasoning" || part.type === "tool"
+
+    // 当前会话中，最后一个可被流式展示（text 或 reasoning）的 part 的 id。
+    // streaming 标记只落到这一个 id 命中的行上，其余行的属性不变 → DOM 不重建。
+    const lastStreamablePartId = createMemo<string | null>(() => {
+        if (!isBusy()) return null
+        const list = messages()
+        for (let i = list.length - 1; i >= 0; i--) {
+            const message = list[i]
+            if (message.role !== "assistant") continue
+            const parts = sdk.store.part[message.id] ?? []
+            for (let j = parts.length - 1; j >= 0; j--) {
+                const part = parts[j]
+                if (part.type === "text" || part.type === "reasoning") return part.id
+            }
+        }
+        return null
+    })
+
+    // 是否显示底部"思考中…"占位：busy 且当前会话没有任何可流式 part（用户刚发完、还没有 assistant 输出）
+    const showThinkingPlaceholder = createMemo(() => {
+        if (!isBusy()) return false
+        return lastStreamablePartId() === null
+    })
 
     return (
         <div class="chat-panel">
@@ -981,10 +707,10 @@ export function ChatPanel() {
                     </div>
                 </div>
                 <div class="chat-header-actions">
-                    <Show when={sessionId()}>
+                    <Show when={currentSessionId()}>
                         <div class="status-indicator">
-                            <span class={`status-dot ${sessionStatus() === "busy" ? "busy" : "online"}`}></span>
-                            <span>{sessionStatus() === "busy" ? "处理中" : "就绪"}</span>
+                            <span class={`status-dot ${isBusy() ? "busy" : "online"}`}></span>
+                            <span>{isBusy() ? "处理中" : "就绪"}</span>
                         </div>
                     </Show>
                     <Show when={sdk.directory() && !isLoading()}>
@@ -997,7 +723,7 @@ export function ChatPanel() {
 
             <div class="chat-messages" ref={messagesContainer}>
                 <Show
-                    when={messages().length > 0 || isLoading() || streamingContent() || toolCalls().length > 0}
+                    when={messages().length > 0 || isLoading() || sendError()}
                     fallback={
                         <div class="chat-empty">
                             <div class="chat-empty-icon" aria-hidden="true"></div>
@@ -1009,76 +735,106 @@ export function ChatPanel() {
                     <div class="chat-timeline">
                         <For each={messages()}>
                             {(message) => (
-                                <div class={`chat-turn ${message.role}`}>
-                                    <div class={`chat-message ${message.role}`}>
-                                        <div class="chat-message-role">{message.role === "user" ? "You" : "Assistant"}</div>
-                                        <Markdown
-                                            class="chat-message-content"
-                                            text={message.content}
-                                            cacheKey={message.id}
-                                            streaming={false}
-                                        />
-                                    </div>
-                                </div>
-                            )}
-                        </For>
-
-                        <Show when={toolCalls().length > 0}>
-                            <div class="chat-turn assistant">
-                                <div class="tool-calls">
-                                    <For each={toolCalls()}>
-                                        {(tool) => (
-                                            <div class={`tool-call ${tool.status}`}>
-                                                <span class="tool-icon">{getToolStatusIcon(tool.status)}</span>
-                                                <span class="tool-body">
-                                                    <span class="tool-name">{tool.title || tool.tool}</span>
-                                                    <Show when={tool.status === "error" && tool.error}>
-                                                        {(error) => <span class="tool-error-text">{cleanToolError(error())}</span>}
-                                                    </Show>
-                                                </span>
-                                            </div>
-                                        )}
-                                    </For>
-                                </div>
-                            </div>
-                        </Show>
-
-                        <Show when={isLoading()}>
-                            <div class="chat-turn assistant">
                                 <Show
-                                    when={streamingReasoningText()}
+                                    when={message.role === "assistant"}
                                     fallback={
-                                        <div class="chat-thinking">
-                                            <span class="chat-thinking-spinner" aria-hidden="true"></span>
-                                            <span class="chat-thinking-label">思考中</span>
-                                            <Show when={streamingReasoningHeading()}>
-                                                <span class="chat-thinking-heading">{streamingReasoningHeading()}</span>
-                                            </Show>
+                                        <div class="chat-turn user">
+                                            <div class="chat-message user">
+                                                <div class="chat-message-role">You</div>
+                                                <Markdown
+                                                    class="chat-message-content"
+                                                    text={userMessageText(partsOf(message.id))}
+                                                    cacheKey={message.id}
+                                                    streaming={false}
+                                                />
+                                            </div>
                                         </div>
                                     }
                                 >
-                                    <ReasoningBlock
-                                        text={streamingReasoningText()}
-                                        heading={streamingReasoningHeading()}
-                                        cacheKey={`${sessionId() ?? "streaming"}:streaming`}
-                                        streaming
-                                    />
+                                    <For each={partsOf(message.id)}>
+                                        {(part) => (
+                                            <Show when={isVisiblePart(part)}>
+                                                <Show when={part.type === "text"}>
+                                                    {(() => {
+                                                        const textPart = part as Part & { type: "text"; text: string }
+                                                        const streaming = createMemo(() => lastStreamablePartId() === textPart.id)
+                                                        return (
+                                                            <div class="chat-turn assistant">
+                                                                <div class={`chat-message assistant${streaming() ? " streaming" : ""}`}>
+                                                                    <div class="chat-message-role">Assistant</div>
+                                                                    <Markdown
+                                                                        class="chat-message-content"
+                                                                        text={textPart.text}
+                                                                        cacheKey={textPart.id}
+                                                                        streaming={streaming()}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })()}
+                                                </Show>
+                                                <Show when={part.type === "reasoning"}>
+                                                    {(() => {
+                                                        const reasoningPart = part as Part & { type: "reasoning"; text: string }
+                                                        const streaming = createMemo(() => lastStreamablePartId() === reasoningPart.id)
+                                                        return (
+                                                            <div class="chat-turn assistant">
+                                                                <ReasoningBlock
+                                                                    text={reasoningPart.text}
+                                                                    cacheKey={reasoningPart.id}
+                                                                    streaming={streaming()}
+                                                                />
+                                                            </div>
+                                                        )
+                                                    })()}
+                                                </Show>
+                                                <Show when={part.type === "tool"}>
+                                                    {(() => {
+                                                        const tool = part as Part & { type: "tool" }
+                                                        return (
+                                                            <div class="chat-turn assistant">
+                                                                <div class="tool-calls">
+                                                                    <div class={`tool-call ${tool.state.status}`}>
+                                                                        <span class="tool-icon">{getToolStatusIcon(tool.state.status)}</span>
+                                                                        <span class="tool-body">
+                                                                            <span class="tool-name">
+                                                                                {"title" in tool.state && tool.state.title ? tool.state.title : tool.tool}
+                                                                            </span>
+                                                                            <Show when={tool.state.status === "error" && "error" in tool.state ? tool.state.error : undefined}>
+                                                                                {(error) => <span class="tool-error-text">{cleanToolError(error())}</span>}
+                                                                            </Show>
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })()}
+                                                </Show>
+                                            </Show>
+                                        )}
+                                    </For>
                                 </Show>
+                            )}
+                        </For>
+
+                        <Show when={showThinkingPlaceholder()}>
+                            <div class="chat-turn assistant">
+                                <div class="chat-thinking">
+                                    <span class="chat-thinking-spinner" aria-hidden="true"></span>
+                                    <span class="chat-thinking-label">思考中</span>
+                                </div>
                             </div>
                         </Show>
 
-                        <Show when={streamingContent()}>
-                            <div class="chat-turn assistant">
-                                <div class="chat-message assistant streaming">
-                                    <div class="chat-message-role">Assistant</div>
-                                    <Markdown
-                                        class="chat-message-content"
-                                        text={streamingContent()}
-                                        cacheKey={`${sessionId() ?? "streaming"}:streaming`}
-                                        streaming
-                                    />
+                        <Show when={sendError()}>
+                            {(error) => (
+                                <div class="chat-turn assistant">
+                                    <div class="chat-message assistant">
+                                        <div class="chat-message-role">Assistant</div>
+                                        <div class="chat-message-content">{error()}</div>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </Show>
                     </div>
                 </Show>

@@ -1,5 +1,8 @@
 import { createContext, useContext, createSignal, type ParentProps, type Accessor, type Setter, onCleanup, batch } from "solid-js"
+import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { createOpencodeClient, type OpencodeClient, type Event, type Session } from "@opencode-ai/sdk/v2/client"
+import { applySessionEvent } from "../store/event-reducer"
+import { createInitialSessionState, type SessionState } from "../store/types"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -50,6 +53,9 @@ interface SDKContextType {
     // 讨论审核问题相关
     discussIssue: Accessor<DiscussIssue | null>
     setDiscussIssue: Setter<DiscussIssue | null>
+    // 按 sessionID 分桶的会话运行时状态（消息、parts、权限、问询、状态等）
+    store: Store<SessionState>
+    setStore: SetStoreFunction<SessionState>
 }
 
 const SDKContext = createContext<SDKContextType>()
@@ -72,6 +78,8 @@ export function SDKProvider(props: SDKProviderProps) {
     const [selectedSession, setSelectedSession] = createSignal<Session | null>(null)
     const [sessionListVersion, setSessionListVersion] = createSignal(0)
     const [discussIssue, setDiscussIssue] = createSignal<DiscussIssue | null>(null)
+
+    const [store, setStore] = createStore<SessionState>(createInitialSessionState())
 
     const eventListeners = new Set<EventListener>()
     const abortController = new AbortController()
@@ -109,10 +117,19 @@ export function SDKProvider(props: SDKProviderProps) {
         }
     }
 
+    // 切换目录时只清空选中的文件；selectedSession 由调用方显式管理，
+    // 避免清空打断"切换会话"流程（旧实现会先把 selectedSession 设成 null，
+    // 触发 ChatPanel 的 createEffect 清空运行时状态）
     const updateDirectory = (dir: string) => {
+        const current = directory()
         setDirectory(dir)
         setSelectedFile(null)
-        setSelectedSession(null)
+        if (current && current !== dir) {
+            const session = selectedSession()
+            if (session && session.directory !== dir) {
+                setSelectedSession(null)
+            }
+        }
     }
 
     // 创建带认证的 fetch 函数
@@ -165,7 +182,40 @@ export function SDKProvider(props: SDKProviderProps) {
             const part = (payload as any).properties?.part
             return `message.part.updated:${dir}:${part?.messageID}:${part?.id}`
         }
+        if (payload.type === "message.part.delta") {
+            const p = (payload as any).properties
+            return `message.part.delta:${dir}:${p?.messageID}:${p?.partID}:${p?.field}`
+        }
         return undefined
+    }
+
+    // 入队事件；对 message.part.delta 做字符串拼接合并（不能简单丢弃前一条，否则字会丢）
+    const enqueue = (directory: string, payload: Event) => {
+        if (payload.type === "message.part.delta") {
+            const k = key(directory, payload)!
+            const i = coalesced.get(k)
+            if (i !== undefined) {
+                const prev = queue[i]
+                if (prev && prev.payload.type === "message.part.delta") {
+                    const prevProps = (prev.payload as any).properties
+                    const curProps = (payload as any).properties
+                    prevProps.delta = (prevProps.delta ?? "") + (curProps.delta ?? "")
+                    return
+                }
+            }
+            coalesced.set(k, queue.length)
+            queue.push({ directory, payload })
+            return
+        }
+        const k = key(directory, payload)
+        if (k) {
+            const i = coalesced.get(k)
+            if (i !== undefined) {
+                queue[i] = undefined
+            }
+            coalesced.set(k, queue.length)
+        }
+        queue.push({ directory, payload })
     }
 
     // 刷新事件队列
@@ -182,6 +232,8 @@ export function SDKProvider(props: SDKProviderProps) {
         batch(() => {
             for (const event of events) {
                 if (!event) continue
+                // 先把事件应用到按 sessionID 分桶的 store，再分发给外部监听器
+                applySessionEvent({ event: event.payload, store, setStore })
                 applySelectedSessionEvent(event.payload, event.directory)
                 for (const listener of eventListeners) {
                     try {
@@ -227,15 +279,7 @@ export function SDKProvider(props: SDKProviderProps) {
                 console.log("  解析后 payload:", JSON.stringify(payload, null, 2))
 
                 // 事件合并（高频事件优化）
-                const k = key(eventDirectory, payload)
-                if (k) {
-                    const i = coalesced.get(k)
-                    if (i !== undefined) {
-                        queue[i] = undefined
-                    }
-                    coalesced.set(k, queue.length)
-                }
-                queue.push({ directory: eventDirectory, payload })
+                enqueue(eventDirectory, payload)
                 schedule()
 
                 // 让出执行权（避免阻塞 UI）
@@ -281,6 +325,8 @@ export function SDKProvider(props: SDKProviderProps) {
         subscribeToEvents,
         discussIssue,
         setDiscussIssue,
+        store,
+        setStore,
     }
 
     return (
