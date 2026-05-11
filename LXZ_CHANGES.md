@@ -32,12 +32,28 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
   - The default directory is `~/Documents/LongwiseTechAgent`.
   - The directory is created before the instance is initialized, so the first no-directory request registers this folder instead of the server process working directory.
 
+- `packages/opencode/src/session/prompt/*.txt`
+  - Changed model-facing identity prompt lines from `opencode` / `OpenCode` to `朗小知`.
+  - Updated only identity declarations such as `You are ...` and `Your name is ...`.
+  - Left product references, command names, docs URLs, issue URLs, and other non-identity `opencode` references unchanged.
+  - Affected prompt files:
+    - `anthropic.txt`
+    - `beast.txt`
+    - `codex.txt`
+    - `copilot-gpt-5.txt`
+    - `default.txt`
+    - `gemini.txt`
+    - `gpt.txt`
+    - `kimi.txt`
+    - `trinity.txt`
+
 ## Existing code paths affected by the new root
 
 - Session database remains defined in `packages/opencode/src/storage/db.ts`, but `Global.Path.data` now points to `~/.lxz/data`, so the default database becomes `~/.lxz/data/opencode.db`.
 - Recent model selection remains defined in `packages/opencode/src/provider/provider.ts`, but `Global.Path.state` now points to `~/.lxz/state`, so the recent model file becomes `~/.lxz/state/model.json`.
 - Global config loading remains defined in `packages/opencode/src/config/config.ts` and `packages/opencode/src/config/paths.ts`, but `Global.Path.config` now points to `~/.lxz/config`.
 - Instance route requests without an explicit directory now default to `~/Documents/LongwiseTechAgent`, created by `packages/opencode/src/server/routes/instance/middleware.ts`.
+- Main session prompts are selected by `packages/opencode/src/session/system.ts` and assembled in `packages/opencode/src/session/llm.ts`; after these local prompt edits, assistant self-identification should use `朗小知`.
 
 ## Where to configure models and skills
 
