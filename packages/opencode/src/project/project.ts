@@ -2,6 +2,7 @@ import z from "zod"
 import { and } from "drizzle-orm"
 import { Database } from "@/storage/db"
 import { eq } from "drizzle-orm"
+import { createHash } from "crypto"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import * as Log from "@opencode-ai/core/util/log"
@@ -194,10 +195,11 @@ export const layer: Layer.Layer<
         const dotgit = dotgitMatches[0]
 
         if (!dotgit) {
+          const local = pathSvc.normalize(directory)
           return {
-            id: ProjectID.global,
-            worktree: "/",
-            sandbox: "/",
+            id: ProjectID.make("local:" + createHash("sha256").update(local).digest("hex")),
+            worktree: local,
+            sandbox: local,
             vcs: fakeVcs,
           }
         }

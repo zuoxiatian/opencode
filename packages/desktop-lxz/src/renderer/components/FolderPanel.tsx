@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { Project, Session } from "@opencode-ai/sdk/v2/client"
 import { useSDK } from "../context/sdk"
 
 interface FileItem {
@@ -8,8 +8,6 @@ interface FileItem {
     isDirectory: boolean
 }
 
-const RECENT_FOLDERS_KEY = "recent_folders"
-
 function isDefaultSessionTitle(title?: string) {
     const value = title?.trim()
     return value === "新对话" || /^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value ?? "")
@@ -17,7 +15,7 @@ function isDefaultSessionTitle(title?: string) {
 
 export function FolderPanel() {
     const sdk = useSDK()
-    const [recentFolders, setRecentFolders] = createSignal<string[]>([])
+    const [projects, setProjects] = createSignal<Project[]>([])
     const [files, setFiles] = createSignal<FileItem[]>([])
     const [sessionsByFolder, setSessionsByFolder] = createSignal<Record<string, Session[]>>({})
     const [isLoadingFiles, setIsLoadingFiles] = createSignal(false)
@@ -27,20 +25,29 @@ export function FolderPanel() {
     const [showFiles, setShowFiles] = createSignal(false)
     let unsubscribe: (() => void) | undefined
 
-    onMount(() => {
-        const saved = localStorage.getItem(RECENT_FOLDERS_KEY)
-        if (saved) {
-            try {
-                const folders = JSON.parse(saved) as string[]
-                setRecentFolders(folders)
-                setCollapsedFolders(new Set(folders))
-            } catch (error) {
-                console.error("无法解析最近文件夹:", error)
-            }
+    const projectFolders = () => projects().map((project) => project.worktree)
+
+    const loadProjects = async () => {
+        try {
+            const result = await sdk.client.project.list(undefined, { throwOnError: true })
+            const listed = (result.data ?? [])
+                .filter((project) => Boolean(project.worktree))
+                .sort((a, b) => b.time.updated - a.time.updated)
+
+            setProjects(listed)
+            setCollapsedFolders((prev) => new Set(listed.map((project) => project.worktree).filter((folder) => prev.has(folder))))
+        } catch (error) {
+            console.error("加载项目列表失败:", error)
+            setProjects([])
         }
+    }
+
+    onMount(() => {
+        void loadProjects()
         unsubscribe = sdk.subscribeToEvents((event) => {
             if (event.type === "session.created" || event.type === "session.updated") {
                 applySessionUpdate(event.properties.sessionID, event.properties.info as Partial<Session>)
+                void loadProjects()
             }
         })
     })
@@ -60,7 +67,7 @@ export function FolderPanel() {
 
     createEffect(() => {
         sdk.sessionListVersion()
-        void Promise.all(recentFolders().map(loadSessions))
+        void Promise.all(projectFolders().map(loadSessions))
     })
 
     const loadFiles = async (folder: string) => {
@@ -99,18 +106,19 @@ export function FolderPanel() {
         if (!folder) return
         setCollapsedFolders((prev) => new Set(prev).add(folder))
         activateFolder(folder)
-        saveRecentFolders([folder, ...recentFolders().filter((item) => item !== folder)].slice(0, 20))
+        await sdk.client.project.list(undefined, {
+            headers: {
+                "x-opencode-directory": encodeURIComponent(folder),
+            },
+            throwOnError: true,
+        })
+        void loadProjects()
     }
 
     const activateFolder = (folder: string) => {
         sdk.setDirectory(folder)
         setShowFiles(false)
         void loadSessions(folder)
-    }
-
-    const saveRecentFolders = (folders: string[]) => {
-        setRecentFolders(folders)
-        localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(folders))
     }
 
     const createSessionForFolder = async (folder: string, event: MouseEvent) => {
@@ -121,6 +129,7 @@ export function FolderPanel() {
             sdk.setSelectedSession(result.data)
             setSessionsByFolder((prev) => ({ ...prev, [folder]: [result.data, ...(prev[folder] ?? [])] }))
             sdk.refreshSessionList()
+            void loadProjects()
         } catch (error) {
             console.error("创建会话失败:", error)
         }
@@ -131,7 +140,7 @@ export function FolderPanel() {
     const formatRelativeTime = (time: number) => {
         const diff = Date.now() - time
         if (diff < 60_000) return "刚刚"
-        if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分`
+        if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟`
         if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时`
         if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)} 天`
         return `${Math.floor(diff / 604_800_000)} 周`
@@ -245,7 +254,7 @@ export function FolderPanel() {
 
             <div class="folder-panel-content project-history-layout">
                 <Show
-                    when={recentFolders().length > 0}
+                    when={projectFolders().length > 0}
                     fallback={
                         <div class="empty-state">
                             <div class="empty-state-title">还没有打开任何文件夹</div>
@@ -255,7 +264,7 @@ export function FolderPanel() {
                 >
                     <div class="project-section-title">项目</div>
                     <div class="project-list">
-                        <For each={recentFolders()}>
+                        <For each={projectFolders()}>
                             {(folder) => (
                                 <div class="project-group">
                                     <div
@@ -271,7 +280,7 @@ export function FolderPanel() {
                                             onClick={(event) => createSessionForFolder(folder, event)}
                                             title="新建会话"
                                         >
-                                            ⊕
+                                            ＋
                                         </button>
                                     </div>
 
