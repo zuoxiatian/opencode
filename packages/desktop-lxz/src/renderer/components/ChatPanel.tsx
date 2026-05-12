@@ -67,6 +67,13 @@ function sameModel(a: ModelSelection, b: ModelSelection) {
     return a.providerID === b.providerID && a.modelID === b.modelID
 }
 
+function toModelSelection(model: ModelSelection): ModelSelection {
+    return {
+        providerID: model.providerID,
+        modelID: model.modelID,
+    }
+}
+
 function sortModelOptions(options: ModelOption[]) {
     return options.sort(
         (a, b) => Number(a.providerName.toLowerCase() === "opencode zen") - Number(b.providerName.toLowerCase() === "opencode zen"),
@@ -436,8 +443,9 @@ export function ChatPanel() {
             setModelOptions(nextModels)
             setCurrentAgent((prev) => nextAgents.some((agent) => agent.name === prev) ? prev : pickDefaultAgent(nextAgents))
             setCurrentModel((prev) => {
-                if (prev && nextModels.some((model) => sameModel(model, prev))) return prev
-                return pickDefaultModel(nextModels, defaults) ?? null
+                if (prev && nextModels.some((model) => sameModel(model, prev))) return toModelSelection(prev)
+                const nextModel = pickDefaultModel(nextModels, defaults)
+                return nextModel ? toModelSelection(nextModel) : null
             })
         } catch (error) {
             console.error("加载模型和模式失败:", error)
@@ -447,7 +455,7 @@ export function ChatPanel() {
     const applyAgent = (agent: AgentOption) => {
         setCurrentAgent(agent.name)
         if (agent.model && modelOptions().some((model) => sameModel(model, agent.model!))) {
-            setCurrentModel(agent.model)
+            setCurrentModel(toModelSelection(agent.model))
         }
         setShowAgentMenu(false)
     }
@@ -744,7 +752,7 @@ export function ChatPanel() {
                 text,
                 parts: promptParts(text),
                 agent: currentAgent(),
-                model,
+                model: toModelSelection(model),
             }
 
             if (isBusy()) {
@@ -1097,7 +1105,7 @@ export function ChatPanel() {
                                                 {(model) => (
                                                     <button
                                                         class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
-                                                        onClick={() => { setCurrentModel(model); setShowModelMenu(false); }}
+                                                        onClick={() => { setCurrentModel(toModelSelection(model)); setShowModelMenu(false); }}
                                                     >
                                                         <span class="model-menu-main">{model.modelName || model.modelID}</span>
                                                         <span class="model-menu-meta">{model.providerName || model.providerID}{model.isDefault ? " · 默认" : ""}</span>
