@@ -82,7 +82,10 @@ export function App(props: AppProps) {
         <MarkedProvider>
         <SDKProvider serverInfo={props.serverInfo}>
             {/* 窗口标题栏 */}
-            <div class="window-titlebar">
+            <div
+                class="window-titlebar"
+                classList={{ "window-titlebar-macos": navigator.platform.toLowerCase().includes("mac") }}
+            >
                 <img class="window-titlebar-icon" src={appIcon} alt="" />
                 <span class="window-titlebar-title">LongwiseTechAgent</span>
             </div>

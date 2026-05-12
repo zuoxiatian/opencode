@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "newapi/MiniMax-M2.7",
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "newapi": {
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "http://116.62.224.41:17600/v1",
+        "apiKey": "sk-OCkl04gKBgSW7liDsN8whz0VZIVLt1xA1XHTCiRE7OFvRoCJ"
+      },
+      "models": {
+        "MiniMax-M2.7": {
+          "name": "LongwiseTechLLM"
+        }
+      }
+    }
+  }
+}

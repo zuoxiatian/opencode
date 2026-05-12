@@ -4,7 +4,8 @@ import { existsSync } from "fs"
 import { join } from "path"
 import { spawn, ChildProcess } from "child_process"
 import { fileURLToPath } from "url"
-import { readdir } from "fs/promises"
+import { cp, mkdir, readFile, readdir, writeFile } from "fs/promises"
+import { homedir } from "os"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 
@@ -57,10 +58,54 @@ function getAppIconPath() {
     return undefined
 }
 
+async function ensureDefaultOpencodeConfig() {
+    const configDir = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "config")
+    const configFiles = ["opencode.jsonc", "opencode.json", "config.json"].map((file) => join(configDir, file))
+
+    if (configFiles.some((file) => existsSync(file))) return
+
+    await mkdir(configDir, { recursive: true })
+    await writeFile(configFiles[0], await readFile(defaultOpencodeConfigPath(), "utf8"))
+}
+
+function defaultOpencodeConfigPath() {
+    return process.env.NODE_ENV === "development"
+        ? join(getRepoRoot(), "packages", "desktop-lxz", "config", "opencode.jsonc")
+        : join(process.resourcesPath, "config", "opencode.jsonc")
+}
+
+function bundledSkillsDir() {
+    return process.env.NODE_ENV === "development"
+        ? join(getRepoRoot(), "packages", "desktop-lxz", "skills")
+        : join(process.resourcesPath, "skills")
+}
+
+async function ensureBundledSkills() {
+    const source = bundledSkillsDir()
+    if (!existsSync(source)) return
+
+    const target = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "skills")
+    await mkdir(target, { recursive: true })
+
+    const skills = await readdir(source, { withFileTypes: true })
+    await Promise.all(
+        skills
+            .filter((entry) => entry.isDirectory() && existsSync(join(source, entry.name, "SKILL.md")))
+            .map((entry) => {
+                const destination = join(target, entry.name)
+                if (existsSync(destination)) return Promise.resolve()
+                return cp(join(source, entry.name), destination, { recursive: true, force: false })
+            }),
+    )
+}
+
 /**
  * 启动 OpenCode 服务器
  */
 async function startServer(): Promise<ServerInfo> {
+    await ensureDefaultOpencodeConfig()
+    await ensureBundledSkills()
+
     return new Promise((resolve, reject) => {
         const isDev = process.env.NODE_ENV === "development"
         let opencodeCmd: string

@@ -14,6 +14,14 @@
         {
             "from": "build/icon.png",
             "to": "icon.png"
+        },
+        {
+            "from": "skills/",
+            "to": "skills/"
+        },
+        {
+            "from": "config/opencode.jsonc",
+            "to": "config/opencode.jsonc"
         }
     ],
     "win": {
@@ -84,6 +92,28 @@
         "icon": "build/icon.icns",
         "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
         "category": "public.app-category.developer-tools"
+    },
+    "dmg": {
+        "title": "LongwiseTechAgent",
+        "background": "build/background.tiff",
+        "iconSize": 96,
+        "window": {
+            "width": 768,
+            "height": 530
+        },
+        "contents": [
+            {
+                "x": 240,
+                "y": 255,
+                "type": "file"
+            },
+            {
+                "x": 528,
+                "y": 255,
+                "type": "link",
+                "path": "/Applications"
+            }
+        ]
     },
     "linux": {
         "target": [
