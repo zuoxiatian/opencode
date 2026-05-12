@@ -10,6 +10,7 @@ import type {
     QuestionAnswer,
     QuestionRequest,
     SessionStatus,
+    TextPartInput,
 } from "@opencode-ai/sdk/v2/client"
 import { Markdown } from "@opencode-ai/ui/markdown"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
@@ -325,8 +326,33 @@ export function ChatPanel() {
     const contextLabel = createMemo(() => {
         const directory = sdk.directory()
         if (!directory) return "未选择文件夹"
-        return sdk.selectedFile()?.name ?? directory.split(/[/\\]/).pop() ?? directory
+        const selectedFiles = sdk.selectedFiles()
+        if (selectedFiles.length === 1) return selectedFiles[0].name
+        if (selectedFiles.length > 1) return `${selectedFiles.length} 个文件`
+        return directory.split(/[/\\]/).pop() ?? directory
     })
+
+    const promptParts = (text: string): TextPartInput[] => {
+        const selectedFiles = sdk.selectedFiles().filter((file) => !file.isDirectory)
+        if (selectedFiles.length === 0) return [{ type: "text", text }]
+        return [
+            { type: "text", text },
+            {
+                type: "text",
+                text: [
+                    "Selected files for this message. File contents are not attached; use these paths only as selection context:",
+                    ...selectedFiles.map((file) => `- ${file.path}`),
+                ].join("\n"),
+                synthetic: true,
+                metadata: {
+                    selectedFiles: selectedFiles.map((file) => ({
+                        name: file.name,
+                        path: file.path,
+                    })),
+                },
+            },
+        ]
+    }
 
     const loadChatOptions = async () => {
         try {
@@ -568,11 +594,7 @@ export function ChatPanel() {
             }
             if (!sid) throw new Error("创建会话失败")
 
-            const selectedFile = sdk.selectedFile()
             await ensureInitialSessionTitle(sid, text)
-            const messageWithContext = selectedFile && !selectedFile.isDirectory
-                ? `[当前文件夹: ${sdk.directory()}]\n[当前文件: ${selectedFile.path}]\n\n${text}`
-                : `[当前文件夹: ${sdk.directory()}]\n\n${text}`
             console.log("发送异步消息到:", `${serverInfo.url}/session/${sid}/prompt_async`)
 
             const messageResponse = await fetch(`${serverInfo.url}/session/${sid}/prompt_async`, {
@@ -581,7 +603,7 @@ export function ChatPanel() {
                 body: JSON.stringify({
                     agent: currentAgent(),
                     ...(currentModel() ? { model: currentModel() } : {}),
-                    parts: [{ type: "text", text: messageWithContext }],
+                    parts: promptParts(text),
                 }),
             })
 
@@ -660,7 +682,7 @@ export function ChatPanel() {
     // 拼接用户消息中所有 text part（用户消息按整段渲染，不按 part 分块）
     const userMessageText = (parts: Part[]): string => {
         return parts
-            .filter((part): part is Part & { type: "text"; text: string } => part.type === "text")
+            .filter((part): part is Part & { type: "text"; text: string; synthetic?: boolean } => part.type === "text" && !part.synthetic)
             .map((part) => part.text)
             .join("\n")
     }
@@ -702,7 +724,7 @@ export function ChatPanel() {
                         <div class="chat-title">{sessionTitle()}</div>
                     </div>
                     <div class="chat-context-line">
-                        <span class={sdk.selectedFile() ? "chat-file-mark" : "chat-folder-mark"} aria-hidden="true"></span>
+                        <span class={sdk.selectedFiles().length ? "chat-file-mark" : "chat-folder-mark"} aria-hidden="true"></span>
                         <span class="chat-context-name">{contextLabel()}</span>
                     </div>
                 </div>

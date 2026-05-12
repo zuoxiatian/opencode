@@ -45,6 +45,8 @@ interface SDKContextType {
     setDirectory: (dir: string) => void
     selectedFile: Accessor<SelectedFile | null>
     setSelectedFile: (file: SelectedFile | null) => void
+    selectedFiles: Accessor<SelectedFile[]>
+    setSelectedFiles: Setter<SelectedFile[]>
     selectedSession: Accessor<Session | null>
     setSelectedSession: Setter<Session | null>
     sessionListVersion: Accessor<number>
@@ -75,6 +77,7 @@ interface SDKProviderProps extends ParentProps {
 export function SDKProvider(props: SDKProviderProps) {
     const [directory, setDirectory] = createSignal("")
     const [selectedFile, setSelectedFile] = createSignal<SelectedFile | null>(null)
+    const [selectedFiles, setSelectedFiles] = createSignal<SelectedFile[]>([])
     const [selectedSession, setSelectedSession] = createSignal<Session | null>(null)
     const [sessionListVersion, setSessionListVersion] = createSignal(0)
     const [discussIssue, setDiscussIssue] = createSignal<DiscussIssue | null>(null)
@@ -124,6 +127,7 @@ export function SDKProvider(props: SDKProviderProps) {
         const current = directory()
         setDirectory(dir)
         setSelectedFile(null)
+        setSelectedFiles([])
         if (current && current !== dir) {
             const session = selectedSession()
             if (session && session.directory !== dir) {
@@ -318,6 +322,8 @@ export function SDKProvider(props: SDKProviderProps) {
         setDirectory: updateDirectory,
         selectedFile,
         setSelectedFile,
+        selectedFiles,
+        setSelectedFiles,
         selectedSession,
         setSelectedSession,
         sessionListVersion,

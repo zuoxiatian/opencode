@@ -23,6 +23,7 @@ export function FolderPanel() {
     const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
     const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
     const [showFiles, setShowFiles] = createSignal(false)
+    const [lastSelectedFilePath, setLastSelectedFilePath] = createSignal<string | null>(null)
     let unsubscribe: (() => void) | undefined
 
     const projectFolders = () => projects().map((project) => project.worktree)
@@ -251,8 +252,38 @@ export function FolderPanel() {
         return icons[ext] || "📄"
     }
 
-    const handleFileClick = (file: FileItem) => {
+    const isSelectedFile = (file: FileItem) => sdk.selectedFiles().some((selected) => selected.path === file.path)
+
+    const selectFileRange = (file: FileItem) => {
+        const start = files().findIndex((item) => item.path === lastSelectedFilePath())
+        const end = files().findIndex((item) => item.path === file.path)
+        if (start === -1 || end === -1) return [file]
+        const [from, to] = start < end ? [start, end] : [end, start]
+        return files().slice(from, to + 1)
+    }
+
+    const handleFileClick = (file: FileItem, event: MouseEvent) => {
         sdk.setSelectedFile(file)
+        if (event.shiftKey) {
+            const range = selectFileRange(file)
+            sdk.setSelectedFiles((selected) => {
+                const paths = new Set(selected.map((item) => item.path))
+                return [...selected, ...range.filter((item) => !paths.has(item.path))]
+            })
+            setLastSelectedFilePath(file.path)
+            return
+        }
+        if (event.ctrlKey || event.metaKey) {
+            sdk.setSelectedFiles((selected) =>
+                selected.some((item) => item.path === file.path)
+                    ? selected.filter((item) => item.path !== file.path)
+                    : [...selected, file],
+            )
+            setLastSelectedFilePath(file.path)
+            return
+        }
+        sdk.setSelectedFiles([file])
+        setLastSelectedFilePath(file.path)
     }
 
     return (
@@ -344,8 +375,8 @@ export function FolderPanel() {
                                     <For each={files()}>
                                         {(file) => (
                                             <button
-                                                class={`file-item ${sdk.selectedFile()?.path === file.path ? "active" : ""}`}
-                                                onClick={() => handleFileClick(file)}
+                                                class={`file-item ${isSelectedFile(file) ? "active" : ""}`}
+                                                onClick={(event) => handleFileClick(file, event)}
                                                 title={file.path}
                                             >
                                                 <span class="file-item-icon">{getFileIcon(file)}</span>
