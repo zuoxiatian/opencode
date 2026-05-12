@@ -4,6 +4,13 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
+export type EventServerInstanceDisposed = {
+  type: "server.instance.disposed"
+  properties: {
+    directory: string
+  }
+}
+
 export type Project = {
   id: string
   worktree: string
@@ -33,11 +40,9 @@ export type EventProjectUpdated = {
   properties: Project
 }
 
-export type EventServerInstanceDisposed = {
-  type: "server.instance.disposed"
-  properties: {
-    directory: string
-  }
+export type EventProjectDeleted = {
+  type: "project.deleted"
+  properties: Project
 }
 
 export type EventServerConnected = {
@@ -1111,8 +1116,9 @@ export type GlobalEvent = {
   project?: string
   workspace?: string
   payload:
-    | EventProjectUpdated
     | EventServerInstanceDisposed
+    | EventProjectUpdated
+    | EventProjectDeleted
     | EventServerConnected
     | EventGlobalDisposed
     | EventFileEdited
@@ -2055,8 +2061,9 @@ export type File = {
 }
 
 export type Event =
-  | EventProjectUpdated
   | EventServerInstanceDisposed
+  | EventProjectUpdated
+  | EventProjectDeleted
   | EventServerConnected
   | EventGlobalDisposed
   | EventFileEdited
@@ -2657,6 +2664,40 @@ export type ProjectInitGitResponses = {
 }
 
 export type ProjectInitGitResponse = ProjectInitGitResponses[keyof ProjectInitGitResponses]
+
+export type ProjectDeleteData = {
+  body?: never
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/{projectID}"
+}
+
+export type ProjectDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProjectDeleteError = ProjectDeleteErrors[keyof ProjectDeleteErrors]
+
+export type ProjectDeleteResponses = {
+  /**
+   * Successfully deleted project
+   */
+  200: boolean
+}
+
+export type ProjectDeleteResponse = ProjectDeleteResponses[keyof ProjectDeleteResponses]
 
 export type ProjectUpdateData = {
   body?: {

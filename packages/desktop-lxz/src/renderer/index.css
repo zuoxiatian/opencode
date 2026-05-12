@@ -492,7 +492,9 @@ body {
     white-space: nowrap;
 }
 
-.project-new-session {
+.project-row-action,
+.project-conversation-rename,
+.project-conversation-delete {
     width: 22px;
     height: 22px;
     flex-shrink: 0;
@@ -508,6 +510,14 @@ body {
     line-height: 1;
 }
 
+.project-delete,
+.project-conversation-rename,
+.project-conversation-delete {
+    color: var(--text-tertiary);
+    opacity: 0;
+    pointer-events: none;
+}
+
 .project-new-session::before {
     content: "";
     width: 15px;
@@ -518,9 +528,54 @@ body {
     mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.25 4.25H4.85c-1.1 0-2 .9-2 2v8.9c0 1.1.9 2 2 2h8.9c1.1 0 2-.9 2-2v-3.4'/%3E%3Cpath d='M7.2 12.8l2.95-.6 6.55-6.55a1.75 1.75 0 0 0-2.47-2.47L7.8 9.6l-.6 3.2Z'/%3E%3Cpath d='M13.1 4.35l2.55 2.55'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-.project-new-session:hover {
+.project-delete::before,
+.project-conversation-delete::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    display: block;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.2h13'/%3E%3Cpath d='M8 3.2h4'/%3E%3Cpath d='M5.4 5.2l.65 11.1c.05.85.75 1.5 1.6 1.5h4.7c.85 0 1.55-.65 1.6-1.5l.65-11.1'/%3E%3Cpath d='M8.45 8.2v6'/%3E%3Cpath d='M11.55 8.2v6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.2h13'/%3E%3Cpath d='M8 3.2h4'/%3E%3Cpath d='M5.4 5.2l.65 11.1c.05.85.75 1.5 1.6 1.5h4.7c.85 0 1.55-.65 1.6-1.5l.65-11.1'/%3E%3Cpath d='M8.45 8.2v6'/%3E%3Cpath d='M11.55 8.2v6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.project-conversation-rename::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    display: block;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 4H4.8C3.8 4 3 4.8 3 5.8v9.4C3 16.2 3.8 17 4.8 17h9.4c1 0 1.8-.8 1.8-1.8V10'/%3E%3Cpath d='M8.4 12.1l.45-2.45 5.8-5.8a1.55 1.55 0 0 1 2.2 2.2l-5.8 5.8-2.65.25Z'/%3E%3Cpath d='M13.5 5l1.5 1.5'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 4H4.8C3.8 4 3 4.8 3 5.8v9.4C3 16.2 3.8 17 4.8 17h9.4c1 0 1.8-.8 1.8-1.8V10'/%3E%3Cpath d='M8.4 12.1l.45-2.45 5.8-5.8a1.55 1.55 0 0 1 2.2 2.2l-5.8 5.8-2.65.25Z'/%3E%3Cpath d='M13.5 5l1.5 1.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.project-folder-row:hover .project-delete,
+.project-folder-row:focus-within .project-delete,
+.project-conversation-item:hover .project-conversation-rename,
+.project-conversation-item:hover .project-conversation-delete,
+.project-conversation-item:focus-within .project-conversation-rename,
+.project-conversation-item:focus-within .project-conversation-delete {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.project-new-session:hover,
+.project-conversation-rename:hover:not(:disabled) {
     background: var(--bg-tertiary);
     color: var(--text-primary);
+}
+
+.project-delete:hover:not(:disabled),
+.project-conversation-delete:hover:not(:disabled) {
+    background: var(--error-bg);
+    color: var(--error);
+}
+
+.project-row-action:disabled,
+.project-conversation-rename:disabled,
+.project-conversation-delete:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
 }
 
 .project-conversation-list {
@@ -532,7 +587,7 @@ body {
 .project-conversation-item {
     min-height: 28px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto 22px;
+    grid-template-columns: minmax(0, 1fr) auto 22px 22px;
     align-items: center;
     gap: 8px;
     padding: 0 8px 0 38px;
@@ -560,51 +615,23 @@ body {
     white-space: nowrap;
 }
 
+.project-conversation-title-input {
+    width: 100%;
+    min-width: 0;
+    height: 22px;
+    padding: 0 5px;
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius-xs);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    outline: none;
+}
+
 .project-conversation-time {
     flex-shrink: 0;
     color: var(--text-tertiary);
     font-size: 12px;
-}
-
-.project-conversation-delete {
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-tertiary);
-    cursor: pointer;
-    opacity: 0;
-    pointer-events: none;
-}
-
-.project-conversation-delete::before {
-    content: "";
-    width: 14px;
-    height: 14px;
-    display: block;
-    background: currentColor;
-    -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.2h13'/%3E%3Cpath d='M8 3.2h4'/%3E%3Cpath d='M5.4 5.2l.65 11.1c.05.85.75 1.5 1.6 1.5h4.7c.85 0 1.55-.65 1.6-1.5l.65-11.1'/%3E%3Cpath d='M8.45 8.2v6'/%3E%3Cpath d='M11.55 8.2v6'/%3E%3C/svg%3E") center / contain no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.2h13'/%3E%3Cpath d='M8 3.2h4'/%3E%3Cpath d='M5.4 5.2l.65 11.1c.05.85.75 1.5 1.6 1.5h4.7c.85 0 1.55-.65 1.6-1.5l.65-11.1'/%3E%3Cpath d='M8.45 8.2v6'/%3E%3Cpath d='M11.55 8.2v6'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-
-.project-conversation-item:hover .project-conversation-delete,
-.project-conversation-item:focus-within .project-conversation-delete {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.project-conversation-delete:hover:not(:disabled) {
-    background: var(--error-bg);
-    color: var(--error);
-}
-
-.project-conversation-delete:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
 }
 
 .project-conversation-empty,

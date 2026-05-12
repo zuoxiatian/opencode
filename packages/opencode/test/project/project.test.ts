@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { Project } from "@/project/project"
+import { Session } from "@/session/session"
 import * as Log from "@opencode-ai/core/util/log"
 import { $ } from "bun"
 import path from "path"
-import { tmpdir } from "../fixture/fixture"
+import { provideInstance, tmpdir } from "../fixture/fixture"
 import { GlobalBus } from "../../src/bus/global"
 import { ProjectID } from "../../src/project/schema"
+import { Database } from "@/storage/db"
+import { SessionTable } from "@/session/session.sql"
+import { eq } from "drizzle-orm"
 import { Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { NodePath } from "@effect/platform-node"
@@ -441,6 +445,24 @@ describe("Project.update", () => {
     expect(updated.icon?.override).toBe("data:image/png;base64,abc123")
     expect(updated.icon?.color).toBe("#00ff00")
     expect(updated.commands?.start).toBe("make start")
+  })
+})
+
+describe("Project.remove", () => {
+  test("removes project record and associated sessions", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await run((svc) => svc.fromDirectory(tmp.path))
+    const session = await Effect.runPromise(
+      Session.Service.use((svc) => svc.create({ title: "Project session" })).pipe(
+        Effect.provide(Session.defaultLayer),
+        provideInstance(tmp.path),
+      ),
+    )
+
+    await run((svc) => svc.remove(project.id))
+
+    expect(Project.get(project.id)).toBeUndefined()
+    expect(Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, session.id)).get())).toBeUndefined()
   })
 })
 

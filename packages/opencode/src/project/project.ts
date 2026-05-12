@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm"
 import { createHash } from "crypto"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
+import { SyncEvent } from "@/sync"
 import * as Log from "@opencode-ai/core/util/log"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { BusEvent } from "@/bus/bus-event"
@@ -57,6 +58,7 @@ export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
 export const Event = {
   Updated: BusEvent.define("project.updated", Info),
+  Deleted: BusEvent.define("project.deleted", Info),
 }
 
 type Row = typeof ProjectTable.$inferSelect
@@ -113,6 +115,7 @@ export interface Interface {
   readonly list: () => Effect.Effect<Info[]>
   readonly get: (id: ProjectID) => Effect.Effect<Info | undefined>
   readonly update: (input: UpdateInput) => Effect.Effect<Info>
+  readonly remove: (id: ProjectID) => Effect.Effect<void>
   readonly initGit: (input: { directory: string; project: Info }) => Effect.Effect<Info>
   readonly setInitialized: (id: ProjectID) => Effect.Effect<void>
   readonly sandboxes: (id: ProjectID) => Effect.Effect<string[]>
@@ -160,6 +163,15 @@ export const layer: Layer.Layer<
           directory: "global",
           project: data.id,
           payload: { type: Event.Updated.type, properties: data },
+        }),
+      )
+
+    const emitDeleted = (data: Info) =>
+      Effect.sync(() =>
+        GlobalBus.emit("event", {
+          directory: "global",
+          project: data.id,
+          payload: { type: Event.Deleted.type, properties: data },
         }),
       )
 
@@ -401,6 +413,19 @@ export const layer: Layer.Layer<
       return data
     })
 
+    const remove = Effect.fn("Project.remove")(function* (id: ProjectID) {
+      const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+      if (!row) throw new Error(`Project not found: ${id}`)
+      const sessionIDs = yield* db((d) =>
+        d.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.project_id, id)).all(),
+      )
+      yield* db((d) => d.delete(ProjectTable).where(eq(ProjectTable.id, id)).run())
+      yield* Effect.sync(() => {
+        sessionIDs.forEach((session) => SyncEvent.remove(session.id))
+      })
+      yield* emitDeleted(fromRow(row))
+    })
+
     const initGit = Effect.fn("Project.initGit")(function* (input: { directory: string; project: Info }) {
       if (input.project.vcs === "git") return input.project
       if (!(yield* Effect.sync(() => which("git")))) throw new Error("Git is not installed")
@@ -472,6 +497,7 @@ export const layer: Layer.Layer<
       list,
       get,
       update,
+      remove,
       initGit,
       setInitialized,
       sandboxes,

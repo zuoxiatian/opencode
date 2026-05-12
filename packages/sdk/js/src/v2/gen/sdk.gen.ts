@@ -86,6 +86,8 @@ import type {
   PermissionRespondResponses,
   PermissionRuleset,
   ProjectCurrentResponses,
+  ProjectDeleteErrors,
+  ProjectDeleteResponses,
   ProjectInitGitResponses,
   ProjectListResponses,
   ProjectUpdateErrors,
@@ -1022,6 +1024,38 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<ProjectInitGitResponses, unknown, ThrowOnError>({
       url: "/project/git/init",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete project
+   *
+   * Delete an OpenCode project record and its associated sessions without deleting files on disk.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<ProjectDeleteResponses, ProjectDeleteErrors, ThrowOnError>({
+      url: "/project/{projectID}",
       ...options,
       ...params,
     })

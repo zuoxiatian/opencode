@@ -5,6 +5,8 @@ import { GlobalBus } from "@/bus/global"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { InstancePaths } from "../../src/server/routes/instance/httpapi/instance"
+import { ProjectPaths } from "../../src/server/routes/instance/httpapi/project"
+import { Session } from "@/session/session"
 import * as Log from "@opencode-ai/core/util/log"
 import { resetDatabase } from "../fixture/db"
 import { tmpdir } from "../fixture/fixture"
@@ -16,6 +18,10 @@ const original = Flag.OPENCODE_EXPERIMENTAL_HTTPAPI
 function app() {
   Flag.OPENCODE_EXPERIMENTAL_HTTPAPI = true
   return Server.Default().app
+}
+
+function pathFor(path: string, params: Record<string, string>) {
+  return Object.entries(params).reduce((result, [key, value]) => result.replace(`:${key}`, value), path)
 }
 
 async function waitDisposed(directory: string) {
@@ -138,6 +144,40 @@ describe("instance HttpApi", () => {
     expect(await list.json()).toContainEqual(
       expect.objectContaining({ id: project.id, name: "patched-project", commands: { start: "bun dev" } }),
     )
+  })
+
+  test("serves project delete through Hono bridge", async () => {
+    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+
+    const current = await app().request(ProjectPaths.current, { headers: { "x-opencode-directory": tmp.path } })
+    expect(current.status).toBe(200)
+    const project = (await current.json()) as { id: string }
+
+    const created = await app().request("/session", {
+      method: "POST",
+      headers: { "x-opencode-directory": tmp.path, "content-type": "application/json" },
+      body: JSON.stringify({ title: "deleted with project" }),
+    })
+    expect(created.status).toBe(200)
+    const session = (await created.json()) as Session.Info
+
+    const response = await app().request(pathFor(ProjectPaths.remove, { projectID: project.id }), {
+      method: "DELETE",
+      headers: { "x-opencode-directory": tmp.path },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toBe(true)
+
+    const list = await app().request(ProjectPaths.list, { headers: { "x-opencode-directory": tmp.path } })
+    expect(list.status).toBe(200)
+    expect(await list.json()).not.toContainEqual(expect.objectContaining({ id: project.id }))
+
+    const sessions = await app().request("/session", {
+      headers: { "x-opencode-directory": tmp.path },
+    })
+    expect(sessions.status).toBe(200)
+    expect(await sessions.json()).not.toContainEqual(expect.objectContaining({ id: session.id }))
   })
 
   test("serves instance dispose through Hono bridge", async () => {

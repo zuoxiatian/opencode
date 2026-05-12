@@ -10,6 +10,7 @@ import { lazy } from "@/util/lazy"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { AppRuntime } from "@/effect/app-runtime"
 import { jsonRequest, runRequest } from "./trace"
+import { Effect } from "effect"
 
 export const ProjectRoutes = lazy(() =>
   new Hono()
@@ -117,6 +118,35 @@ export const ProjectRoutes = lazy(() =>
           const body = c.req.valid("json")
           const svc = yield* Project.Service
           return yield* svc.update({ ...body, projectID })
+        }),
+    )
+    .delete(
+      "/:projectID",
+      describeRoute({
+        summary: "Delete project",
+        description: "Delete an OpenCode project record and its associated sessions without deleting files on disk.",
+        operationId: "project.delete",
+        responses: {
+          200: {
+            description: "Successfully deleted project",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ projectID: ProjectID.zod })),
+      async (c) =>
+        jsonRequest("ProjectRoutes.delete", c, function* () {
+          const projectID = c.req.valid("param").projectID
+          const current = Instance.project.id
+          const svc = yield* Project.Service
+          yield* svc.remove(projectID)
+          if (current === projectID) yield* Effect.promise(() => Instance.dispose())
+          return true
         }),
     ),
 )

@@ -20,7 +20,11 @@ export function FolderPanel() {
     const [sessionsByFolder, setSessionsByFolder] = createSignal<Record<string, Session[]>>({})
     const [isLoadingFiles, setIsLoadingFiles] = createSignal(false)
     const [loadingFolders, setLoadingFolders] = createSignal<Set<string>>(new Set())
+    const [deletingProjects, setDeletingProjects] = createSignal<Set<string>>(new Set())
     const [deletingSessions, setDeletingSessions] = createSignal<Set<string>>(new Set())
+    const [renamingSessions, setRenamingSessions] = createSignal<Set<string>>(new Set())
+    const [editingSessionID, setEditingSessionID] = createSignal<string | null>(null)
+    const [editingSessionTitle, setEditingSessionTitle] = createSignal("")
     const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
     const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
     const [showFiles, setShowFiles] = createSignal(false)
@@ -32,14 +36,15 @@ export function FolderPanel() {
     const projectActivityTime = (project: Project) =>
         Math.max(project.time.updated, ...(sessionsByFolder()[project.worktree] ?? []).map((session) => session.time.updated))
 
-    const sortedProjectFolders = () =>
+    const sortedProjects = () =>
         projects()
             .toSorted((a, b) => {
                 const diff = projectActivityTime(b) - projectActivityTime(a)
                 if (diff !== 0) return diff
                 return getFolderName(a.worktree).localeCompare(getFolderName(b.worktree))
             })
-            .map((project) => project.worktree)
+
+    const sortedProjectFolders = () => sortedProjects().map((project) => project.worktree)
 
     const loadProjects = async () => {
         try {
@@ -70,6 +75,11 @@ export function FolderPanel() {
                 removeSession(sessionID)
                 setDeletingSessions((prev) => new Set([...prev].filter((item) => item !== sessionID)))
                 void loadProjects()
+            }
+            if (event.type === "project.deleted") {
+                const project = event.properties as Project
+                removeProject(project)
+                setDeletingProjects((prev) => new Set([...prev].filter((item) => item !== project.id)))
             }
         })
     })
@@ -143,6 +153,23 @@ export function FolderPanel() {
         void loadSessions(folder)
     }
 
+    const clearProjectState = (project: Project) => {
+        setProjects((prev) => prev.filter((item) => item.id !== project.id))
+        setSessionsByFolder((prev) => Object.fromEntries(Object.entries(prev).filter((entry) => entry[0] !== project.worktree)))
+        setCollapsedFolders((prev) => new Set([...prev].filter((folder) => folder !== project.worktree)))
+        setExpandedSessionFolders((prev) => new Set([...prev].filter((folder) => folder !== project.worktree)))
+        if (sdk.directory() !== project.worktree) return
+        sdk.setDirectory("")
+        sdk.setSelectedSession(null)
+        setFiles([])
+        setShowFiles(false)
+    }
+
+    const removeProject = (project: Project) => {
+        clearProjectState(project)
+        sdk.refreshSessionList()
+    }
+
     const createSessionForFolder = async (folder: string, event: MouseEvent) => {
         event.stopPropagation()
         try {
@@ -163,9 +190,37 @@ export function FolderPanel() {
         ))
     }
 
+    const updateSession = (folder: string, next: Session) => {
+        setSessionsByFolder((prev) => ({
+            ...prev,
+            [folder]: (prev[folder] ?? [])
+                .map((session) => session.id === next.id ? next : session)
+                .sort((a, b) => b.time.updated - a.time.updated),
+        }))
+        if (sdk.selectedSession()?.id === next.id) {
+            sdk.setSelectedSession(next)
+        }
+    }
+
     const selectSession = (folder: string, session: Session) => {
         activateFolder(folder)
         sdk.setSelectedSession(session)
+    }
+
+    const deleteProject = async (project: Project, event: MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (deletingProjects().has(project.id)) return
+        setDeletingProjects((prev) => new Set(prev).add(project.id))
+        try {
+            await sdk.client.project.delete({ projectID: project.id, directory: project.worktree }, { throwOnError: true })
+            removeProject(project)
+            void loadProjects()
+        } catch (error) {
+            console.error("删除项目失败:", error)
+        } finally {
+            setDeletingProjects((prev) => new Set([...prev].filter((item) => item !== project.id)))
+        }
     }
 
     const deleteSession = async (folder: string, session: Session, event: MouseEvent) => {
@@ -186,6 +241,52 @@ export function FolderPanel() {
         } finally {
             setDeletingSessions((prev) => new Set([...prev].filter((item) => item !== session.id)))
         }
+    }
+
+    const startRenameSession = (session: Session, event: MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (renamingSessions().has(session.id)) return
+        setEditingSessionID(session.id)
+        setEditingSessionTitle(getSessionTitle(session))
+    }
+
+    const cancelRenameSession = () => {
+        setEditingSessionID(null)
+        setEditingSessionTitle("")
+    }
+
+    const commitRenameSession = async (folder: string, session: Session) => {
+        const title = editingSessionTitle().trim()
+        cancelRenameSession()
+        if (!title || title === session.title) return
+        setRenamingSessions((prev) => new Set(prev).add(session.id))
+        try {
+            const result = await sdk.client.session.update({
+                sessionID: session.id,
+                directory: folder,
+                title,
+            }, { throwOnError: true })
+            updateSession(folder, result.data)
+            sdk.refreshSessionList()
+            void loadProjects()
+        } catch (error) {
+            console.error("修改会话名称失败:", error)
+        } finally {
+            setRenamingSessions((prev) => new Set([...prev].filter((item) => item !== session.id)))
+        }
+    }
+
+    const handleRenameKeyDown = (folder: string, session: Session, event: KeyboardEvent) => {
+        event.stopPropagation()
+        if (event.key === "Escape") {
+            event.preventDefault()
+            cancelRenameSession()
+            return
+        }
+        if (event.key !== "Enter") return
+        event.preventDefault()
+        void commitRenameSession(folder, session)
     }
 
     const handleSessionKeyDown = (folder: string, session: Session, event: KeyboardEvent) => {
@@ -361,25 +462,34 @@ export function FolderPanel() {
                 >
                     <div class="project-section-title">项目</div>
                     <div class="project-list">
-                        <For each={sortedProjectFolders()}>
-                            {(folder) => (
-                                <div class="project-group">
-                                    <div
-                                        class={`project-folder-row ${folder === sdk.directory() ? "active" : ""}`}
-                                        onClick={() => toggleFolder(folder)}
-                                        title={folder}
-                                    >
-                                        <span class="project-folder-icon">{isFolderExpanded(folder) ? "▾" : "▸"}</span>
-                                        <span class="project-folder-mark" aria-hidden="true"></span>
-                                        <span class="project-folder-name">{getFolderName(folder)}</span>
-                                        <button
-                                            class="project-new-session"
-                                            onClick={(event) => createSessionForFolder(folder, event)}
-                                            title="新建会话"
+                        <For each={sortedProjects()}>
+                            {(project) => {
+                                const folder = project.worktree
+                                return (
+                                    <div class="project-group">
+                                        <div
+                                            class={`project-folder-row ${folder === sdk.directory() ? "active" : ""}`}
+                                            onClick={() => toggleFolder(folder)}
+                                            title={folder}
                                         >
-                                            ＋
-                                        </button>
-                                    </div>
+                                            <span class="project-folder-icon">{isFolderExpanded(folder) ? "▾" : "▸"}</span>
+                                            <span class="project-folder-mark" aria-hidden="true"></span>
+                                            <span class="project-folder-name">{getFolderName(folder)}</span>
+                                            <button
+                                                class="project-row-action project-new-session"
+                                                onClick={(event) => createSessionForFolder(folder, event)}
+                                                title="新建会话"
+                                                aria-label="新建会话"
+                                            ></button>
+                                            <button
+                                                type="button"
+                                                class="project-row-action project-delete"
+                                                disabled={deletingProjects().has(project.id)}
+                                                onClick={(event) => deleteProject(project, event)}
+                                                title="删除项目"
+                                                aria-label="删除项目"
+                                            ></button>
+                                        </div>
 
                                     <Show when={isFolderExpanded(folder)}>
                                         <div class="project-conversation-list">
@@ -399,8 +509,29 @@ export function FolderPanel() {
                                                         onKeyDown={(event) => handleSessionKeyDown(folder, session, event)}
                                                         title={session.title}
                                                     >
-                                                        <span class="project-conversation-title">{getSessionTitle(session)}</span>
+                                                        <Show
+                                                            when={editingSessionID() === session.id}
+                                                            fallback={<span class="project-conversation-title">{getSessionTitle(session)}</span>}
+                                                        >
+                                                            <input
+                                                                class="project-conversation-title-input"
+                                                                value={editingSessionTitle()}
+                                                                onClick={(event) => event.stopPropagation()}
+                                                                onInput={(event) => setEditingSessionTitle(event.currentTarget.value)}
+                                                                onBlur={() => void commitRenameSession(folder, session)}
+                                                                onKeyDown={(event) => handleRenameKeyDown(folder, session, event)}
+                                                                ref={(element) => queueMicrotask(() => { element.focus(); element.select(); })}
+                                                            />
+                                                        </Show>
                                                         <span class="project-conversation-time">{formatRelativeTime(session.time.updated)}</span>
+                                                        <button
+                                                            type="button"
+                                                            class="project-conversation-rename"
+                                                            disabled={renamingSessions().has(session.id)}
+                                                            onClick={(event) => startRenameSession(session, event)}
+                                                            title="修改会话名称"
+                                                            aria-label="修改会话名称"
+                                                        ></button>
                                                         <button
                                                             type="button"
                                                             class="project-conversation-delete"
@@ -419,8 +550,9 @@ export function FolderPanel() {
                                             </Show>
                                         </div>
                                     </Show>
-                                </div>
-                            )}
+                                    </div>
+                                )
+                            }}
                         </For>
                     </div>
                 </Show>
