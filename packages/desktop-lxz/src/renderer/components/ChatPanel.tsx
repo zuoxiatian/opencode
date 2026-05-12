@@ -80,8 +80,8 @@ function buildModelOptions(providers: Provider[], defaults: Record<string, strin
             .map((model): ModelOption => ({
                 providerID: provider.id,
                 modelID: model.id,
-                providerName: provider.name,
-                modelName: model.name,
+                providerName: provider.name || provider.id,
+                modelName: model.name || model.id,
                 context: model.limit.context,
                 isDefault: defaults[provider.id] === model.id,
             })),
@@ -94,8 +94,8 @@ function buildModelOptions(providers: Provider[], defaults: Record<string, strin
                 .map((model): ModelOption => ({
                     providerID: provider.id,
                     modelID: model.id,
-                    providerName: provider.name,
-                    modelName: model.name,
+                    providerName: provider.name || provider.id,
+                    modelName: model.name || model.id,
                     context: model.limit.context,
                     isDefault: defaults[provider.id] === model.id,
                 })),
@@ -267,6 +267,7 @@ export function ChatPanel() {
     let messagesContainer: HTMLDivElement | undefined
     let agentDropdownRef: HTMLDivElement | undefined
     let modelDropdownRef: HTMLDivElement | undefined
+    let modelMenuRef: HTMLDivElement | undefined
 
     // 当前选中的会话 ID 派生自 SDK 的 selectedSession
     const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
@@ -313,9 +314,30 @@ export function ChatPanel() {
         if (showAgentMenu() && agentDropdownRef && !agentDropdownRef.contains(e.target as Node)) {
             setShowAgentMenu(false)
         }
-        if (showModelMenu() && modelDropdownRef && !modelDropdownRef.contains(e.target as Node)) {
+        if (
+            showModelMenu()
+            && modelDropdownRef
+            && !modelDropdownRef.contains(e.target as Node)
+            && !modelMenuRef?.contains(e.target as Node)
+        ) {
             setShowModelMenu(false)
         }
+    }
+
+    const modelMenuStyle = () => {
+        const rect = modelDropdownRef?.getBoundingClientRect()
+        if (!rect) return {}
+        const width = Math.min(320, window.innerWidth * 0.7)
+        return {
+            left: `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`,
+            bottom: `${window.innerHeight - rect.top + 8}px`,
+            width: `${width}px`,
+        }
+    }
+
+    const toggleModelMenu = () => {
+        setShowAgentMenu(false)
+        setShowModelMenu((value) => !value)
     }
 
     onMount(() => {
@@ -356,7 +378,7 @@ export function ChatPanel() {
     const modelLabel = createMemo(() => {
         const model = currentModelInfo()
         if (!model) return "默认模型"
-        return model.modelName
+        return model.modelName || model.modelID
     })
 
     const sessionTitle = createMemo(() => formatSessionTitle(sdk.selectedSession()?.title))
@@ -1059,28 +1081,33 @@ export function ChatPanel() {
                             <div class="model-dropdown" ref={modelDropdownRef}>
                                 <button
                                     class="model-toggle"
-                                    onClick={() => setShowModelMenu(!showModelMenu())}
-                                    title={currentModelInfo() ? `${currentModelInfo()?.providerName}/${currentModelInfo()?.modelID}` : "选择模型"}
+                                    onClick={toggleModelMenu}
+                                    title={currentModelInfo() ? `${currentModelInfo()?.providerName || currentModelInfo()?.providerID}/${currentModelInfo()?.modelID}` : "选择模型"}
                                 >
                                     <span class="toggle-icon model-icon">⌄</span>
                                     <span>{modelLabel()}</span>
                                 </button>
                                 <Show when={showModelMenu()}>
-                                    <div class="model-menu">
-                                        <For each={modelOptions()}>
-                                            {(model) => (
-                                                <button
-                                                    class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
-                                                    onClick={() => { setCurrentModel(model); setShowModelMenu(false); }}
-                                                >
-                                                    <span class="model-menu-main">{model.modelName}</span>
-                                                    <span class="model-menu-meta">{model.providerName}{model.isDefault ? " · 默认" : ""}</span>
-                                                    <Show when={currentModel() && sameModel(model, currentModel()!)}>
-                                                        <span class="check-icon">✓</span>
-                                                    </Show>
-                                                </button>
-                                            )}
-                                        </For>
+                                    <div class="model-menu model-menu-floating" ref={modelMenuRef} style={modelMenuStyle()}>
+                                        <Show
+                                            when={modelOptions().length > 0}
+                                            fallback={<div class="model-menu-empty">暂无可用模型</div>}
+                                        >
+                                            <For each={modelOptions()}>
+                                                {(model) => (
+                                                    <button
+                                                        class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
+                                                        onClick={() => { setCurrentModel(model); setShowModelMenu(false); }}
+                                                    >
+                                                        <span class="model-menu-main">{model.modelName || model.modelID}</span>
+                                                        <span class="model-menu-meta">{model.providerName || model.providerID}{model.isDefault ? " · 默认" : ""}</span>
+                                                        <Show when={currentModel() && sameModel(model, currentModel()!)}>
+                                                            <span class="check-icon">✓</span>
+                                                        </Show>
+                                                    </button>
+                                                )}
+                                            </For>
+                                        </Show>
                                     </div>
                                 </Show>
                             </div>

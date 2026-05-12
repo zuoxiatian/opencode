@@ -20,6 +20,7 @@ export function FolderPanel() {
     const [sessionsByFolder, setSessionsByFolder] = createSignal<Record<string, Session[]>>({})
     const [isLoadingFiles, setIsLoadingFiles] = createSignal(false)
     const [loadingFolders, setLoadingFolders] = createSignal<Set<string>>(new Set())
+    const [deletingSessions, setDeletingSessions] = createSignal<Set<string>>(new Set())
     const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
     const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
     const [showFiles, setShowFiles] = createSignal(false)
@@ -60,6 +61,14 @@ export function FolderPanel() {
         unsubscribe = sdk.subscribeToEvents((event) => {
             if (event.type === "session.created" || event.type === "session.updated") {
                 applySessionUpdate(event.properties.sessionID, event.properties.info as Partial<Session>)
+                void loadProjects()
+            }
+            if (event.type === "session.deleted") {
+                const properties = event.properties as { sessionID?: string; info?: Partial<Session> }
+                const sessionID = properties.sessionID ?? properties.info?.id
+                if (!sessionID) return
+                removeSession(sessionID)
+                setDeletingSessions((prev) => new Set([...prev].filter((item) => item !== sessionID)))
                 void loadProjects()
             }
         })
@@ -146,6 +155,43 @@ export function FolderPanel() {
         } catch (error) {
             console.error("创建会话失败:", error)
         }
+    }
+
+    const removeSession = (sessionID: string) => {
+        setSessionsByFolder((prev) => Object.fromEntries(
+            Object.entries(prev).map((entry) => [entry[0], entry[1].filter((session) => session.id !== sessionID)]),
+        ))
+    }
+
+    const selectSession = (folder: string, session: Session) => {
+        activateFolder(folder)
+        sdk.setSelectedSession(session)
+    }
+
+    const deleteSession = async (folder: string, session: Session, event: MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (deletingSessions().has(session.id)) return
+        setDeletingSessions((prev) => new Set(prev).add(session.id))
+        try {
+            await sdk.client.session.delete({ sessionID: session.id, directory: folder }, { throwOnError: true })
+            removeSession(session.id)
+            if (sdk.selectedSession()?.id === session.id) {
+                sdk.setSelectedSession(null)
+            }
+            sdk.refreshSessionList()
+            void loadProjects()
+        } catch (error) {
+            console.error("鍒犻櫎浼氳瘽澶辫触:", error)
+        } finally {
+            setDeletingSessions((prev) => new Set([...prev].filter((item) => item !== session.id)))
+        }
+    }
+
+    const handleSessionKeyDown = (folder: string, session: Session, event: KeyboardEvent) => {
+        if (event.key !== "Enter" && event.key !== " ") return
+        event.preventDefault()
+        selectSession(folder, session)
     }
 
     const getFolderName = (folder: string) => folder.split(/[/\\]/).pop() || folder
@@ -337,14 +383,25 @@ export function FolderPanel() {
                                             </Show>
                                             <For each={visibleSessions(folder)}>
                                                 {(session) => (
-                                                    <button
+                                                    <div
+                                                        role="button"
+                                                        tabIndex={0}
                                                         class={`project-conversation-item ${sdk.selectedSession()?.id === session.id ? "active" : ""}`}
-                                                        onClick={() => { activateFolder(folder); sdk.setSelectedSession(session) }}
+                                                        onClick={() => selectSession(folder, session)}
+                                                        onKeyDown={(event) => handleSessionKeyDown(folder, session, event)}
                                                         title={session.title}
                                                     >
                                                         <span class="project-conversation-title">{getSessionTitle(session)}</span>
                                                         <span class="project-conversation-time">{formatRelativeTime(session.time.updated)}</span>
-                                                    </button>
+                                                        <button
+                                                            type="button"
+                                                            class="project-conversation-delete"
+                                                            disabled={deletingSessions().has(session.id)}
+                                                            onClick={(event) => deleteSession(folder, session, event)}
+                                                            title="删除会话"
+                                                            aria-label="删除会话"
+                                                        ></button>
+                                                    </div>
                                                 )}
                                             </For>
                                             <Show when={(sessionsByFolder()[folder]?.length ?? 0) > 5}>
