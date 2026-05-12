@@ -15,6 +15,15 @@ import type {
 import { Markdown } from "@opencode-ai/ui/markdown"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
 
+interface QueuedPrompt {
+    id: string
+    sessionID: string
+    text: string
+    parts: TextPartInput[]
+    agent: string
+    model: ModelSelection
+}
+
 interface AgentOption {
     name: string
     description?: string
@@ -214,6 +223,31 @@ function buildIssueContext(issue: DiscussIssue): string {
     return lines.join('\n')
 }
 
+const identifierState = {
+    lastTimestamp: 0,
+    counter: 0,
+}
+
+function createAscendingID(prefix: "msg" | "prt") {
+    const now = Date.now()
+    if (now !== identifierState.lastTimestamp) {
+        identifierState.lastTimestamp = now
+        identifierState.counter = 0
+    }
+    identifierState.counter += 1
+
+    const value = BigInt(now) * BigInt(0x1000) + BigInt(identifierState.counter)
+    const bytes = new Uint8Array(6)
+    for (let i = 0; i < 6; i += 1) {
+        bytes[i] = Number((value >> BigInt(40 - 8 * i)) & BigInt(0xff))
+    }
+
+    const random = new Uint8Array(14)
+    crypto.getRandomValues(random)
+    const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    return `${prefix}_${Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("")}${Array.from(random).map((byte) => chars[byte % chars.length]).join("")}`
+}
+
 export function ChatPanel() {
     const sdk = useSDK()
     const [inputText, setInputText] = createSignal("")
@@ -225,6 +259,9 @@ export function ChatPanel() {
     const [showModelMenu, setShowModelMenu] = createSignal(false)
     const [requestResponding, setRequestResponding] = createSignal<string | null>(null)
     const [sendError, setSendError] = createSignal<string | null>(null)
+    const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
+    const [sendingQueuedPrompt, setSendingQueuedPrompt] = createSignal<string | null>(null)
+    const [failedQueuedPrompt, setFailedQueuedPrompt] = createSignal<string | null>(null)
     const loadedSessions = new Set<string>()
     const loadingSessions = new Set<string>()
     let messagesContainer: HTMLDivElement | undefined
@@ -269,6 +306,7 @@ export function ChatPanel() {
     })
 
     const hasPendingRequest = createMemo(() => Boolean(activePermissionRequest() || activeQuestionRequest()))
+    const canSend = createMemo(() => Boolean(inputText().trim() && !hasPendingRequest() && sdk.directory()))
 
     // 点击外部关闭菜单
     const handleClickOutside = (e: MouseEvent) => {
@@ -334,10 +372,11 @@ export function ChatPanel() {
 
     const promptParts = (text: string): TextPartInput[] => {
         const selectedFiles = sdk.selectedFiles().filter((file) => !file.isDirectory)
-        if (selectedFiles.length === 0) return [{ type: "text", text }]
+        if (selectedFiles.length === 0) return [{ id: createAscendingID("prt"), type: "text", text }]
         return [
-            { type: "text", text },
+            { id: createAscendingID("prt"), type: "text", text },
             {
+                id: createAscendingID("prt"),
                 type: "text",
                 text: [
                     "Selected files for this message. File contents are not attached; use these paths only as selection context:",
@@ -529,6 +568,85 @@ export function ChatPanel() {
         sdk.refreshSessionList()
     }
 
+    const addOptimisticPrompt = (prompt: QueuedPrompt) => {
+        const message: Message = {
+            id: prompt.id,
+            sessionID: prompt.sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: prompt.agent,
+            model: prompt.model,
+        }
+        const parts = prompt.parts.map((part): Part => ({
+            ...part,
+            id: part.id ?? createAscendingID("prt"),
+            sessionID: prompt.sessionID,
+            messageID: prompt.id,
+        } as Part))
+
+        batch(() => {
+            const current = sdk.store.message[prompt.sessionID] ?? []
+            if (!current.some((item) => item.id === prompt.id)) {
+                sdk.setStore("message", prompt.sessionID, reconcile([...current, message].sort((a, b) => a.id.localeCompare(b.id)), { key: "id" }))
+            }
+            sdk.setStore("part", prompt.id, reconcile(parts, { key: "id" }))
+        })
+    }
+
+    const removeOptimisticPrompt = (prompt: QueuedPrompt) => {
+        batch(() => {
+            sdk.setStore("message", prompt.sessionID, (items) => items?.filter((message) => message.id !== prompt.id) ?? [])
+            sdk.setStore("part", prompt.id, [])
+        })
+    }
+
+    const submitPrompt = async (prompt: QueuedPrompt) => {
+        const { serverInfo } = sdk
+        const response = await fetch(`${serverInfo.url}/session/${prompt.sessionID}/prompt_async`, {
+            method: "POST",
+            headers: getHeaders(),
+            body: JSON.stringify({
+                messageID: prompt.id,
+                agent: prompt.agent,
+                model: prompt.model,
+                parts: prompt.parts,
+            }),
+        })
+
+        if (!response.ok) {
+            const errorData = await response.text()
+            console.error("发送异步消息错误:", errorData)
+            throw new Error(`发送失败: ${response.status}`)
+        }
+    }
+
+    const sendQueuedPrompt = async (prompt: QueuedPrompt) => {
+        if (sendingQueuedPrompt()) return
+        setSendingQueuedPrompt(prompt.id)
+        setSendError(null)
+
+        try {
+            await submitPrompt(prompt)
+            setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id))
+            setFailedQueuedPrompt((id) => id === prompt.id ? null : id)
+        } catch (error) {
+            console.error("发送排队消息失败:", error)
+            removeOptimisticPrompt(prompt)
+            setFailedQueuedPrompt(prompt.id)
+            setSendError(`发送排队消息失败: ${error instanceof Error ? error.message : "未知错误"}`)
+        } finally {
+            setSendingQueuedPrompt((id) => id === prompt.id ? null : id)
+        }
+    }
+
+    createEffect(() => {
+        const sid = currentSessionId()
+        if (!sid || isBusy() || hasPendingRequest() || sendingQueuedPrompt()) return
+        const prompt = queuedPrompts().find((item) => item.sessionID === sid)
+        if (!prompt || failedQueuedPrompt() === prompt.id) return
+        void sendQueuedPrompt(prompt)
+    })
+
     const handlePermissionDecision = async (reply: "once" | "always" | "reject") => {
         const request = activePermissionRequest()
         if (!request || requestResponding()) return
@@ -574,7 +692,7 @@ export function ChatPanel() {
 
     const handleSend = async () => {
         const text = inputText().trim()
-        if (!text || isLoading() || hasPendingRequest()) return
+        if (!text || hasPendingRequest()) return
 
         if (!sdk.directory()) {
             setSendError("请先在左侧选择一个文件夹。")
@@ -584,10 +702,11 @@ export function ChatPanel() {
         setInputText("")
         setSendError(null)
 
+        let optimisticPrompt: QueuedPrompt | undefined
         try {
             const { serverInfo } = sdk
-            const headers = getHeaders()
-
+            const model = currentModel()
+            if (!model) throw new Error("请选择模型后再发送")
             let sid = currentSessionId()
             if (!sid) {
                 sid = await createNewSessionForFolder(createInitialSessionTitle(text))
@@ -597,24 +716,29 @@ export function ChatPanel() {
             await ensureInitialSessionTitle(sid, text)
             console.log("发送异步消息到:", `${serverInfo.url}/session/${sid}/prompt_async`)
 
-            const messageResponse = await fetch(`${serverInfo.url}/session/${sid}/prompt_async`, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({
-                    agent: currentAgent(),
-                    ...(currentModel() ? { model: currentModel() } : {}),
-                    parts: promptParts(text),
-                }),
-            })
-
-            if (!messageResponse.ok) {
-                const errorData = await messageResponse.text()
-                console.error("发送异步消息错误:", errorData)
-                throw new Error(`发送失败: ${messageResponse.status}`)
+            const prompt: QueuedPrompt = {
+                id: createAscendingID("msg"),
+                sessionID: sid,
+                text,
+                parts: promptParts(text),
+                agent: currentAgent(),
+                model,
             }
+
+            if (isBusy()) {
+                addOptimisticPrompt(prompt)
+                setQueuedPrompts((items) => [...items, prompt])
+                setFailedQueuedPrompt(null)
+                return
+            }
+
+            addOptimisticPrompt(prompt)
+            optimisticPrompt = prompt
+            await submitPrompt(prompt)
 
             console.log("消息已提交，等待 SSE 事件...")
         } catch (error) {
+            if (optimisticPrompt) removeOptimisticPrompt(optimisticPrompt)
             console.error("发送消息失败:", error)
             const errorMessage = error instanceof Error ? error.message : "未知错误"
             setSendError(`发送失败: ${errorMessage}`)
@@ -895,7 +1019,7 @@ export function ChatPanel() {
                         value={inputText()}
                         onInput={(e) => setInputText(e.currentTarget.value)}
                         onKeyDown={handleKeyDown}
-                        disabled={isLoading() || hasPendingRequest() || !sdk.directory()}
+                        disabled={hasPendingRequest() || !sdk.directory()}
                         rows={1}
                     />
                     <div class="chat-toolbar">
@@ -962,12 +1086,12 @@ export function ChatPanel() {
                             </div>
                         </div>
                         <Show
-                            when={isLoading()}
+                            when={isLoading() && !canSend()}
                             fallback={
                                 <button
                                     class="send-btn"
                                     onClick={handleSend}
-                                    disabled={!inputText().trim() || hasPendingRequest() || !sdk.directory()}
+                                    disabled={!canSend()}
                                     title="发送消息"
                                     aria-label="发送消息"
                                 >
