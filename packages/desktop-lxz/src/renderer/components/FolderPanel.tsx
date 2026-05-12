@@ -309,8 +309,8 @@ export function FolderPanel() {
     }
 
     const handleFileClick = (file: FileItem, event: MouseEvent) => {
-        sdk.setSelectedFile(file)
         if (event.shiftKey) {
+            sdk.setSelectedFile(file)
             const range = selectFileRange(file)
             sdk.setSelectedFiles((selected) => {
                 const paths = new Set(selected.map((item) => item.path))
@@ -320,6 +320,7 @@ export function FolderPanel() {
             return
         }
         if (event.ctrlKey || event.metaKey) {
+            sdk.setSelectedFile(file)
             sdk.setSelectedFiles((selected) =>
                 selected.some((item) => item.path === file.path)
                     ? selected.filter((item) => item.path !== file.path)
@@ -328,6 +329,13 @@ export function FolderPanel() {
             setLastSelectedFilePath(file.path)
             return
         }
+        if (sdk.selectedFiles().length === 1 && sdk.selectedFiles()[0].path === file.path) {
+            sdk.setSelectedFile(null)
+            sdk.setSelectedFiles([])
+            setLastSelectedFilePath(null)
+            return
+        }
+        sdk.setSelectedFile(file)
         sdk.setSelectedFiles([file])
         setLastSelectedFilePath(file.path)
     }
