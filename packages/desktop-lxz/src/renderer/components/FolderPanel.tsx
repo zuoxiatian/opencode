@@ -1,6 +1,27 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { batch, createEffect, createSignal, For, Index, onCleanup, onMount, Show, untrack } from "solid-js"
+import { Dynamic, Portal } from "solid-js/web"
 import type { Project, Session } from "@opencode-ai/sdk/v2/client"
 import { useSDK } from "../context/sdk"
+import type { LucideIcon } from "lucide-solid"
+import ChartColumn from "lucide-solid/icons/chart-column"
+import Check from "lucide-solid/icons/check"
+import ChevronDown from "lucide-solid/icons/chevron-down"
+import ChevronRight from "lucide-solid/icons/chevron-right"
+import CircleMinus from "lucide-solid/icons/circle-minus"
+import FileCode from "lucide-solid/icons/file-code"
+import FileIcon from "lucide-solid/icons/file"
+import FileAudio from "lucide-solid/icons/file-audio"
+import FileSpreadsheet from "lucide-solid/icons/file-spreadsheet"
+import FileText from "lucide-solid/icons/file-text"
+import FileType from "lucide-solid/icons/file-type"
+import FileVideo from "lucide-solid/icons/file-video"
+import Folder from "lucide-solid/icons/folder"
+import FolderOpen from "lucide-solid/icons/folder-open"
+import Image from "lucide-solid/icons/image"
+import PencilLine from "lucide-solid/icons/pencil-line"
+import Presentation from "lucide-solid/icons/presentation"
+import SquarePen from "lucide-solid/icons/square-pen"
+import Trash2 from "lucide-solid/icons/trash-2"
 
 interface FileItem {
     name: string
@@ -8,9 +29,25 @@ interface FileItem {
     isDirectory: boolean
 }
 
+type SidebarMenu =
+    | { kind: "project"; x: number; y: number; project: Project }
+    | { kind: "session"; x: number; y: number; folder: string; session: Session }
+
+type SidebarDialog =
+    | { kind: "rename-session"; folder: string; session: Session }
+    | { kind: "delete-project"; project: Project }
+    | { kind: "delete-session"; folder: string; session: Session }
+
+const LAST_PROJECT_STORAGE_KEY = "desktop-lxz.lastProjectFolder"
+const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
+
 function isDefaultSessionTitle(title?: string) {
     const value = title?.trim()
     return value === "新对话" || /^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value ?? "")
+}
+
+function SidebarChevron(props: { expanded: boolean; class?: string }) {
+    return <Dynamic component={props.expanded ? ChevronDown : ChevronRight} class={props.class ?? "sidebar-chevron-icon"} size={14} strokeWidth={1.8} />
 }
 
 export function FolderPanel() {
@@ -23,15 +60,128 @@ export function FolderPanel() {
     const [deletingProjects, setDeletingProjects] = createSignal<Set<string>>(new Set())
     const [deletingSessions, setDeletingSessions] = createSignal<Set<string>>(new Set())
     const [renamingSessions, setRenamingSessions] = createSignal<Set<string>>(new Set())
-    const [editingSessionID, setEditingSessionID] = createSignal<string | null>(null)
-    const [editingSessionTitle, setEditingSessionTitle] = createSignal("")
+    const [renameSessionTitle, setRenameSessionTitle] = createSignal("")
     const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
     const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
-    const [showFiles, setShowFiles] = createSignal(false)
+    const [showFiles, setShowFiles] = createSignal(true)
     const [lastSelectedFilePath, setLastSelectedFilePath] = createSignal<string | null>(null)
+    const [unreadSessions, setUnreadSessions] = createSignal<Set<string>>(new Set())
+    const [sidebarMenu, setSidebarMenu] = createSignal<SidebarMenu | null>(null)
+    const [sidebarDialog, setSidebarDialog] = createSignal<SidebarDialog | null>(null)
+    const sessionLoadFolders = new Set<string>()
     let unsubscribe: (() => void) | undefined
 
+    const menuPosition = (event: MouseEvent, height: number) => ({
+        x: Math.min(event.clientX, window.innerWidth - 176),
+        y: Math.min(event.clientY, window.innerHeight - height),
+    })
+
+    const closeSidebarMenu = () => setSidebarMenu(null)
+
+    const closeSidebarDialog = () => {
+        setSidebarDialog(null)
+        setRenameSessionTitle("")
+    }
+
+    const rememberProjectFolder = (folder: string) => {
+        localStorage.setItem(LAST_PROJECT_STORAGE_KEY, folder)
+    }
+
+    const forgetProjectFolder = (folder: string) => {
+        if (localStorage.getItem(LAST_PROJECT_STORAGE_KEY) === folder) localStorage.removeItem(LAST_PROJECT_STORAGE_KEY)
+    }
+
+    const openProjectMenu = (project: Project, event: MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setSidebarMenu({ kind: "project", project, ...menuPosition(event, 86) })
+    }
+
+    const openSessionMenu = (folder: string, session: Session, event: MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setSidebarMenu({ kind: "session", folder, session, ...menuPosition(event, 86) })
+    }
+
+    const openRenameSessionDialog = (folder: string, session: Session) => {
+        if (renamingSessions().has(session.id)) return
+        closeSidebarMenu()
+        setRenameSessionTitle(getSessionTitle(session))
+        setSidebarDialog({ kind: "rename-session", folder, session })
+    }
+
+    const openDeleteProjectDialog = (project: Project) => {
+        if (deletingProjects().has(project.id)) return
+        closeSidebarMenu()
+        setSidebarDialog({ kind: "delete-project", project })
+    }
+
+    const openDeleteSessionDialog = (folder: string, session: Session) => {
+        if (deletingSessions().has(session.id)) return
+        closeSidebarMenu()
+        setSidebarDialog({ kind: "delete-session", folder, session })
+    }
+
+    const openProjectInFileManagerLabel = () => {
+        const platform = navigator.platform.toLowerCase()
+        if (platform.includes("mac")) return "在访达中打开"
+        if (platform.includes("win")) return "在资源管理器中打开"
+        return "在文件管理器中打开"
+    }
+
+    const markSessionUnread = (sessionID?: string) => {
+        if (!sessionID) return
+        if (sdk.selectedSession()?.id === sessionID) return
+        setUnreadSessions((prev) => new Set(prev).add(sessionID))
+    }
+
+    const acknowledgeSession = (sessionID: string) => {
+        setUnreadSessions((prev) => {
+            if (!prev.has(sessionID)) return prev
+            return new Set([...prev].filter((item) => item !== sessionID))
+        })
+    }
+
     const projectFolders = () => projects().map((project) => project.worktree)
+
+    const isSameProject = (a: Project, b: Project) =>
+        a.id === b.id
+        && a.worktree === b.worktree
+        && a.time.created === b.time.created
+        && a.time.updated === b.time.updated
+
+    const mergeProjectList = (current: Project[], next: Project[]) =>
+        [
+            ...next,
+            ...current.filter((project) => !next.some((item) => item.id === project.id || item.worktree === project.worktree)),
+        ].map((project) => {
+            const existing = current.find((item) => item.id === project.id || item.worktree === project.worktree)
+            return existing && isSameProject(existing, project) ? existing : project
+        })
+
+    const syncProjectList = (current: Project[], next: Project[]) =>
+        next.map((project) => {
+            const existing = current.find((item) => item.id === project.id || item.worktree === project.worktree)
+            return existing && isSameProject(existing, project) ? existing : project
+        })
+
+    const isSameSession = (a: Session, b: Session) =>
+        a.id === b.id
+        && a.slug === b.slug
+        && a.projectID === b.projectID
+        && a.directory === b.directory
+        && a.title === b.title
+        && a.version === b.version
+        && a.time.created === b.time.created
+        && a.time.updated === b.time.updated
+
+    const sortSessions = (sessions: Session[]) => sessions.toSorted((a, b) => b.time.updated - a.time.updated)
+
+    const mergeSessionList = (current: Session[] | undefined, next: Session[]) =>
+        sortSessions(next.map((session) => {
+            const existing = current?.find((item) => item.id === session.id)
+            return existing && isSameSession(existing, session) ? existing : session
+        }))
 
     const projectActivityTime = (project: Project) =>
         Math.max(project.time.updated, ...(sessionsByFolder()[project.worktree] ?? []).map((session) => session.time.updated))
@@ -46,6 +196,11 @@ export function FolderPanel() {
 
     const sortedProjectFolders = () => sortedProjects().map((project) => project.worktree)
 
+    const applyProjectUpdate = (project: Project) => {
+        setProjects((prev) => mergeProjectList(prev, [project]))
+        void loadSessions(project.worktree)
+    }
+
     const loadProjects = async () => {
         try {
             const result = await sdk.client.project.list(undefined, { throwOnError: true })
@@ -53,20 +208,45 @@ export function FolderPanel() {
                 .filter((project) => Boolean(project.worktree))
                 .sort((a, b) => b.time.updated - a.time.updated)
 
-            setProjects(listed)
+            setProjects((prev) => syncProjectList(prev, listed))
             setCollapsedFolders((prev) => new Set(listed.map((project) => project.worktree).filter((folder) => prev.has(folder))))
+            if (!sdk.directory() && listed.length > 0) {
+                activateFolder(
+                    (listed.find((project) => project.worktree === localStorage.getItem(LAST_PROJECT_STORAGE_KEY)) ?? listed[0]).worktree,
+                    { resetFiles: true, reloadSessions: true },
+                )
+            }
         } catch (error) {
             console.error("加载项目列表失败:", error)
-            setProjects([])
         }
     }
 
-    onMount(() => {
+    const handleProjectAdded = (event: Event) => {
+        const project = (event as CustomEvent<Project>).detail
+        if (!project?.worktree) return
+        applyProjectUpdate(project)
+    }
+
+    createEffect(() => {
+        sdk.sessionListVersion()
         void loadProjects()
+    })
+
+    onMount(() => {
+        window.addEventListener(PROJECT_ADDED_EVENT, handleProjectAdded)
+        document.addEventListener("click", closeSidebarMenu)
+        document.addEventListener("scroll", closeSidebarMenu, true)
         unsubscribe = sdk.subscribeToEvents((event) => {
             if (event.type === "session.created" || event.type === "session.updated") {
                 applySessionUpdate(event.properties.sessionID, event.properties.info as Partial<Session>)
-                void loadProjects()
+                if (event.type === "session.created") void loadProjects()
+            }
+            if (event.type === "session.status") {
+                const properties = event.properties as { sessionID?: string; status?: { type?: string } }
+                if (properties.status?.type === "idle") markSessionUnread(properties.sessionID)
+            }
+            if (event.type === "session.idle") {
+                markSessionUnread((event.properties as { sessionID?: string }).sessionID)
             }
             if (event.type === "session.deleted") {
                 const properties = event.properties as { sessionID?: string; info?: Partial<Session> }
@@ -81,10 +261,18 @@ export function FolderPanel() {
                 removeProject(project)
                 setDeletingProjects((prev) => new Set([...prev].filter((item) => item !== project.id)))
             }
+            if (event.type === "project.updated") {
+                const project = event.properties as Project
+                if (deletingProjects().has(project.id)) return
+                applyProjectUpdate(project)
+            }
         })
     })
 
     onCleanup(() => {
+        window.removeEventListener(PROJECT_ADDED_EVENT, handleProjectAdded)
+        document.removeEventListener("click", closeSidebarMenu)
+        document.removeEventListener("scroll", closeSidebarMenu, true)
         unsubscribe?.()
     })
 
@@ -99,7 +287,8 @@ export function FolderPanel() {
 
     createEffect(() => {
         sdk.sessionListVersion()
-        void Promise.all(projectFolders().map(loadSessions))
+        const folders = projectFolders()
+        untrack(() => void Promise.all(folders.map(loadSessions)))
     })
 
     const loadFiles = async (folder: string) => {
@@ -117,19 +306,23 @@ export function FolderPanel() {
     }
 
     const loadSessions = async (folder: string) => {
-        setLoadingFolders((prev) => new Set(prev).add(folder))
+        if (sessionLoadFolders.has(folder)) return
+        sessionLoadFolders.add(folder)
+        const initialLoad = untrack(() => sessionsByFolder()[folder] === undefined)
+        if (initialLoad) setLoadingFolders((prev) => new Set(prev).add(folder))
         try {
             const result = await sdk.client.session.list({
                 directory: folder,
                 roots: true,
                 limit: 50,
             }, { throwOnError: true })
-            setSessionsByFolder((prev) => ({ ...prev, [folder]: result.data }))
+            setSessionsByFolder((prev) => ({ ...prev, [folder]: mergeSessionList(prev[folder], result.data) }))
         } catch (error) {
             console.error("加载对话记录失败:", error)
-            setSessionsByFolder((prev) => ({ ...prev, [folder]: [] }))
+            if (initialLoad) setSessionsByFolder((prev) => ({ ...prev, [folder]: [] }))
         } finally {
-            setLoadingFolders((prev) => new Set([...prev].filter((item) => item !== folder)))
+            sessionLoadFolders.delete(folder)
+            if (initialLoad) setLoadingFolders((prev) => new Set([...prev].filter((item) => item !== folder)))
         }
     }
 
@@ -137,27 +330,37 @@ export function FolderPanel() {
         const folder = await window.electronAPI.pickDirectory()
         if (!folder) return
         setCollapsedFolders((prev) => new Set(prev).add(folder))
-        activateFolder(folder)
-        await sdk.client.project.list(undefined, {
-            headers: {
-                "x-opencode-directory": encodeURIComponent(folder),
-            },
-            throwOnError: true,
-        })
+        activateFolder(folder, { resetFiles: true, reloadSessions: true })
+        await sdk.client.instance.dispose({ directory: folder }, { throwOnError: true })
+            .catch((error) => {
+                console.error("释放项目实例失败:", error)
+            })
+        const project = await sdk.client.project.current({ directory: folder }, { throwOnError: true })
+            .then((result) => result.data)
+            .catch((error) => {
+                console.error("添加项目文件夹失败:", error)
+                return undefined
+            })
+        if (project) applyProjectUpdate(project)
         void loadProjects()
     }
 
-    const activateFolder = (folder: string) => {
-        sdk.setDirectory(folder)
-        setShowFiles(false)
-        void loadSessions(folder)
+    const activateFolder = (folder: string, options: { reloadSessions?: boolean; resetFiles?: boolean } = {}) => {
+        const changed = sdk.directory() !== folder
+        rememberProjectFolder(folder)
+        if (changed) sdk.setDirectory(folder)
+        if (changed || options.resetFiles) setShowFiles(true)
+        if (options.reloadSessions ?? changed) void loadSessions(folder)
     }
 
     const clearProjectState = (project: Project) => {
-        setProjects((prev) => prev.filter((item) => item.id !== project.id))
+        const projectSessionIDs = new Set((sessionsByFolder()[project.worktree] ?? []).map((session) => session.id))
+        setProjects((prev) => prev.filter((item) => item.id !== project.id && item.worktree !== project.worktree))
         setSessionsByFolder((prev) => Object.fromEntries(Object.entries(prev).filter((entry) => entry[0] !== project.worktree)))
         setCollapsedFolders((prev) => new Set([...prev].filter((folder) => folder !== project.worktree)))
         setExpandedSessionFolders((prev) => new Set([...prev].filter((folder) => folder !== project.worktree)))
+        setUnreadSessions((prev) => new Set([...prev].filter((sessionID) => !projectSessionIDs.has(sessionID))))
+        forgetProjectFolder(project.worktree)
         if (sdk.directory() !== project.worktree) return
         sdk.setDirectory("")
         sdk.setSelectedSession(null)
@@ -167,24 +370,22 @@ export function FolderPanel() {
 
     const removeProject = (project: Project) => {
         clearProjectState(project)
-        sdk.refreshSessionList()
     }
 
-    const createSessionForFolder = async (folder: string, event: MouseEvent) => {
+    const startSessionDraftForFolder = (folder: string, event: MouseEvent) => {
         event.stopPropagation()
-        try {
-            const result = await sdk.client.session.create({ directory: folder }, { throwOnError: true })
-            activateFolder(folder)
-            sdk.setSelectedSession(result.data)
-            setSessionsByFolder((prev) => ({ ...prev, [folder]: [result.data, ...(prev[folder] ?? [])] }))
-            sdk.refreshSessionList()
-            void loadProjects()
-        } catch (error) {
-            console.error("创建会话失败:", error)
-        }
+        startSessionDraft(folder)
+    }
+
+    const startSessionDraft = (folder: string) => {
+        batch(() => {
+            activateFolder(folder, { resetFiles: true, reloadSessions: false })
+            sdk.setSelectedSession(null)
+        })
     }
 
     const removeSession = (sessionID: string) => {
+        acknowledgeSession(sessionID)
         setSessionsByFolder((prev) => Object.fromEntries(
             Object.entries(prev).map((entry) => [entry[0], entry[1].filter((session) => session.id !== sessionID)]),
         ))
@@ -193,9 +394,7 @@ export function FolderPanel() {
     const updateSession = (folder: string, next: Session) => {
         setSessionsByFolder((prev) => ({
             ...prev,
-            [folder]: (prev[folder] ?? [])
-                .map((session) => session.id === next.id ? next : session)
-                .sort((a, b) => b.time.updated - a.time.updated),
+            [folder]: sortSessions((prev[folder] ?? []).map((session) => session.id === next.id ? next : session)),
         }))
         if (sdk.selectedSession()?.id === next.id) {
             sdk.setSelectedSession(next)
@@ -203,37 +402,58 @@ export function FolderPanel() {
     }
 
     const selectSession = (folder: string, session: Session) => {
-        activateFolder(folder)
-        sdk.setSelectedSession(session)
+        closeSidebarMenu()
+        acknowledgeSession(session.id)
+        if (sdk.directory() === folder && sdk.selectedSession()?.id === session.id) return
+        batch(() => {
+            activateFolder(folder, { reloadSessions: false })
+            sdk.setSelectedSession(session)
+        })
     }
 
-    const deleteProject = async (project: Project, event: MouseEvent) => {
-        event.preventDefault()
-        event.stopPropagation()
+    const deleteProject = async (project: Project) => {
         if (deletingProjects().has(project.id)) return
+        const fallback = projects().find((item) => item.id !== project.id && item.worktree !== project.worktree)
         setDeletingProjects((prev) => new Set(prev).add(project.id))
         try {
-            await sdk.client.project.delete({ projectID: project.id, directory: project.worktree }, { throwOnError: true })
+            await sdk.client.instance.dispose({ directory: project.worktree }, { throwOnError: true })
+                .catch((error) => {
+                    console.error("释放项目实例失败:", error)
+                })
+            if (sdk.directory() === project.worktree) {
+                if (fallback) {
+                    activateFolder(fallback.worktree, { resetFiles: true, reloadSessions: true })
+                } else {
+                    forgetProjectFolder(project.worktree)
+                    sdk.setDirectory("")
+                    sdk.setSelectedSession(null)
+                    setFiles([])
+                    setShowFiles(false)
+                }
+            }
+            await sdk.client.project.delete({ projectID: project.id, directory: fallback?.worktree }, { throwOnError: true })
             removeProject(project)
-            void loadProjects()
         } catch (error) {
-            console.error("删除项目失败:", error)
+            console.error("移除项目失败:", error)
         } finally {
             setDeletingProjects((prev) => new Set([...prev].filter((item) => item !== project.id)))
         }
     }
 
-    const deleteSession = async (folder: string, session: Session, event: MouseEvent) => {
-        event.preventDefault()
-        event.stopPropagation()
+    const openProjectInFileManager = async (project: Project) => {
+        closeSidebarMenu()
+        const result = await window.electronAPI.openPath(project.worktree)
+        if (result.success) return
+        console.error("打开项目目录失败:", result.error)
+    }
+
+    const deleteSession = async (folder: string, session: Session) => {
         if (deletingSessions().has(session.id)) return
         setDeletingSessions((prev) => new Set(prev).add(session.id))
         try {
             await sdk.client.session.delete({ sessionID: session.id, directory: folder }, { throwOnError: true })
             removeSession(session.id)
-            if (sdk.selectedSession()?.id === session.id) {
-                sdk.setSelectedSession(null)
-            }
+            startSessionDraft(folder)
             sdk.refreshSessionList()
             void loadProjects()
         } catch (error) {
@@ -243,22 +463,9 @@ export function FolderPanel() {
         }
     }
 
-    const startRenameSession = (session: Session, event: MouseEvent) => {
-        event.preventDefault()
-        event.stopPropagation()
-        if (renamingSessions().has(session.id)) return
-        setEditingSessionID(session.id)
-        setEditingSessionTitle(getSessionTitle(session))
-    }
-
-    const cancelRenameSession = () => {
-        setEditingSessionID(null)
-        setEditingSessionTitle("")
-    }
-
-    const commitRenameSession = async (folder: string, session: Session) => {
-        const title = editingSessionTitle().trim()
-        cancelRenameSession()
+    const renameSession = async (folder: string, session: Session) => {
+        const title = renameSessionTitle().trim()
+        closeSidebarDialog()
         if (!title || title === session.title) return
         setRenamingSessions((prev) => new Set(prev).add(session.id))
         try {
@@ -277,16 +484,31 @@ export function FolderPanel() {
         }
     }
 
-    const handleRenameKeyDown = (folder: string, session: Session, event: KeyboardEvent) => {
+    const confirmSidebarDialog = async () => {
+        const dialog = sidebarDialog()
+        if (!dialog) return
+        if (dialog.kind === "rename-session") {
+            await renameSession(dialog.folder, dialog.session)
+            return
+        }
+        closeSidebarDialog()
+        if (dialog.kind === "delete-project") {
+            await deleteProject(dialog.project)
+            return
+        }
+        await deleteSession(dialog.folder, dialog.session)
+    }
+
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
         event.stopPropagation()
         if (event.key === "Escape") {
             event.preventDefault()
-            cancelRenameSession()
+            closeSidebarDialog()
             return
         }
         if (event.key !== "Enter") return
         event.preventDefault()
-        void commitRenameSession(folder, session)
+        void confirmSidebarDialog()
     }
 
     const handleSessionKeyDown = (folder: string, session: Session, event: KeyboardEvent) => {
@@ -311,6 +533,9 @@ export function FolderPanel() {
         return "新对话"
     }
 
+    const isSessionBusy = (sessionID: string) => sdk.store.session_status[sessionID]?.type === "busy"
+    const isSessionUnread = (sessionID: string) => sdk.selectedSession()?.id !== sessionID && unreadSessions().has(sessionID)
+
     const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
         ...session,
         ...info,
@@ -326,10 +551,6 @@ export function FolderPanel() {
     }
 
     const applySessionUpdate = (sessionID: string, info: Partial<Session>) => {
-        const selected = sdk.selectedSession()
-        if (selected?.id === sessionID) {
-            sdk.setSelectedSession(mergeSessionInfo(selected, info))
-        }
         setSessionsByFolder((prev) => {
             const folder = info.directory ?? Object.entries(prev).find((entry) => entry[1].some((session) => session.id === sessionID))?.[0]
             if (!folder) return prev
@@ -340,14 +561,12 @@ export function FolderPanel() {
                 if (!isCompleteSessionInfo(session)) return prev
                 return {
                     ...prev,
-                    [folder]: [session, ...list].sort((a, b) => b.time.updated - a.time.updated),
+                    [folder]: sortSessions([session, ...list]),
                 }
             }
             return {
                 ...prev,
-                [folder]: list
-                    .map((session) => session.id === sessionID ? mergeSessionInfo(session, info) : session)
-                    .sort((a, b) => b.time.updated - a.time.updated),
+                [folder]: sortSessions(list.map((session) => session.id === sessionID ? mergeSessionInfo(session, info) : session)),
             }
         })
     }
@@ -381,25 +600,46 @@ export function FolderPanel() {
         setExpandedSessionFolders(next)
     }
 
-    const getFileIcon = (file: FileItem) => {
-        if (file.isDirectory) return "📁"
+    const getFileIcon = (file: FileItem): LucideIcon => {
+        if (file.isDirectory) return Folder
         const ext = file.name.split(".").pop()?.toLowerCase() || ""
-        const icons: Record<string, string> = {
-            pdf: "📕",
-            doc: "📄", docx: "📄",
-            xls: "📊", xlsx: "📊",
-            ppt: "📽️", pptx: "📽️",
-            jpg: "🖼️", jpeg: "🖼️", png: "🖼️", gif: "🖼️", svg: "🖼️",
-            js: "JS", ts: "TS", tsx: "TS", jsx: "JS",
-            json: "{}",
-            md: "MD",
-            txt: "TXT",
-            html: "HTML", css: "CSS",
+        const icons: Record<string, LucideIcon> = {
+            pdf: FileText,
+            doc: FileType, docx: FileType,
+            xls: FileSpreadsheet, xlsx: FileSpreadsheet,
+            csv: ChartColumn, tsv: ChartColumn,
+            ppt: Presentation, pptx: Presentation,
+            mp3: FileAudio, wav: FileAudio, m4a: FileAudio,
+            mp4: FileVideo, mov: FileVideo, m4v: FileVideo,
+            jpg: Image, jpeg: Image, png: Image, gif: Image, svg: Image,
+            js: FileCode, ts: FileCode, tsx: FileCode, jsx: FileCode,
+            json: FileCode,
+            md: FileType,
+            txt: FileType,
+            html: FileCode, css: FileCode,
         }
-        return icons[ext] || "📄"
+        return icons[ext] || FileIcon
+    }
+
+    function FileTypeIcon(props: { file: FileItem }) {
+        return <Dynamic component={getFileIcon(props.file)} class="file-item-icon" size={16} strokeWidth={1.8} />
     }
 
     const isSelectedFile = (file: FileItem) => sdk.selectedFiles().some((selected) => selected.path === file.path)
+    const allFilesSelected = () => files().length > 0 && files().every(isSelectedFile)
+
+    const toggleAllFiles = () => {
+        if (allFilesSelected()) {
+            sdk.setSelectedFile(null)
+            sdk.setSelectedFiles([])
+            setLastSelectedFilePath(null)
+            return
+        }
+        const next = files()
+        sdk.setSelectedFile(next[0] ?? null)
+        sdk.setSelectedFiles(next)
+        setLastSelectedFilePath(next.at(-1)?.path ?? null)
+    }
 
     const selectFileRange = (file: FileItem) => {
         const start = files().findIndex((item) => item.path === lastSelectedFilePath())
@@ -420,32 +660,20 @@ export function FolderPanel() {
             setLastSelectedFilePath(file.path)
             return
         }
-        if (event.ctrlKey || event.metaKey) {
-            sdk.setSelectedFile(file)
-            sdk.setSelectedFiles((selected) =>
-                selected.some((item) => item.path === file.path)
-                    ? selected.filter((item) => item.path !== file.path)
-                    : [...selected, file],
-            )
-            setLastSelectedFilePath(file.path)
-            return
-        }
-        if (sdk.selectedFiles().length === 1 && sdk.selectedFiles()[0].path === file.path) {
-            sdk.setSelectedFile(null)
-            sdk.setSelectedFiles([])
-            setLastSelectedFilePath(null)
-            return
-        }
-        sdk.setSelectedFile(file)
-        sdk.setSelectedFiles([file])
-        setLastSelectedFilePath(file.path)
+        const selected = sdk.selectedFiles().some((item) => item.path === file.path)
+        const next = selected
+            ? sdk.selectedFiles().filter((item) => item.path !== file.path)
+            : [...sdk.selectedFiles(), file]
+        sdk.setSelectedFile(selected ? (next.at(-1) ?? null) : file)
+        sdk.setSelectedFiles(next)
+        setLastSelectedFilePath(selected ? (next.at(-1)?.path ?? null) : file.path)
     }
 
     return (
         <div class="folder-panel">
             <div class="folder-panel-header">
                 <button class="folder-open-button" onClick={handleOpenFolder} title="打开文件夹">
-                    <span>📁</span>
+                    <FolderOpen class="sidebar-lucide-icon" size={15} strokeWidth={1.8} />
                     <span>打开文件夹</span>
                 </button>
             </div>
@@ -470,25 +698,25 @@ export function FolderPanel() {
                                         <div
                                             class={`project-folder-row ${folder === sdk.directory() ? "active" : ""}`}
                                             onClick={() => toggleFolder(folder)}
+                                            onContextMenu={(event) => openProjectMenu(project, event)}
                                             title={folder}
                                         >
-                                            <span class="project-folder-icon">{isFolderExpanded(folder) ? "▾" : "▸"}</span>
-                                            <span class="project-folder-mark" aria-hidden="true"></span>
+                                            <Dynamic
+                                                component={isFolderExpanded(folder) ? FolderOpen : Folder}
+                                                class="project-folder-mark"
+                                                size={16}
+                                                strokeWidth={1.8}
+                                                aria-hidden="true"
+                                            />
                                             <span class="project-folder-name">{getFolderName(folder)}</span>
                                             <button
                                                 class="project-row-action project-new-session"
-                                                onClick={(event) => createSessionForFolder(folder, event)}
+                                                onClick={(event) => startSessionDraftForFolder(folder, event)}
                                                 title="新建会话"
                                                 aria-label="新建会话"
-                                            ></button>
-                                            <button
-                                                type="button"
-                                                class="project-row-action project-delete"
-                                                disabled={deletingProjects().has(project.id)}
-                                                onClick={(event) => deleteProject(project, event)}
-                                                title="删除项目"
-                                                aria-label="删除项目"
-                                            ></button>
+                                            >
+                                                <SquarePen class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                            </button>
                                         </div>
 
                                     <Show when={isFolderExpanded(folder)}>
@@ -499,50 +727,32 @@ export function FolderPanel() {
                                             <Show when={!loadingFolders().has(folder) && (sessionsByFolder()[folder]?.length ?? 0) === 0}>
                                                 <div class="project-conversation-empty">暂无对话</div>
                                             </Show>
-                                            <For each={visibleSessions(folder)}>
+                                            <Index each={visibleSessions(folder)}>
                                                 {(session) => (
                                                     <div
                                                         role="button"
                                                         tabIndex={0}
-                                                        class={`project-conversation-item ${sdk.selectedSession()?.id === session.id ? "active" : ""}`}
-                                                        onClick={() => selectSession(folder, session)}
-                                                        onKeyDown={(event) => handleSessionKeyDown(folder, session, event)}
-                                                        title={session.title}
+                                                        class={`project-conversation-item ${sdk.selectedSession()?.id === session().id ? "active" : ""}`}
+                                                        onClick={() => selectSession(folder, session())}
+                                                        onContextMenu={(event) => openSessionMenu(folder, session(), event)}
+                                                        onKeyDown={(event) => handleSessionKeyDown(folder, session(), event)}
+                                                        title={session().title}
                                                     >
                                                         <Show
-                                                            when={editingSessionID() === session.id}
-                                                            fallback={<span class="project-conversation-title">{getSessionTitle(session)}</span>}
+                                                            when={isSessionBusy(session().id)}
+                                                            fallback={
+                                                                <Show when={isSessionUnread(session().id)}>
+                                                                    <span class="project-conversation-unread" aria-hidden="true"></span>
+                                                                </Show>
+                                                            }
                                                         >
-                                                            <input
-                                                                class="project-conversation-title-input"
-                                                                value={editingSessionTitle()}
-                                                                onClick={(event) => event.stopPropagation()}
-                                                                onInput={(event) => setEditingSessionTitle(event.currentTarget.value)}
-                                                                onBlur={() => void commitRenameSession(folder, session)}
-                                                                onKeyDown={(event) => handleRenameKeyDown(folder, session, event)}
-                                                                ref={(element) => queueMicrotask(() => { element.focus(); element.select(); })}
-                                                            />
+                                                            <span class="project-conversation-spinner" aria-hidden="true"></span>
                                                         </Show>
-                                                        <span class="project-conversation-time">{formatRelativeTime(session.time.updated)}</span>
-                                                        <button
-                                                            type="button"
-                                                            class="project-conversation-rename"
-                                                            disabled={renamingSessions().has(session.id)}
-                                                            onClick={(event) => startRenameSession(session, event)}
-                                                            title="修改会话名称"
-                                                            aria-label="修改会话名称"
-                                                        ></button>
-                                                        <button
-                                                            type="button"
-                                                            class="project-conversation-delete"
-                                                            disabled={deletingSessions().has(session.id)}
-                                                            onClick={(event) => deleteSession(folder, session, event)}
-                                                            title="删除会话"
-                                                            aria-label="删除会话"
-                                                        ></button>
+                                                        <span class="project-conversation-title">{getSessionTitle(session())}</span>
+                                                        <span class="project-conversation-time">{formatRelativeTime(session().time.updated)}</span>
                                                     </div>
                                                 )}
-                                            </For>
+                                            </Index>
                                             <Show when={(sessionsByFolder()[folder]?.length ?? 0) > 5}>
                                                 <button class="project-expand" onClick={() => toggleSessionLimit(folder)}>
                                                     {expandedSessionFolders().has(folder) ? "收起" : "展开显示"}
@@ -559,10 +769,28 @@ export function FolderPanel() {
 
                 <Show when={sdk.directory()}>
                     <div class="file-preview-section">
-                        <button class="file-toggle" onClick={() => setShowFiles(!showFiles())}>
-                            <span>{showFiles() ? "▾" : "▸"}</span>
-                            <span>文件预览</span>
-                        </button>
+                        <div class="file-preview-header">
+                            <button class="file-toggle" onClick={() => setShowFiles(!showFiles())}>
+                                <SidebarChevron expanded={showFiles()} />
+                                <span>文件预览</span>
+                            </button>
+                            <Show when={showFiles() && !isLoadingFiles() && files().length > 0}>
+                                <button
+                                    type="button"
+                                    class={`file-select-all ${allFilesSelected() ? "active" : ""}`}
+                                    onClick={toggleAllFiles}
+                                    title={allFilesSelected() ? "取消全选" : "全选文件"}
+                                    aria-label={allFilesSelected() ? "取消全选" : "全选文件"}
+                                >
+                                    <span>全选</span>
+                                    <span class="file-checkbox" aria-hidden="true">
+                                        <Show when={allFilesSelected()}>
+                                            <Check class="file-checkbox-check" size={13} strokeWidth={2.2} />
+                                        </Show>
+                                    </span>
+                                </button>
+                            </Show>
+                        </div>
                         <Show when={showFiles()}>
                             <Show when={isLoadingFiles()}>
                                 <div class="conversation-empty">加载文件...</div>
@@ -576,8 +804,13 @@ export function FolderPanel() {
                                                 onClick={(event) => handleFileClick(file, event)}
                                                 title={file.path}
                                             >
-                                                <span class="file-item-icon">{getFileIcon(file)}</span>
+                                                <FileTypeIcon file={file} />
                                                 <span class="file-item-name">{file.name}</span>
+                                                <span class="file-checkbox file-item-checkbox" aria-hidden="true">
+                                                    <Show when={isSelectedFile(file)}>
+                                                        <Check class="file-checkbox-check" size={13} strokeWidth={2.2} />
+                                                    </Show>
+                                                </span>
                                             </button>
                                         )}
                                     </For>
@@ -587,6 +820,137 @@ export function FolderPanel() {
                     </div>
                 </Show>
             </div>
+
+            <div class="folder-panel-status" title="服务器在线">
+                <span class="status-dot online"></span>
+                <span>服务在线</span>
+            </div>
+
+            <Show when={sidebarMenu()}>
+                {(menu) => (
+                    <Portal>
+                        <div
+                            class="sidebar-context-menu"
+                            style={{ left: `${menu().x}px`, top: `${menu().y}px` }}
+                            onClick={(event) => event.stopPropagation()}
+                            onContextMenu={(event) => event.preventDefault()}
+                        >
+                            <Show when={menu().kind === "session"}>
+                                <button
+                                    type="button"
+                                    class="sidebar-context-menu-item"
+                                    disabled={renamingSessions().has((menu() as Extract<SidebarMenu, { kind: "session" }>).session.id)}
+                                    onClick={() => {
+                                        const current = menu() as Extract<SidebarMenu, { kind: "session" }>
+                                        openRenameSessionDialog(current.folder, current.session)
+                                    }}
+                                >
+                                    <PencilLine class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                    <span>重命名</span>
+                                </button>
+                            </Show>
+                            <Show when={menu().kind === "project"}>
+                                <button
+                                    type="button"
+                                    class="sidebar-context-menu-item"
+                                    onClick={() => {
+                                        const current = menu() as Extract<SidebarMenu, { kind: "project" }>
+                                        void openProjectInFileManager(current.project)
+                                    }}
+                                >
+                                    <FolderOpen class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                    <span>{openProjectInFileManagerLabel()}</span>
+                                </button>
+                            </Show>
+                            <button
+                                type="button"
+                                class={`sidebar-context-menu-item ${menu().kind === "session" ? "danger" : ""}`}
+                                disabled={
+                                    menu().kind === "project"
+                                        ? deletingProjects().has((menu() as Extract<SidebarMenu, { kind: "project" }>).project.id)
+                                        : deletingSessions().has((menu() as Extract<SidebarMenu, { kind: "session" }>).session.id)
+                                }
+                                onClick={() => {
+                                    const current = menu()
+                                    if (current.kind === "project") {
+                                        openDeleteProjectDialog(current.project)
+                                        return
+                                    }
+                                    openDeleteSessionDialog(current.folder, current.session)
+                                }}
+                            >
+                                <Dynamic
+                                    component={menu().kind === "project" ? CircleMinus : Trash2}
+                                    class="sidebar-action-icon"
+                                    size={14}
+                                    strokeWidth={1.8}
+                                />
+                                <span>{menu().kind === "project" ? "移除" : "删除会话"}</span>
+                            </button>
+                        </div>
+                    </Portal>
+                )}
+            </Show>
+
+            <Show when={sidebarDialog()}>
+                {(dialog) => {
+                    const current = dialog()
+                    const isRename = current.kind === "rename-session"
+                    const isProjectRemove = current.kind === "delete-project"
+                    const title = isRename ? "重命名会话" : isProjectRemove ? "移除项目" : "删除会话"
+                    const name = current.kind === "delete-project" ? getFolderName(current.project.worktree) : getSessionTitle(current.session)
+                    const busy = current.kind === "rename-session"
+                        ? renamingSessions().has(current.session.id)
+                        : current.kind === "delete-project"
+                            ? deletingProjects().has(current.project.id)
+                            : deletingSessions().has(current.session.id)
+
+                    return (
+                        <Portal>
+                            <div class="sidebar-dialog-backdrop" onMouseDown={closeSidebarDialog}>
+                                <div
+                                    class="sidebar-dialog"
+                                    role="dialog"
+                                    aria-modal="true"
+                                    aria-label={title}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    onKeyDown={handleDialogKeyDown}
+                                >
+                                    <div class="sidebar-dialog-title">{title}</div>
+                                    <Show
+                                        when={isRename}
+                                        fallback={
+                                            <div class="sidebar-dialog-copy">
+                                                确定要{isProjectRemove ? "移除" : "删除"} <span>{name}</span> 吗？{isProjectRemove ? "项目会从列表中移除。" : "此操作不可撤销。"}
+                                            </div>
+                                        }
+                                    >
+                                        <input
+                                            class="sidebar-dialog-input"
+                                            value={renameSessionTitle()}
+                                            onInput={(event) => setRenameSessionTitle(event.currentTarget.value)}
+                                            ref={(element) => queueMicrotask(() => { element.focus(); element.select(); })}
+                                        />
+                                    </Show>
+                                    <div class="sidebar-dialog-actions">
+                                        <button type="button" class="sidebar-dialog-button" onClick={closeSidebarDialog}>
+                                            取消
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class={`sidebar-dialog-button ${isRename ? "primary" : isProjectRemove ? "" : "danger"}`}
+                                            disabled={busy || (isRename && renameSessionTitle().trim().length === 0)}
+                                            onClick={() => void confirmSidebarDialog()}
+                                        >
+                                            {isRename ? "保存" : isProjectRemove ? "移除" : "删除"}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </Portal>
+                    )
+                }}
+            </Show>
         </div>
     )
 }

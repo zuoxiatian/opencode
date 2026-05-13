@@ -310,6 +310,11 @@ ipcMain.handle("open-external", async (_, url: string) => {
     await shell.openExternal(url)
 })
 
+ipcMain.handle("open-path", async (_, targetPath: string) => {
+    const error = await shell.openPath(targetPath)
+    return error ? { success: false, error } : { success: true }
+})
+
 ipcMain.handle("restart", async () => {
     app.relaunch()
     app.exit(0)

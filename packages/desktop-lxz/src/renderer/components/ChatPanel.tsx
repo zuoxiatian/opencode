@@ -1,19 +1,38 @@
 import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch } from "solid-js"
 import { reconcile } from "solid-js/store"
+import { Dynamic } from "solid-js/web"
 import { useSDK, type DiscussIssue } from "../context/sdk"
 import type {
     Agent,
     Message,
     Part,
     PermissionRequest,
+    Project,
     Provider,
     QuestionAnswer,
     QuestionRequest,
     SessionStatus,
     TextPartInput,
 } from "@opencode-ai/sdk/v2/client"
+import { Button } from "@opencode-ai/ui/button"
+import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Markdown } from "@opencode-ai/ui/markdown"
+import type { LucideIcon } from "lucide-solid"
+import ArrowUp from "lucide-solid/icons/arrow-up"
+import Check from "lucide-solid/icons/check"
+import ChevronDown from "lucide-solid/icons/chevron-down"
+import CircleCheck from "lucide-solid/icons/circle-check"
+import Cpu from "lucide-solid/icons/cpu"
+import Folder from "lucide-solid/icons/folder"
+import FolderPlus from "lucide-solid/icons/folder-plus"
+import ListChecks from "lucide-solid/icons/list-checks"
+import Plus from "lucide-solid/icons/plus"
+import Search from "lucide-solid/icons/search"
+import ShieldCheck from "lucide-solid/icons/shield-check"
+import Square from "lucide-solid/icons/square"
+import Terminal from "lucide-solid/icons/terminal"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
+import { isIMECompositionEvent } from "../lib/ime"
 
 interface QueuedPrompt {
     id: string
@@ -43,6 +62,72 @@ interface ModelOption extends ModelSelection {
     isDefault: boolean
 }
 
+type PermissionMode = "default" | "auto"
+type PermissionModeMap = Record<string, PermissionMode>
+
+const LAST_PROJECT_STORAGE_KEY = "desktop-lxz.lastProjectFolder"
+const PERMISSION_MODE_STORAGE_KEY = "desktop-lxz.permissionAutoAccept"
+const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
+const PERMISSION_MODE_OPTIONS = [
+    { mode: "default", label: "默认权限", description: "遇到权限请求时手动确认" },
+    { mode: "auto", label: "自动获取权限", description: "自动允许一次权限请求" },
+] as const
+
+const agentLabel = (name: string) => {
+    if (name === "plan") return "计划"
+    if (name === "build") return "执行"
+    return name
+}
+
+const agentIcon = (name: string): LucideIcon => {
+    if (name === "plan") return ListChecks
+    return Terminal
+}
+
+const permissionModeIcon = (mode: PermissionMode): LucideIcon => {
+    if (mode === "auto") return CircleCheck
+    return ShieldCheck
+}
+
+function AgentModeIcon(props: { name: string; class?: string }) {
+    return <Dynamic component={agentIcon(props.name)} class={props.class ?? "lucide-control-icon"} size={16} strokeWidth={1.8} />
+}
+
+function PermissionModeIcon(props: { mode: PermissionMode; class?: string }) {
+    return <Dynamic component={permissionModeIcon(props.mode)} class={props.class ?? "lucide-control-icon"} size={16} strokeWidth={1.8} />
+}
+
+const normalizePermissionMode = (value: unknown): PermissionMode => {
+    if (value === true) return "auto"
+    if (value === "auto") return value
+    return "default"
+}
+
+const readPermissionMode = (): PermissionModeMap => {
+    const raw = localStorage.getItem(PERMISSION_MODE_STORAGE_KEY)
+    if (!raw) return {}
+    try {
+        const parsed = JSON.parse(raw) as unknown
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+        return Object.fromEntries(Object.entries(parsed).map(([sessionId, mode]) => [sessionId, normalizePermissionMode(mode)]))
+    } catch {
+        return {}
+    }
+}
+
+const writePermissionMode = (modes: PermissionModeMap) => {
+    localStorage.setItem(PERMISSION_MODE_STORAGE_KEY, JSON.stringify(modes))
+}
+
+const permissionModeInfo = (mode: PermissionMode) => {
+    return PERMISSION_MODE_OPTIONS.find((option) => option.mode === mode) ?? PERMISSION_MODE_OPTIONS[0]
+}
+
+const permissionModeReply = (mode: PermissionMode): "once" | "always" | undefined => {
+    if (mode === "auto") return "once"
+    return undefined
+}
+
 function formatSessionTitle(title?: string) {
     const value = title?.trim()
     if (!value) return "新对话"
@@ -65,6 +150,10 @@ function isSelectableAgent(agent: Agent): agent is Agent & { mode: "primary" | "
 
 function sameModel(a: ModelSelection, b: ModelSelection) {
     return a.providerID === b.providerID && a.modelID === b.modelID
+}
+
+function modelKey(model: ModelSelection) {
+    return `${model.providerID}/${model.modelID}`
 }
 
 function toModelSelection(model: ModelSelection): ModelSelection {
@@ -260,24 +349,95 @@ export function ChatPanel() {
     const [inputText, setInputText] = createSignal("")
     const [agents, setAgents] = createSignal<AgentOption[]>([])
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
+    const [projectOptions, setProjectOptions] = createSignal<Project[]>([])
+    const [projectSearch, setProjectSearch] = createSignal("")
     const [currentAgent, setCurrentAgent] = createSignal("build")
     const [currentModel, setCurrentModel] = createSignal<ModelSelection | null>(null)
+    const [showProjectMenu, setShowProjectMenu] = createSignal(false)
     const [showAgentMenu, setShowAgentMenu] = createSignal(false)
     const [showModelMenu, setShowModelMenu] = createSignal(false)
+    const [showPermissionMenu, setShowPermissionMenu] = createSignal(false)
     const [requestResponding, setRequestResponding] = createSignal<string | null>(null)
     const [sendError, setSendError] = createSignal<string | null>(null)
     const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
     const [sendingQueuedPrompt, setSendingQueuedPrompt] = createSignal<string | null>(null)
     const [failedQueuedPrompt, setFailedQueuedPrompt] = createSignal<string | null>(null)
+    const [permissionModes, setPermissionModes] = createSignal<PermissionModeMap>(readPermissionMode())
+    const [newSessionPermissionMode, setNewSessionPermissionMode] = createSignal<PermissionMode>("default")
     const loadedSessions = new Set<string>()
     const loadingSessions = new Set<string>()
+    const autoRespondingPermissions = new Set<string>()
     let messagesContainer: HTMLDivElement | undefined
-    let agentDropdownRef: HTMLDivElement | undefined
-    let modelDropdownRef: HTMLDivElement | undefined
-    let modelMenuRef: HTMLDivElement | undefined
+    let chatInputComposing = false
+    let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
 
     // 当前选中的会话 ID 派生自 SDK 的 selectedSession
     const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
+
+    const currentPermissionMode = createMemo<PermissionMode>(() => {
+        const sid = currentSessionId()
+        return sid ? permissionModes()[sid] ?? "default" : newSessionPermissionMode()
+    })
+
+    const currentPermissionModeInfo = createMemo(() => permissionModeInfo(currentPermissionMode()))
+
+    const setSessionPermissionMode = (sessionId: string, mode: PermissionMode) => {
+        setPermissionModes((current) => {
+            const next = { ...current, [sessionId]: mode }
+            writePermissionMode(next)
+            return next
+        })
+    }
+
+    const handlePermissionModeSelect = (mode: PermissionMode) => {
+        const sid = currentSessionId()
+        setSendError(null)
+        setShowPermissionMenu(false)
+        if (!sid) {
+            setNewSessionPermissionMode(mode)
+            return
+        }
+        setSessionPermissionMode(sid, mode)
+    }
+
+    const setPermissionMenuOpen = (open: boolean) => {
+        if (open) {
+            setShowProjectMenu(false)
+            setShowAgentMenu(false)
+            setShowModelMenu(false)
+        }
+        setShowPermissionMenu(open)
+    }
+
+    const setProjectMenuOpen = (open: boolean) => {
+        if (open) {
+            setShowPermissionMenu(false)
+            setShowAgentMenu(false)
+            setShowModelMenu(false)
+            void loadProjectOptions()
+        } else {
+            setProjectSearch("")
+        }
+        setShowProjectMenu(open)
+    }
+
+    const setAgentMenuOpen = (open: boolean) => {
+        if (open) {
+            setShowProjectMenu(false)
+            setShowPermissionMenu(false)
+            setShowModelMenu(false)
+        }
+        setShowAgentMenu(open)
+    }
+
+    const setModelMenuOpen = (open: boolean) => {
+        if (open) {
+            setShowProjectMenu(false)
+            setShowPermissionMenu(false)
+            setShowAgentMenu(false)
+        }
+        setShowModelMenu(open)
+    }
 
     // 当前会话的消息列表
     const messages = createMemo<Message[]>(() => {
@@ -316,43 +476,8 @@ export function ChatPanel() {
     const hasPendingRequest = createMemo(() => Boolean(activePermissionRequest() || activeQuestionRequest()))
     const canSend = createMemo(() => Boolean(inputText().trim() && !hasPendingRequest() && sdk.directory()))
 
-    // 点击外部关闭菜单
-    const handleClickOutside = (e: MouseEvent) => {
-        if (showAgentMenu() && agentDropdownRef && !agentDropdownRef.contains(e.target as Node)) {
-            setShowAgentMenu(false)
-        }
-        if (
-            showModelMenu()
-            && modelDropdownRef
-            && !modelDropdownRef.contains(e.target as Node)
-            && !modelMenuRef?.contains(e.target as Node)
-        ) {
-            setShowModelMenu(false)
-        }
-    }
-
-    const modelMenuStyle = () => {
-        const rect = modelDropdownRef?.getBoundingClientRect()
-        if (!rect) return {}
-        const width = Math.min(320, window.innerWidth * 0.7)
-        return {
-            left: `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`,
-            bottom: `${window.innerHeight - rect.top + 8}px`,
-            width: `${width}px`,
-        }
-    }
-
-    const toggleModelMenu = () => {
-        setShowAgentMenu(false)
-        setShowModelMenu((value) => !value)
-    }
-
-    onMount(() => {
-        document.addEventListener("click", handleClickOutside)
-    })
-
     onCleanup(() => {
-        document.removeEventListener("click", handleClickOutside)
+        if (chatInputCompositionEndTimer) clearTimeout(chatInputCompositionEndTimer)
     })
 
     // 滚动到底部
@@ -388,6 +513,11 @@ export function ChatPanel() {
         return model.modelName || model.modelID
     })
 
+    const currentModelKey = createMemo(() => {
+        const model = currentModel()
+        return model ? modelKey(model) : ""
+    })
+
     const sessionTitle = createMemo(() => formatSessionTitle(sdk.selectedSession()?.title))
 
     const contextLabel = createMemo(() => {
@@ -397,6 +527,23 @@ export function ChatPanel() {
         if (selectedFiles.length === 1) return selectedFiles[0].name
         if (selectedFiles.length > 1) return `${selectedFiles.length} 个文件`
         return directory.split(/[/\\]/).pop() ?? directory
+    })
+
+    const getFolderName = (folder: string) => folder.split(/[/\\]/).pop() || folder
+
+    const currentProjectName = createMemo(() => {
+        const directory = sdk.directory()
+        if (!directory) return "选择项目"
+        return getFolderName(directory)
+    })
+
+    const filteredProjectOptions = createMemo(() => {
+        const query = projectSearch().trim().toLowerCase()
+        if (!query) return projectOptions()
+        return projectOptions().filter((project) =>
+            getFolderName(project.worktree).toLowerCase().includes(query)
+            || project.worktree.toLowerCase().includes(query),
+        )
     })
 
     const promptParts = (text: string): TextPartInput[] => {
@@ -420,6 +567,57 @@ export function ChatPanel() {
                 },
             },
         ]
+    }
+
+    const loadProjectOptions = async () => {
+        try {
+            const result = await sdk.client.project.list(undefined, { throwOnError: true })
+            setProjectOptions((result.data ?? [])
+                .filter((project) => Boolean(project.worktree))
+                .sort((a, b) => b.time.updated - a.time.updated))
+        } catch (error) {
+            console.error("加载项目切换列表失败:", error)
+            setProjectOptions([])
+        }
+    }
+
+    const activateProjectFolder = (folder: string) => {
+        localStorage.setItem(LAST_PROJECT_STORAGE_KEY, folder)
+        batch(() => {
+            if (sdk.directory() !== folder) sdk.setDirectory(folder)
+            sdk.setSelectedSession(null)
+            setInputText("")
+            setSendError(null)
+        })
+        sdk.refreshSessionList()
+    }
+
+    const selectProject = (project: Project) => {
+        setShowProjectMenu(false)
+        setProjectSearch("")
+        activateProjectFolder(project.worktree)
+    }
+
+    const addProjectFolder = async () => {
+        const folder = await window.electronAPI.pickDirectory()
+        if (!folder) return
+
+        await sdk.client.instance.dispose({ directory: folder }, { throwOnError: true })
+            .catch((error) => {
+                console.error("释放项目实例失败:", error)
+            })
+        const project = await sdk.client.project.current({ directory: folder }, { throwOnError: true })
+            .then((result) => result.data)
+            .catch((error) => {
+                console.error("添加项目文件夹失败:", error)
+                return undefined
+            })
+        if (project) window.dispatchEvent(new CustomEvent(PROJECT_ADDED_EVENT, { detail: project }))
+
+        setShowProjectMenu(false)
+        setProjectSearch("")
+        activateProjectFolder(folder)
+        void loadProjectOptions()
     }
 
     const loadChatOptions = async () => {
@@ -462,6 +660,11 @@ export function ChatPanel() {
 
     onMount(() => {
         void loadChatOptions()
+    })
+
+    createEffect(() => {
+        sdk.sessionListVersion()
+        void loadProjectOptions()
     })
 
     // 构建认证头
@@ -572,11 +775,13 @@ export function ChatPanel() {
             if (response.ok) {
                 const data = await response.json()
                 loadedSessions.add(data.id)
+                if (newSessionPermissionMode() !== "default") setSessionPermissionMode(data.id, newSessionPermissionMode())
                 sdk.setSelectedSession(data)
                 sdk.refreshSessionList()
                 console.log(`为文件夹 ${sdk.directory()} 创建新会话: ${data.id}`)
                 return data.id as string
             }
+            console.error("创建会话失败:", await response.text())
         } catch (error) {
             console.error("创建会话失败:", error)
         }
@@ -595,7 +800,6 @@ export function ChatPanel() {
         }, { throwOnError: false })
         if (!result.data) return
         sdk.setSelectedSession(result.data)
-        sdk.refreshSessionList()
     }
 
     const addOptimisticPrompt = (prompt: QueuedPrompt) => {
@@ -677,8 +881,7 @@ export function ChatPanel() {
         void sendQueuedPrompt(prompt)
     })
 
-    const handlePermissionDecision = async (reply: "once" | "always" | "reject") => {
-        const request = activePermissionRequest()
+    const respondToPermissionRequest = async (request: PermissionRequest, reply: "once" | "always" | "reject") => {
         if (!request || requestResponding()) return
         setRequestResponding(request.id)
         try {
@@ -693,6 +896,22 @@ export function ChatPanel() {
             setRequestResponding((current) => current === request.id ? null : current)
         }
     }
+
+    const handlePermissionDecision = async (reply: "once" | "always" | "reject") => {
+        const request = activePermissionRequest()
+        if (!request) return
+        await respondToPermissionRequest(request, reply)
+    }
+
+    createEffect(() => {
+        const request = activePermissionRequest()
+        const reply = permissionModeReply(currentPermissionMode())
+        if (!request || !reply || autoRespondingPermissions.has(request.id)) return
+        autoRespondingPermissions.add(request.id)
+        void respondToPermissionRequest(request, reply).finally(() => {
+            setTimeout(() => autoRespondingPermissions.delete(request.id), 1000)
+        })
+    })
 
     const handleQuestionSubmit = async (answers: QuestionAnswer[]) => {
         const request = activeQuestionRequest()
@@ -775,7 +994,20 @@ export function ChatPanel() {
         }
     }
 
+    const handleChatInputCompositionStart = () => {
+        if (chatInputCompositionEndTimer) clearTimeout(chatInputCompositionEndTimer)
+        chatInputComposing = true
+    }
+
+    const handleChatInputCompositionEnd = () => {
+        if (chatInputCompositionEndTimer) clearTimeout(chatInputCompositionEndTimer)
+        chatInputCompositionEndTimer = setTimeout(() => {
+            chatInputComposing = false
+        }, 0)
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (chatInputComposing || isIMECompositionEvent(e)) return
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault()
             handleSend()
@@ -805,32 +1037,17 @@ export function ChatPanel() {
         }
     }
 
-    // 清空对话 - 创建当前文件夹下的新会话
-    const handleClearMessages = async () => {
+    // 清空当前选中会话，进入草稿态；发送第一条消息时再创建真实会话。
+    const handleClearMessages = () => {
         if (!sdk.directory() || isLoading()) return
 
-        try {
-            const { serverInfo } = sdk
-            const headers = getHeaders()
-
-            const response = await fetch(`${serverInfo.url}/session`, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({}),
-            })
-
-            if (response.ok) {
-                const newSession = await response.json()
-                loadedSessions.add(newSession.id)
-                sdk.setSelectedSession(newSession)
-                sdk.refreshSessionList()
-                console.log(`已清空对话，新会话 ID: ${newSession.id}`)
-            } else {
-                console.error("创建新会话失败:", response.status)
-            }
-        } catch (error) {
-            console.error("清空对话失败:", error)
-        }
+        const keepPermissionMode = currentPermissionMode()
+        batch(() => {
+            setNewSessionPermissionMode(keepPermissionMode)
+            sdk.setSelectedSession(null)
+            setInputText("")
+            setSendError(null)
+        })
     }
 
     // 拼接用户消息中所有 text part（用户消息按整段渲染，不按 part 分块）
@@ -867,8 +1084,10 @@ export function ChatPanel() {
         return lastStreamablePartId() === null
     })
 
+    const emptyConversation = createMemo(() => messages().length === 0 && !isLoading() && !sendError() && !hasPendingRequest())
+
     return (
-        <div class="chat-panel">
+        <div class="chat-panel" classList={{ "chat-panel-empty": emptyConversation() }}>
             <div class="chat-header">
                 <div class="chat-header-main">
                     <div class="chat-title-row">
@@ -1042,6 +1261,11 @@ export function ChatPanel() {
             </Show>
 
             <div class="chat-composer-wrap">
+                <Show when={emptyConversation()}>
+                    <div class="chat-empty-hero">
+                        <div class="chat-empty-hero-title">我能为你做什么？</div>
+                    </div>
+                </Show>
                 <div class="chat-input-container">
                     <textarea
                         class="chat-input"
@@ -1049,76 +1273,164 @@ export function ChatPanel() {
                         value={inputText()}
                         onInput={(e) => setInputText(e.currentTarget.value)}
                         onKeyDown={handleKeyDown}
+                        onCompositionStart={handleChatInputCompositionStart}
+                        onCompositionEnd={handleChatInputCompositionEnd}
                         disabled={hasPendingRequest() || !sdk.directory()}
                         rows={1}
                     />
                     <div class="chat-toolbar">
                         <div class="agent-selector">
-                            <button class="toolbar-btn" title="添加附件" aria-label="添加附件">
-                                <span class="toolbar-icon attachment-icon">+</span>
+                            <button
+                                class="toolbar-btn"
+                                title="添加附件"
+                                aria-label="添加附件"
+                            >
+                                <Plus class="lucide-control-icon" size={16} strokeWidth={1.8} />
                             </button>
-                            <div class="agent-dropdown" ref={agentDropdownRef}>
-                                <button
+                            <DropdownMenu
+                                gutter={8}
+                                placement="top-start"
+                                open={showPermissionMenu()}
+                                onOpenChange={setPermissionMenuOpen}
+                            >
+                                <DropdownMenu.Trigger
+                                    as={Button}
+                                    variant="ghost"
+                                    size="small"
+                                    class="permission-mode-toggle"
+                                    data-active={currentPermissionMode() !== "default"}
+                                    data-open={showPermissionMenu() ? "true" : "false"}
+                                    title={currentPermissionModeInfo().description}
+                                    aria-label={`权限模式：${currentPermissionModeInfo().label}`}
+                                >
+                                    <PermissionModeIcon mode={currentPermissionMode()} />
+                                    <span data-slot="permission-mode-label">{currentPermissionModeInfo().label}</span>
+                                    <ChevronDown class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Portal>
+                                    <DropdownMenu.Content class="permission-mode-menu">
+                                        <DropdownMenu.RadioGroup
+                                            value={currentPermissionMode()}
+                                            onChange={(mode) => {
+                                                if (mode === "default" || mode === "auto") handlePermissionModeSelect(mode)
+                                            }}
+                                        >
+                                            <For each={PERMISSION_MODE_OPTIONS}>
+                                                {(option) => (
+                                                    <DropdownMenu.RadioItem
+                                                        value={option.mode}
+                                                        class="permission-mode-item"
+                                                        classList={{ active: currentPermissionMode() === option.mode }}
+                                                    >
+                                                        <PermissionModeIcon mode={option.mode} />
+                                                        <span data-slot="permission-mode-option-main">
+                                                            <span data-slot="permission-mode-option-label">{option.label}</span>
+                                                            <span data-slot="permission-mode-option-description">{option.description}</span>
+                                                        </span>
+                                                        <DropdownMenu.ItemIndicator>
+                                                            <Check class="check-icon" size={14} strokeWidth={2} />
+                                                        </DropdownMenu.ItemIndicator>
+                                                    </DropdownMenu.RadioItem>
+                                                )}
+                                            </For>
+                                        </DropdownMenu.RadioGroup>
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Portal>
+                            </DropdownMenu>
+                            <DropdownMenu
+                                gutter={8}
+                                placement="top-start"
+                                open={showAgentMenu()}
+                                onOpenChange={setAgentMenuOpen}
+                            >
+                                <DropdownMenu.Trigger
+                                    as={Button}
+                                    variant="ghost"
+                                    size="small"
                                     class="agent-toggle"
-                                    onClick={() => setShowAgentMenu(!showAgentMenu())}
+                                    data-agent={currentAgent()}
+                                    data-open={showAgentMenu() ? "true" : "false"}
                                     title="切换模式"
                                 >
-                                    <span class="toggle-icon mode-icon">◇</span>
-                                    <span>{currentAgentInfo()?.name ?? currentAgent()}</span>
-                                </button>
-                                <Show when={showAgentMenu()}>
-                                    <div class="agent-menu">
+                                    <AgentModeIcon name={currentAgent()} />
+                                    <span>{agentLabel(currentAgentInfo()?.name ?? currentAgent())}</span>
+                                    <ChevronDown class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Portal>
+                                    <DropdownMenu.Content class="agent-menu">
                                         <For each={agents()}>
                                             {(agent) => (
-                                                <button
-                                                    class={`agent-menu-item ${currentAgent() === agent.name ? "active" : ""}`}
-                                                    onClick={() => applyAgent(agent)}
+                                                <DropdownMenu.Item
+                                                    class="agent-menu-item"
+                                                    classList={{ active: currentAgent() === agent.name }}
+                                                    data-agent={agent.name}
+                                                    onSelect={() => applyAgent(agent)}
                                                     title={agent.description}
                                                 >
-                                                    <span class="menu-icon">{agent.name === "plan" ? "◇" : "▣"}</span>
-                                                    <span>{agent.name}</span>
+                                                    <AgentModeIcon name={agent.name} class="menu-icon lucide-control-icon" />
+                                                    <DropdownMenu.ItemLabel>{agentLabel(agent.name)}</DropdownMenu.ItemLabel>
                                                     <Show when={currentAgent() === agent.name}>
-                                                        <span class="check-icon">✓</span>
+                                                        <Check class="check-icon" size={14} strokeWidth={2} />
                                                     </Show>
-                                                </button>
+                                                </DropdownMenu.Item>
                                             )}
                                         </For>
-                                    </div>
-                                </Show>
-                            </div>
-                            <div class="model-dropdown" ref={modelDropdownRef}>
-                                <button
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Portal>
+                            </DropdownMenu>
+                            <DropdownMenu
+                                gutter={8}
+                                placement="top-start"
+                                open={showModelMenu()}
+                                onOpenChange={setModelMenuOpen}
+                            >
+                                <DropdownMenu.Trigger
+                                    as={Button}
+                                    variant="ghost"
+                                    size="small"
                                     class="model-toggle"
-                                    onClick={toggleModelMenu}
+                                    data-open={showModelMenu() ? "true" : "false"}
                                     title={currentModelInfo() ? `${currentModelInfo()?.providerName || currentModelInfo()?.providerID}/${currentModelInfo()?.modelID}` : "选择模型"}
                                 >
-                                    <span class="toggle-icon model-icon">⌄</span>
+                                    <Cpu class="lucide-control-icon" size={16} strokeWidth={1.8} />
                                     <span>{modelLabel()}</span>
-                                </button>
-                                <Show when={showModelMenu()}>
-                                    <div class="model-menu model-menu-floating" ref={modelMenuRef} style={modelMenuStyle()}>
+                                    <ChevronDown class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Portal>
+                                    <DropdownMenu.Content class="model-menu">
                                         <Show
                                             when={modelOptions().length > 0}
                                             fallback={<div class="model-menu-empty">暂无可用模型</div>}
                                         >
-                                            <For each={modelOptions()}>
-                                                {(model) => (
-                                                    <button
-                                                        class={`model-menu-item ${currentModel() && sameModel(model, currentModel()!) ? "active" : ""}`}
-                                                        onClick={() => { setCurrentModel(toModelSelection(model)); setShowModelMenu(false); }}
-                                                    >
-                                                        <span class="model-menu-main">{model.modelName || model.modelID}</span>
-                                                        <span class="model-menu-meta">{model.providerName || model.providerID}{model.isDefault ? " · 默认" : ""}</span>
-                                                        <Show when={currentModel() && sameModel(model, currentModel()!)}>
-                                                            <span class="check-icon">✓</span>
-                                                        </Show>
-                                                    </button>
-                                                )}
-                                            </For>
+                                            <DropdownMenu.RadioGroup
+                                                value={currentModelKey()}
+                                                onChange={(value) => {
+                                                    const model = modelOptions().find((option) => modelKey(option) === value)
+                                                    if (!model) return
+                                                    setCurrentModel(toModelSelection(model))
+                                                    setShowModelMenu(false)
+                                                }}
+                                            >
+                                                <For each={modelOptions()}>
+                                                    {(model) => (
+                                                        <DropdownMenu.RadioItem
+                                                            value={modelKey(model)}
+                                                            class="model-menu-item"
+                                                            classList={{ active: currentModel() ? sameModel(model, currentModel()!) : false }}
+                                                        >
+                                                            <span class="model-menu-main">{model.modelName || model.modelID}</span>
+                                                            <span class="model-menu-meta">{model.providerName || model.providerID}{model.isDefault ? " · 默认" : ""}</span>
+                                                            <DropdownMenu.ItemIndicator>
+                                                                <Check class="check-icon" size={14} strokeWidth={2} />
+                                                            </DropdownMenu.ItemIndicator>
+                                                        </DropdownMenu.RadioItem>
+                                                    )}
+                                                </For>
+                                            </DropdownMenu.RadioGroup>
                                         </Show>
-                                    </div>
-                                </Show>
-                            </div>
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Portal>
+                            </DropdownMenu>
                         </div>
                         <Show
                             when={isLoading() && !canSend()}
@@ -1130,15 +1442,79 @@ export function ChatPanel() {
                                     title="发送消息"
                                     aria-label="发送消息"
                                 >
-                                    <span class="send-icon">↑</span>
+                                    <ArrowUp class="lucide-send-icon" size={16} strokeWidth={2.2} />
                                 </button>
                             }
                         >
                             <button class="stop-btn" onClick={handleAbort} title="停止执行" aria-label="停止执行">
-                                <span class="stop-icon">■</span>
+                                <Square class="lucide-stop-icon" size={13} fill="currentColor" strokeWidth={0} />
                             </button>
                         </Show>
                     </div>
+                    <Show when={emptyConversation()}>
+                        <div class="chat-empty-project-row">
+                            <DropdownMenu
+                                gutter={8}
+                                placement="bottom-start"
+                                open={showProjectMenu()}
+                                onOpenChange={setProjectMenuOpen}
+                            >
+                                <DropdownMenu.Trigger
+                                    as={Button}
+                                    variant="ghost"
+                                    size="small"
+                                    class="empty-project-toggle"
+                                    data-open={showProjectMenu() ? "true" : "false"}
+                                    title={sdk.directory() || "选择项目"}
+                                    aria-label={`当前项目：${currentProjectName()}`}
+                                >
+                                    <Folder class="lucide-control-icon" size={15} strokeWidth={1.8} />
+                                    <span>{currentProjectName()}</span>
+                                    <ChevronDown class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Portal>
+                                    <DropdownMenu.Content class="empty-project-menu">
+                                        <div class="empty-project-search">
+                                            <Search class="lucide-control-icon" size={14} strokeWidth={1.8} />
+                                            <input
+                                                value={projectSearch()}
+                                                placeholder="搜索项目"
+                                                onInput={(event) => setProjectSearch(event.currentTarget.value)}
+                                                onKeyDown={(event) => event.stopPropagation()}
+                                            />
+                                        </div>
+                                        <div class="empty-project-list">
+                                            <Show
+                                                when={filteredProjectOptions().length > 0}
+                                                fallback={<div class="empty-project-menu-empty">没有匹配项目</div>}
+                                            >
+                                                <For each={filteredProjectOptions()}>
+                                                    {(project) => (
+                                                        <DropdownMenu.Item
+                                                            class="empty-project-item"
+                                                            classList={{ active: sdk.directory() === project.worktree }}
+                                                            onSelect={() => selectProject(project)}
+                                                            title={project.worktree}
+                                                        >
+                                                            <Folder class="lucide-control-icon" size={15} strokeWidth={1.8} />
+                                                            <span class="empty-project-item-name">{getFolderName(project.worktree)}</span>
+                                                            <Show when={sdk.directory() === project.worktree}>
+                                                                <Check class="check-icon" size={14} strokeWidth={2} />
+                                                            </Show>
+                                                        </DropdownMenu.Item>
+                                                    )}
+                                                </For>
+                                            </Show>
+                                        </div>
+                                        <button class="empty-project-add" type="button" onClick={() => void addProjectFolder()}>
+                                            <FolderPlus class="lucide-control-icon" size={15} strokeWidth={1.8} />
+                                            <span>添加新文件夹</span>
+                                        </button>
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Portal>
+                            </DropdownMenu>
+                        </div>
+                    </Show>
                 </div>
             </div>
         </div>

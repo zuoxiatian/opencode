@@ -7,6 +7,7 @@ export interface ElectronAPI {
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
     saveFile: (options?: { defaultPath?: string }) => Promise<string | null>
     openExternal: (url: string) => Promise<void>
+    openPath: (path: string) => Promise<{ success: boolean; error?: string }>
     restart: () => Promise<void>
     readDirectory: (path: string) => Promise<Array<{ name: string; path: string; isDirectory: boolean }>>
     readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
@@ -28,6 +29,8 @@ const electronAPI: ElectronAPI = {
     saveFile: (options) => ipcRenderer.invoke("save-file", options),
 
     openExternal: (url) => ipcRenderer.invoke("open-external", url),
+
+    openPath: (path) => ipcRenderer.invoke("open-path", path),
 
     restart: () => ipcRenderer.invoke("restart"),
 

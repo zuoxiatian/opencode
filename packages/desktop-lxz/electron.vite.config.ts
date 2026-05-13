@@ -1,5 +1,6 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import solid from "vite-plugin-solid"
+import tailwindcss from "@tailwindcss/vite"
 import { resolve } from "path"
 import { fileURLToPath } from "url"
 
@@ -50,6 +51,7 @@ export default defineConfig({
             alias: {
                 "@": resolve(__dirname, "src/renderer"),
                 "@opencode-ai/sdk": resolve(__dirname, "../sdk/js/src"),
+                "@opencode-ai/ui/styles/tailwind": resolve(__dirname, "../ui/src/styles/tailwind/index.css"),
                 "@opencode-ai/ui/styles": resolve(__dirname, "../ui/src/styles/index.css"),
                 "@opencode-ai/ui/context": resolve(__dirname, "../ui/src/context"),
                 "@opencode-ai/ui": resolve(__dirname, "../ui/src/components"),
@@ -57,6 +59,7 @@ export default defineConfig({
             },
         },
         plugins: [
+            tailwindcss(),
             solid(),
         ],
         server: {

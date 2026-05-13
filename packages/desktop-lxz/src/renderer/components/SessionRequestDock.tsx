@@ -4,6 +4,7 @@ import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@openco
 import { Button } from "@opencode-ai/ui/button"
 import { DockPrompt } from "@opencode-ai/ui/dock-prompt"
 import { Icon } from "@opencode-ai/ui/icon"
+import { isIMECompositionEvent } from "../lib/ime"
 
 const permissionDescription = (request: PermissionRequest) => {
     const descriptions: Record<string, string> = {
@@ -342,6 +343,7 @@ export function SessionQuestionDock(props: {
                                     disabled={props.responding}
                                     onInput={(event) => updateCustom(event.currentTarget.value)}
                                     onKeyDown={(event) => {
+                                        if (isIMECompositionEvent(event)) return
                                         if (event.key !== "Enter" || event.shiftKey) return
                                         event.preventDefault()
                                         setEditingCustom(false)

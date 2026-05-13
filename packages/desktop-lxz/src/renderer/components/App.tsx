@@ -1,6 +1,5 @@
-import { createSignal, createEffect, For, Show, type ParentProps, onMount, onCleanup } from "solid-js"
+import { createSignal, Show, onMount, onCleanup } from "solid-js"
 import { FolderPanel } from "./FolderPanel"
-import { ContentPanel } from "./ContentPanel"
 import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
@@ -17,27 +16,11 @@ interface AppProps {
 }
 
 export function App(props: AppProps) {
-    const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false)
-    const [chatCollapsed, setChatCollapsed] = createSignal(false)
-    const [contentCollapsed, setContentCollapsed] = createSignal(true)
-    const [folderWidth, setFolderWidth] = createSignal(220)
-    const [chatWidth, setChatWidth] = createSignal(400)
-    const [isDragging, setIsDragging] = createSignal<"folder" | "chat" | null>(null)
-
-    const toggleSidebar = () => {
-        setSidebarCollapsed(!sidebarCollapsed())
-    }
-
-    const toggleChat = () => {
-        setChatCollapsed(!chatCollapsed())
-    }
-
-    const toggleContent = () => {
-        setContentCollapsed(!contentCollapsed())
-    }
+    const [folderWidth, setFolderWidth] = createSignal(260)
+    const [isDragging, setIsDragging] = createSignal<"folder" | null>(null)
 
     // 拖拽处理
-    const handleMouseDown = (type: "folder" | "chat") => (e: MouseEvent) => {
+    const handleMouseDown = (type: "folder") => (e: MouseEvent) => {
         e.preventDefault()
         setIsDragging(type)
         document.body.style.cursor = "col-resize"
@@ -48,14 +31,9 @@ export function App(props: AppProps) {
         if (!isDragging()) return
 
         if (isDragging() === "folder") {
-            const newWidth = e.clientX - 52 // 减去工具栏宽度(52px)
-            if (newWidth >= 120 && newWidth <= 500) {
+            const newWidth = e.clientX
+            if (newWidth >= 220 && newWidth <= 500) {
                 setFolderWidth(newWidth)
-            }
-        } else if (isDragging() === "chat") {
-            const newWidth = window.innerWidth - e.clientX
-            if (newWidth >= 280 && newWidth <= 700) {
-                setChatWidth(newWidth)
             }
         }
     }
@@ -96,78 +74,23 @@ export function App(props: AppProps) {
                     <div class="drag-overlay" />
                 </Show>
 
-                {/* 固定的工具栏 - 始终显示 */}
-                <div class="sidebar-toolbar">
-                    <button
-                        class="sidebar-toggle-btn"
-                        onClick={toggleSidebar}
-                        title={sidebarCollapsed() ? "展开目录" : "收起目录"}
-                    >
-                        <span class="toggle-arrow">☰</span>
-                    </button>
-                    <button
-                        class={`sidebar-toggle-btn ${contentCollapsed() ? "collapsed" : ""}`}
-                        onClick={toggleContent}
-                        title={contentCollapsed() ? "展开内容" : "收起内容"}
-                    >
-                        <span class="toggle-arrow">📄</span>
-                    </button>
-                    <button
-                        class={`sidebar-toggle-btn ${chatCollapsed() ? "collapsed" : ""}`}
-                        onClick={toggleChat}
-                        title={chatCollapsed() ? "展开聊天" : "收起聊天"}
-                    >
-                        <span class="toggle-arrow">💬</span>
-                    </button>
-                    {/* 占位空间，将状态指示器推到底部 */}
-                    <div style={{ flex: 1 }}></div>
-                    {/* 服务器状态指示器 */}
-                    <div class="toolbar-status" title="服务器在线">
-                        <span class="status-dot online"></span>
-                    </div>
-                </div>
-
-                {/* 侧边栏面板 - 可展开/收起 */}
+                {/* 侧边栏面板 */}
                 <div
-                    class={`folder-panel-container ${sidebarCollapsed() ? "collapsed" : ""}`}
-                    style={{ width: sidebarCollapsed() ? "0px" : `${folderWidth()}px` }}
+                    class="folder-panel-container"
+                    style={{ width: `${folderWidth()}px` }}
                 >
-                    <Show when={!sidebarCollapsed()}>
-                        <FolderPanel />
-                    </Show>
+                    <FolderPanel />
                 </div>
 
-                {/* 分隔条1：目录 ↔ 内容 */}
-                <Show when={!sidebarCollapsed()}>
-                    <div
-                        class={`resizer ${isDragging() === "folder" ? "active" : ""}`}
-                        onMouseDown={handleMouseDown("folder")}
-                    />
-                </Show>
-
-                {/* 内容面板 */}
-                <div class={`content-panel-wrapper ${contentCollapsed() ? "collapsed" : ""}`}>
-                    <Show when={!contentCollapsed()}>
-                        <ContentPanel />
-                    </Show>
-                </div>
-
-                {/* 分隔条2：内容 ↔ 聊天 */}
-                <Show when={!chatCollapsed()}>
-                    <div
-                        class={`resizer ${isDragging() === "chat" ? "active" : ""}`}
-                        onMouseDown={handleMouseDown("chat")}
-                    />
-                </Show>
+                {/* 分隔条：项目列表 ↔ 聊天 */}
+                <div
+                    class={`resizer ${isDragging() === "folder" ? "active" : ""}`}
+                    onMouseDown={handleMouseDown("folder")}
+                />
 
                 {/* 聊天面板 */}
-                <div
-                    class={`chat-panel-wrapper ${chatCollapsed() ? "collapsed" : ""} ${contentCollapsed() && !chatCollapsed() ? "expanded" : ""}`}
-                    style={{ width: chatCollapsed() ? "0px" : contentCollapsed() ? undefined : `${chatWidth()}px` }}
-                >
-                    <Show when={!chatCollapsed()}>
-                        <ChatPanel />
-                    </Show>
+                <div class="chat-panel-wrapper expanded">
+                    <ChatPanel />
                 </div>
             </div>
         </SDKProvider>
