@@ -22,15 +22,15 @@ import ArrowUp from "lucide-solid/icons/arrow-up"
 import Check from "lucide-solid/icons/check"
 import ChevronDown from "lucide-solid/icons/chevron-down"
 import CircleCheck from "lucide-solid/icons/circle-check"
-import Cpu from "lucide-solid/icons/cpu"
 import Folder from "lucide-solid/icons/folder"
 import FolderPlus from "lucide-solid/icons/folder-plus"
 import ListChecks from "lucide-solid/icons/list-checks"
+import MonitorCheck from "lucide-solid/icons/monitor-check"
+import Package from "lucide-solid/icons/package"
 import Plus from "lucide-solid/icons/plus"
 import Search from "lucide-solid/icons/search"
 import ShieldCheck from "lucide-solid/icons/shield-check"
 import Square from "lucide-solid/icons/square"
-import Terminal from "lucide-solid/icons/terminal"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
 import { isIMECompositionEvent } from "../lib/ime"
 
@@ -70,7 +70,7 @@ const PERMISSION_MODE_STORAGE_KEY = "desktop-lxz.permissionAutoAccept"
 const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
 const PERMISSION_MODE_OPTIONS = [
     { mode: "default", label: "默认权限", description: "遇到权限请求时手动确认" },
-    { mode: "auto", label: "自动获取权限", description: "自动允许一次权限请求" },
+    { mode: "auto", label: "自动获取权限", description: "自动允许每次请求" },
 ] as const
 
 const agentLabel = (name: string) => {
@@ -79,9 +79,15 @@ const agentLabel = (name: string) => {
     return name
 }
 
+const agentDescription = (agent: AgentOption) => {
+    if (agent.name === "plan") return "先给方案，不执行操作"
+    if (agent.name === "build") return "直接处理并执行操作"
+    return agent.description || "使用此模式处理消息"
+}
+
 const agentIcon = (name: string): LucideIcon => {
     if (name === "plan") return ListChecks
-    return Terminal
+    return MonitorCheck
 }
 
 const permissionModeIcon = (mode: PermissionMode): LucideIcon => {
@@ -431,6 +437,10 @@ export function ChatPanel() {
     }
 
     const setModelMenuOpen = (open: boolean) => {
+        if (modelOptions().length <= 1) {
+            setShowModelMenu(false)
+            return
+        }
         if (open) {
             setShowProjectMenu(false)
             setShowPermissionMenu(false)
@@ -517,6 +527,8 @@ export function ChatPanel() {
         const model = currentModel()
         return model ? modelKey(model) : ""
     })
+
+    const modelMenuAvailable = createMemo(() => modelOptions().length > 1)
 
     const sessionTitle = createMemo(() => formatSessionTitle(sdk.selectedSession()?.title))
 
@@ -1037,19 +1049,6 @@ export function ChatPanel() {
         }
     }
 
-    // 清空当前选中会话，进入草稿态；发送第一条消息时再创建真实会话。
-    const handleClearMessages = () => {
-        if (!sdk.directory() || isLoading()) return
-
-        const keepPermissionMode = currentPermissionMode()
-        batch(() => {
-            setNewSessionPermissionMode(keepPermissionMode)
-            sdk.setSelectedSession(null)
-            setInputText("")
-            setSendError(null)
-        })
-    }
-
     // 拼接用户消息中所有 text part（用户消息按整段渲染，不按 part 分块）
     const userMessageText = (parts: Part[]): string => {
         return parts
@@ -1108,11 +1107,6 @@ export function ChatPanel() {
                             <span>{isBusy() ? "处理中" : "就绪"}</span>
                         </div>
                     </Show>
-                    <Show when={sdk.directory() && !isLoading()}>
-                        <button class="chat-header-btn" onClick={handleClearMessages} title="清空对话" aria-label="清空对话">
-                            <span class="chat-trash-icon" aria-hidden="true"></span>
-                        </button>
-                    </Show>
                 </div>
             </div>
 
@@ -1135,7 +1129,6 @@ export function ChatPanel() {
                                     fallback={
                                         <div class="chat-turn user">
                                             <div class="chat-message user">
-                                                <div class="chat-message-role">You</div>
                                                 <Markdown
                                                     class="chat-message-content"
                                                     text={userMessageText(partsOf(message.id))}
@@ -1156,7 +1149,6 @@ export function ChatPanel() {
                                                         return (
                                                             <div class="chat-turn assistant">
                                                                 <div class={`chat-message assistant${streaming() ? " streaming" : ""}`}>
-                                                                    <div class="chat-message-role">Assistant</div>
                                                                     <Markdown
                                                                         class="chat-message-content"
                                                                         text={textPart.text}
@@ -1225,7 +1217,6 @@ export function ChatPanel() {
                             {(error) => (
                                 <div class="chat-turn assistant">
                                     <div class="chat-message assistant">
-                                        <div class="chat-message-role">Assistant</div>
                                         <div class="chat-message-content">{error()}</div>
                                     </div>
                                 </div>
@@ -1237,7 +1228,7 @@ export function ChatPanel() {
 
             <Show when={activeQuestionRequest()}>
                 {(request) => (
-                    <div class="chat-prompt-dock">
+                    <div class="chat-prompt-dock chat-prompt-dock-question">
                         <SessionQuestionDock
                             request={request()}
                             responding={requestResponding() === request().id}
@@ -1365,10 +1356,13 @@ export function ChatPanel() {
                                                     classList={{ active: currentAgent() === agent.name }}
                                                     data-agent={agent.name}
                                                     onSelect={() => applyAgent(agent)}
-                                                    title={agent.description}
+                                                    title={agentDescription(agent)}
                                                 >
                                                     <AgentModeIcon name={agent.name} class="menu-icon lucide-control-icon" />
-                                                    <DropdownMenu.ItemLabel>{agentLabel(agent.name)}</DropdownMenu.ItemLabel>
+                                                    <span data-slot="agent-menu-main">
+                                                        <DropdownMenu.ItemLabel>{agentLabel(agent.name)}</DropdownMenu.ItemLabel>
+                                                        <span data-slot="agent-menu-description">{agentDescription(agent)}</span>
+                                                    </span>
                                                     <Show when={currentAgent() === agent.name}>
                                                         <Check class="check-icon" size={14} strokeWidth={2} />
                                                     </Show>
@@ -1381,7 +1375,7 @@ export function ChatPanel() {
                             <DropdownMenu
                                 gutter={8}
                                 placement="top-start"
-                                open={showModelMenu()}
+                                open={modelMenuAvailable() && showModelMenu()}
                                 onOpenChange={setModelMenuOpen}
                             >
                                 <DropdownMenu.Trigger
@@ -1389,12 +1383,15 @@ export function ChatPanel() {
                                     variant="ghost"
                                     size="small"
                                     class="model-toggle"
-                                    data-open={showModelMenu() ? "true" : "false"}
+                                    data-open={modelMenuAvailable() && showModelMenu() ? "true" : "false"}
+                                    data-single={modelMenuAvailable() ? "false" : "true"}
                                     title={currentModelInfo() ? `${currentModelInfo()?.providerName || currentModelInfo()?.providerID}/${currentModelInfo()?.modelID}` : "选择模型"}
                                 >
-                                    <Cpu class="lucide-control-icon" size={16} strokeWidth={1.8} />
+                                    <Package class="lucide-control-icon" size={16} strokeWidth={1.8} />
                                     <span>{modelLabel()}</span>
-                                    <ChevronDown class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                    <Show when={modelMenuAvailable()}>
+                                        <ChevronDown class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                    </Show>
                                 </DropdownMenu.Trigger>
                                 <DropdownMenu.Portal>
                                     <DropdownMenu.Content class="model-menu">

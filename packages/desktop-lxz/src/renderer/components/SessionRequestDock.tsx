@@ -340,6 +340,13 @@ export function SessionQuestionDock(props: {
                                     placeholder="输入回答"
                                     value={customValue()}
                                     rows={1}
+                                    ref={(element) => {
+                                        queueMicrotask(() => {
+                                            if (!editingCustom()) return
+                                            element.focus()
+                                            element.setSelectionRange(element.value.length, element.value.length)
+                                        })
+                                    }}
                                     disabled={props.responding}
                                     onInput={(event) => updateCustom(event.currentTarget.value)}
                                     onKeyDown={(event) => {

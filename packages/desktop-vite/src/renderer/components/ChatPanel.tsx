@@ -519,44 +519,6 @@ export function ChatPanel() {
         }
     }
 
-    // 清空对话 - 创建新会话并重新关联文件
-    const handleClearMessages = async () => {
-        const selectedFile = sdk.selectedFile()
-        if (!selectedFile || isLoading()) return
-
-        try {
-            const { serverInfo } = sdk
-            const headers = getHeaders()
-
-            // 创建新会话
-            const response = await fetch(`${serverInfo.url}/session`, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({}),
-            })
-
-            if (response.ok) {
-                const newSession = await response.json()
-                const newSessionId = newSession.id
-
-                // 重新关联文件
-                sdk.setSessionForFile(selectedFile.path, newSessionId)
-                setSessionId(newSessionId)
-
-                // 清空 UI 上的消息
-                setMessages([])
-                setStreamingContent("")
-                setToolCalls([])
-
-                console.log(`已清空对话，新会话 ID: ${newSessionId}`)
-            } else {
-                console.error("创建新会话失败:", response.status)
-            }
-        } catch (error) {
-            console.error("清空对话失败:", error)
-        }
-    }
-
     return (
         <div class="chat-panel">
             <div class="chat-header">
@@ -582,34 +544,13 @@ export function ChatPanel() {
                         </div>
                     </Show>
                 </div>
-                {/* 右侧区域 - 状态指示器和按钮，固定位置 */}
+                {/* 右侧区域 - 状态指示器，固定位置 */}
                 <div style={{ display: "flex", "align-items": "center", gap: "8px", "flex-shrink": 0 }}>
                     <Show when={sessionId()}>
                         <div class="status-indicator">
                             <span class={`status-dot ${sessionStatus() === "busy" ? "busy" : "online"}`}></span>
                             <span>{sessionStatus() === "busy" ? "处理中" : "就绪"}</span>
                         </div>
-                    </Show>
-                    {/* 清空对话按钮 */}
-                    <Show when={sdk.selectedFile() && !isLoading()}>
-                        <button
-                            onClick={handleClearMessages}
-                            title="清空对话"
-                            style={{
-                                background: "transparent",
-                                border: "1px solid var(--border-default)",
-                                "border-radius": "6px",
-                                padding: "4px 8px",
-                                cursor: "pointer",
-                                "font-size": "14px",
-                                transition: "all 0.2s",
-                                opacity: 0.7
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
-                            onMouseLeave={(e) => e.currentTarget.style.opacity = "0.7"}
-                        >
-                            🗑️
-                        </button>
                     </Show>
                 </div>
             </div>
