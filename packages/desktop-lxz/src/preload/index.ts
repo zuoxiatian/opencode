@@ -1,5 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron"
 
+export interface DirectoryChangeEvent {
+    path: string
+    eventType: "rename" | "change"
+    filename: string | null
+}
+
+interface DirectoryWatchResult {
+    success: boolean
+    error?: string
+}
+
 export interface ElectronAPI {
     onServerReady: (callback: (data: { url: string; password: string | null }) => void) => void
     getServerInfo: () => Promise<{ url: string; password: string | null } | null>
@@ -13,6 +24,7 @@ export interface ElectronAPI {
     readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
     readFileBase64: (path: string) => Promise<{ success: boolean; base64?: string; error?: string }>
     deleteFile: (path: string) => Promise<{ success: boolean; error?: string }>
+    watchDirectory: (path: string, callback: (event: DirectoryChangeEvent) => void) => () => void
 }
 
 const electronAPI: ElectronAPI = {
@@ -41,6 +53,29 @@ const electronAPI: ElectronAPI = {
     readFileBase64: (path) => ipcRenderer.invoke("read-file-base64", path),
 
     deleteFile: (path) => ipcRenderer.invoke("delete-file", path),
+
+    watchDirectory: (path, callback) => {
+        const watcherID = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        const handler = (_: unknown, event: DirectoryChangeEvent & { watcherID: string }) => {
+            if (event.watcherID !== watcherID) return
+            callback({
+                path: event.path,
+                eventType: event.eventType,
+                filename: event.filename,
+            })
+        }
+
+        ipcRenderer.on("directory-changed", handler)
+        void ipcRenderer.invoke("watch-directory", { path, watcherID }).then((result: DirectoryWatchResult) => {
+            if (result.success) return
+            console.error("监听目录失败:", result.error)
+        })
+
+        return () => {
+            ipcRenderer.removeListener("directory-changed", handler)
+            void ipcRenderer.invoke("unwatch-directory", watcherID)
+        }
+    },
 }
 
 contextBridge.exposeInMainWorld("electronAPI", electronAPI)

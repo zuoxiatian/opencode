@@ -18,6 +18,7 @@ import FileVideo from "lucide-solid/icons/file-video"
 import Folder from "lucide-solid/icons/folder"
 import FolderOpen from "lucide-solid/icons/folder-open"
 import Image from "lucide-solid/icons/image"
+import PanelLeft from "lucide-solid/icons/panel-left"
 import PencilLine from "lucide-solid/icons/pencil-line"
 import Presentation from "lucide-solid/icons/presentation"
 import SquarePen from "lucide-solid/icons/square-pen"
@@ -50,7 +51,7 @@ function SidebarChevron(props: { expanded: boolean; class?: string }) {
     return <Dynamic component={props.expanded ? ChevronDown : ChevronRight} class={props.class ?? "sidebar-chevron-icon"} size={14} strokeWidth={1.8} />
 }
 
-export function FolderPanel() {
+export function FolderPanel(props: { onCollapse: () => void }) {
     const sdk = useSDK()
     const [projects, setProjects] = createSignal<Project[]>([])
     const [files, setFiles] = createSignal<FileItem[]>([])
@@ -69,6 +70,8 @@ export function FolderPanel() {
     const [sidebarMenu, setSidebarMenu] = createSignal<SidebarMenu | null>(null)
     const [sidebarDialog, setSidebarDialog] = createSignal<SidebarDialog | null>(null)
     const sessionLoadFolders = new Set<string>()
+    let fileLoadRequest = 0
+    let fileRefreshTimer: ReturnType<typeof setTimeout> | undefined
     let unsubscribe: (() => void) | undefined
 
     const menuPosition = (event: MouseEvent, height: number) => ({
@@ -273,16 +276,36 @@ export function FolderPanel() {
         window.removeEventListener(PROJECT_ADDED_EVENT, handleProjectAdded)
         document.removeEventListener("click", closeSidebarMenu)
         document.removeEventListener("scroll", closeSidebarMenu, true)
+        if (fileRefreshTimer) {
+            clearTimeout(fileRefreshTimer)
+            fileRefreshTimer = undefined
+        }
         unsubscribe?.()
     })
 
     createEffect(() => {
         const folder = sdk.directory()
+        let stopWatching: (() => void) | undefined
         if (!folder) {
             setFiles([])
             return
         }
         void loadFiles(folder)
+        stopWatching = window.electronAPI.watchDirectory(folder, () => {
+            if (fileRefreshTimer) clearTimeout(fileRefreshTimer)
+            fileRefreshTimer = setTimeout(() => {
+                fileRefreshTimer = undefined
+                if (sdk.directory() !== folder) return
+                void loadFiles(folder, { quiet: true })
+            }, 120)
+        })
+        onCleanup(() => {
+            if (fileRefreshTimer) {
+                clearTimeout(fileRefreshTimer)
+                fileRefreshTimer = undefined
+            }
+            stopWatching?.()
+        })
     })
 
     createEffect(() => {
@@ -291,17 +314,39 @@ export function FolderPanel() {
         untrack(() => void Promise.all(folders.map(loadSessions)))
     })
 
-    const loadFiles = async (folder: string) => {
-        setIsLoadingFiles(true)
+    const loadFiles = async (folder: string, options: { quiet?: boolean } = {}) => {
+        const request = ++fileLoadRequest
+        if (!options.quiet) setIsLoadingFiles(true)
         try {
-            setFiles((await window.electronAPI.readDirectory(folder))
+            const nextFiles = (await window.electronAPI.readDirectory(folder))
                 .filter((file: FileItem) => !file.isDirectory)
-                .sort((a: FileItem, b: FileItem) => a.name.localeCompare(b.name)))
+                .sort((a: FileItem, b: FileItem) => a.name.localeCompare(b.name))
+            if (request !== fileLoadRequest || sdk.directory() !== folder) return
+            const paths = new Set(nextFiles.map((file) => file.path))
+            const selectedFiles = sdk.selectedFiles().filter((file) => paths.has(file.path))
+            const selectedFile = sdk.selectedFile()
+            const lastSelected = lastSelectedFilePath()
+            batch(() => {
+                setFiles(nextFiles)
+                sdk.setSelectedFiles(selectedFiles)
+                if (selectedFile && !paths.has(selectedFile.path)) {
+                    sdk.setSelectedFile(selectedFiles.at(-1) ?? null)
+                }
+                if (lastSelected && !paths.has(lastSelected)) {
+                    setLastSelectedFilePath(selectedFiles.at(-1)?.path ?? null)
+                }
+            })
         } catch (error) {
+            if (request !== fileLoadRequest || sdk.directory() !== folder) return
             console.error("加载文件列表失败:", error)
-            setFiles([])
+            batch(() => {
+                setFiles([])
+                sdk.setSelectedFile(null)
+                sdk.setSelectedFiles([])
+                setLastSelectedFilePath(null)
+            })
         } finally {
-            setIsLoadingFiles(false)
+            if (request === fileLoadRequest && sdk.directory() === folder) setIsLoadingFiles(false)
         }
     }
 
@@ -672,8 +717,13 @@ export function FolderPanel() {
     return (
         <div class="folder-panel">
             <div class="folder-panel-header">
+                <div class="sidebar-top-control-row">
+                    <button class="sidebar-panel-button" onClick={props.onCollapse} title="折叠侧边栏" aria-label="折叠侧边栏">
+                        <PanelLeft class="sidebar-lucide-icon" size={17} strokeWidth={1.8} />
+                    </button>
+                </div>
                 <button class="folder-open-button" onClick={handleOpenFolder} title="打开文件夹">
-                    <FolderOpen class="sidebar-lucide-icon" size={15} strokeWidth={1.8} />
+                    <FolderOpen class="sidebar-lucide-icon" size={17} strokeWidth={1.9} />
                     <span>打开文件夹</span>
                 </button>
             </div>
@@ -794,6 +844,9 @@ export function FolderPanel() {
                         <Show when={showFiles()}>
                             <Show when={isLoadingFiles()}>
                                 <div class="conversation-empty">加载文件...</div>
+                            </Show>
+                            <Show when={!isLoadingFiles() && files().length === 0}>
+                                <div class="file-preview-empty">暂无文件</div>
                             </Show>
                             <Show when={!isLoadingFiles() && files().length > 0}>
                                 <div class="file-list compact">

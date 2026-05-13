@@ -3,7 +3,6 @@ import { FolderPanel } from "./FolderPanel"
 import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
-import appIcon from "../../../build/icon.png"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -17,7 +16,10 @@ interface AppProps {
 
 export function App(props: AppProps) {
     const [folderWidth, setFolderWidth] = createSignal(260)
+    const [folderCollapsed, setFolderCollapsed] = createSignal(false)
     const [isDragging, setIsDragging] = createSignal<"folder" | null>(null)
+    const isMac = () => navigator.platform.toLowerCase().includes("mac")
+    const visibleFolderWidth = () => folderCollapsed() ? 0 : folderWidth()
 
     // 拖拽处理
     const handleMouseDown = (type: "folder") => (e: MouseEvent) => {
@@ -59,38 +61,42 @@ export function App(props: AppProps) {
     return (
         <MarkedProvider>
         <SDKProvider serverInfo={props.serverInfo}>
-            {/* 窗口标题栏 */}
             <div
-                class="window-titlebar"
-                classList={{ "window-titlebar-macos": navigator.platform.toLowerCase().includes("mac") }}
+                class={[
+                    "app-layout",
+                    isDragging() ? "dragging" : "",
+                    isMac() ? "app-layout-macos" : "",
+                    folderCollapsed() ? "app-layout-folder-collapsed" : "",
+                ].filter(Boolean).join(" ")}
             >
-                <img class="window-titlebar-icon" src={appIcon} alt="" />
-                <span class="window-titlebar-title">LongwiseTechAgent</span>
-            </div>
-
-            <div class={`app-layout ${isDragging() ? "dragging" : ""}`}>
                 {/* 拖拽时的透明遮罩层 - 防止 iframe 捕获鼠标事件 */}
                 <Show when={isDragging()}>
                     <div class="drag-overlay" />
                 </Show>
-
                 {/* 侧边栏面板 */}
                 <div
                     class="folder-panel-container"
-                    style={{ width: `${folderWidth()}px` }}
+                    classList={{ collapsed: folderCollapsed() }}
+                    style={{ width: `${visibleFolderWidth()}px` }}
                 >
-                    <FolderPanel />
+                    <Show
+                        when={!folderCollapsed()}
+                    >
+                        <FolderPanel onCollapse={() => setFolderCollapsed(true)} />
+                    </Show>
                 </div>
 
                 {/* 分隔条：项目列表 ↔ 聊天 */}
-                <div
-                    class={`resizer ${isDragging() === "folder" ? "active" : ""}`}
-                    onMouseDown={handleMouseDown("folder")}
-                />
+                <Show when={!folderCollapsed()}>
+                    <div
+                        class={`resizer ${isDragging() === "folder" ? "active" : ""}`}
+                        onMouseDown={handleMouseDown("folder")}
+                    />
+                </Show>
 
                 {/* 聊天面板 */}
                 <div class="chat-panel-wrapper expanded">
-                    <ChatPanel />
+                    <ChatPanel sidebarCollapsed={folderCollapsed()} onOpenSidebar={() => setFolderCollapsed(false)} />
                 </div>
             </div>
         </SDKProvider>

@@ -27,6 +27,7 @@ import FolderPlus from "lucide-solid/icons/folder-plus"
 import ListChecks from "lucide-solid/icons/list-checks"
 import MonitorCheck from "lucide-solid/icons/monitor-check"
 import Package from "lucide-solid/icons/package"
+import PanelLeftOpen from "lucide-solid/icons/panel-left-open"
 import Plus from "lucide-solid/icons/plus"
 import Search from "lucide-solid/icons/search"
 import ShieldCheck from "lucide-solid/icons/shield-check"
@@ -60,6 +61,11 @@ interface ModelOption extends ModelSelection {
     modelName: string
     context: number
     isDefault: boolean
+}
+
+interface ChatPanelProps {
+    sidebarCollapsed?: boolean
+    onOpenSidebar?: () => void
 }
 
 type PermissionMode = "default" | "auto"
@@ -350,7 +356,7 @@ function createAscendingID(prefix: "msg" | "prt") {
     return `${prefix}_${Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("")}${Array.from(random).map((byte) => chars[byte % chars.length]).join("")}`
 }
 
-export function ChatPanel() {
+export function ChatPanel(props: ChatPanelProps) {
     const sdk = useSDK()
     const [inputText, setInputText] = createSignal("")
     const [agents, setAgents] = createSignal<AgentOption[]>([])
@@ -1088,6 +1094,31 @@ export function ChatPanel() {
     return (
         <div class="chat-panel" classList={{ "chat-panel-empty": emptyConversation() }}>
             <div class="chat-header">
+                <Show when={props.sidebarCollapsed}>
+                    <button
+                        class="chat-sidebar-toggle"
+                        type="button"
+                        onPointerDown={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            props.onOpenSidebar?.()
+                        }}
+                        onMouseDown={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            props.onOpenSidebar?.()
+                        }}
+                        onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            props.onOpenSidebar?.()
+                        }}
+                        title="展开侧边栏"
+                        aria-label="展开侧边栏"
+                    >
+                        <PanelLeftOpen class="lucide-control-icon" size={17} strokeWidth={1.8} />
+                    </button>
+                </Show>
                 <div class="chat-header-main">
                     <div class="chat-title-row">
                         <Show when={isLoading()}>

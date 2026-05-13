@@ -1,6 +1,6 @@
 import type { BrowserWindow as BrowserWindowType } from "electron"
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron"
-import { existsSync } from "fs"
+import { existsSync, watch, type FSWatcher } from "fs"
 import { join } from "path"
 import { spawn, ChildProcess } from "child_process"
 import { fileURLToPath } from "url"
@@ -12,14 +12,30 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url))
 let mainWindow: BrowserWindowType | null = null
 let serverProcess: ChildProcess | null = null
 let serverInfo: ServerInfo | null = null
+const directoryWatchers = new Map<string, FSWatcher>()
 
 interface ServerInfo {
     url: string
     password: string | null
 }
 
+interface DirectoryWatchOptions {
+    path: string
+    watcherID: string
+}
+
 function getRepoRoot() {
     return join(__dirname, "..", "..", "..", "..")
+}
+
+function closeDirectoryWatcher(watcherID: string) {
+    directoryWatchers.get(watcherID)?.close()
+    directoryWatchers.delete(watcherID)
+}
+
+function closeDirectoryWatchers() {
+    directoryWatchers.forEach((watcher) => watcher.close())
+    directoryWatchers.clear()
 }
 
 function getBunCommand() {
@@ -241,10 +257,11 @@ async function createWindow() {
         // 使用无边框窗口 + 自定义控件覆盖
         frame: false,
         titleBarStyle: "hidden",
+        trafficLightPosition: { x: 19, y: 19 },
         titleBarOverlay: {
             color: "#08080d",
             symbolColor: "#9ca3af",
-            height: 32,
+            height: 52,
         },
         backgroundColor: "#08080d",
         webPreferences: {
@@ -261,6 +278,7 @@ async function createWindow() {
     })
 
     mainWindow.on("closed", () => {
+        closeDirectoryWatchers()
         mainWindow = null
     })
 
@@ -339,6 +357,38 @@ ipcMain.handle("read-directory", async (_, dirPath: string) => {
     }
 })
 
+ipcMain.handle("watch-directory", (event, options: DirectoryWatchOptions) => {
+    closeDirectoryWatcher(options.watcherID)
+    try {
+        const watcher = watch(options.path, { persistent: false }, (eventType, filename) => {
+            if (event.sender.isDestroyed()) {
+                closeDirectoryWatcher(options.watcherID)
+                return
+            }
+            event.sender.send("directory-changed", {
+                watcherID: options.watcherID,
+                path: options.path,
+                eventType,
+                filename: filename?.toString() ?? null,
+            })
+        })
+        watcher.on("error", (error) => {
+            console.error("监听目录失败:", error)
+            closeDirectoryWatcher(options.watcherID)
+        })
+        directoryWatchers.set(options.watcherID, watcher)
+        return { success: true }
+    } catch (error) {
+        console.error("监听目录失败:", error)
+        return { success: false, error: String(error) }
+    }
+})
+
+ipcMain.handle("unwatch-directory", (_, watcherID: string) => {
+    closeDirectoryWatcher(watcherID)
+    return { success: true }
+})
+
 ipcMain.handle("read-file", async (_, filePath: string) => {
     try {
         const { readFile } = await import("fs/promises")
@@ -384,6 +434,7 @@ app.on("activate", () => {
 })
 
 app.on("window-all-closed", () => {
+    closeDirectoryWatchers()
     if (serverProcess) {
         serverProcess.kill()
         serverProcess = null
@@ -395,6 +446,7 @@ app.on("window-all-closed", () => {
 })
 
 app.on("before-quit", () => {
+    closeDirectoryWatchers()
     if (serverProcess) {
         serverProcess.kill()
         serverProcess = null
