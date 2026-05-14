@@ -242,6 +242,7 @@ async function startServer(): Promise<ServerInfo> {
  */
 async function createWindow() {
     const appIconPath = getAppIconPath()
+    const useNativeTitlebar = process.platform === "win32"
 
     if (process.platform === "darwin" && appIconPath) {
         app.dock.setIcon(appIconPath)
@@ -254,15 +255,16 @@ async function createWindow() {
         minHeight: 600,
         title: "LongwiseTechAgent",
         icon: appIconPath,
-        // 使用无边框窗口 + 自定义控件覆盖
-        frame: false,
-        titleBarStyle: "hidden",
-        trafficLightPosition: { x: 19, y: 19 },
-        titleBarOverlay: {
-            color: "#08080d",
-            symbolColor: "#9ca3af",
-            height: 52,
-        },
+        frame: useNativeTitlebar,
+        ...(useNativeTitlebar ? {} : {
+            titleBarStyle: "hidden" as const,
+            trafficLightPosition: { x: 19, y: 19 },
+            titleBarOverlay: {
+                color: "#08080d",
+                symbolColor: "#9ca3af",
+                height: 52,
+            },
+        }),
         backgroundColor: "#08080d",
         webPreferences: {
             preload: join(__dirname, "../preload/index.cjs"),

@@ -18,11 +18,15 @@ import FileVideo from "lucide-solid/icons/file-video"
 import Folder from "lucide-solid/icons/folder"
 import FolderOpen from "lucide-solid/icons/folder-open"
 import Image from "lucide-solid/icons/image"
+import Monitor from "lucide-solid/icons/monitor"
+import Moon from "lucide-solid/icons/moon"
 import PanelLeft from "lucide-solid/icons/panel-left"
 import PencilLine from "lucide-solid/icons/pencil-line"
 import Presentation from "lucide-solid/icons/presentation"
 import SquarePen from "lucide-solid/icons/square-pen"
+import Sun from "lucide-solid/icons/sun"
 import Trash2 from "lucide-solid/icons/trash-2"
+import { nextThemeMode, type ThemeMode } from "../theme"
 
 interface FileItem {
     name: string
@@ -41,6 +45,12 @@ type SidebarDialog =
 
 const LAST_PROJECT_STORAGE_KEY = "desktop-lxz.lastProjectFolder"
 const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
+const SYSTEM_THEME_MODE_OPTION = { mode: "system", label: "系统", icon: Monitor } as const
+const THEME_MODE_OPTIONS = [
+    SYSTEM_THEME_MODE_OPTION,
+    { mode: "light", label: "亮色", icon: Sun },
+    { mode: "dark", label: "暗色", icon: Moon },
+] as const
 
 function isDefaultSessionTitle(title?: string) {
     const value = title?.trim()
@@ -51,7 +61,7 @@ function SidebarChevron(props: { expanded: boolean; class?: string }) {
     return <Dynamic component={props.expanded ? ChevronDown : ChevronRight} class={props.class ?? "sidebar-chevron-icon"} size={14} strokeWidth={1.8} />
 }
 
-export function FolderPanel(props: { onCollapse: () => void }) {
+export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void }) {
     const sdk = useSDK()
     const [projects, setProjects] = createSignal<Project[]>([])
     const [files, setFiles] = createSignal<FileItem[]>([])
@@ -580,6 +590,8 @@ export function FolderPanel(props: { onCollapse: () => void }) {
 
     const isSessionBusy = (sessionID: string) => sdk.store.session_status[sessionID]?.type === "busy"
     const isSessionUnread = (sessionID: string) => sdk.selectedSession()?.id !== sessionID && unreadSessions().has(sessionID)
+    const currentThemeModeOption = () => THEME_MODE_OPTIONS.find((item) => item.mode === props.themeMode) ?? SYSTEM_THEME_MODE_OPTION
+    const nextThemeModeOption = () => THEME_MODE_OPTIONS.find((item) => item.mode === nextThemeMode(props.themeMode)) ?? SYSTEM_THEME_MODE_OPTION
 
     const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
         ...session,
@@ -718,6 +730,10 @@ export function FolderPanel(props: { onCollapse: () => void }) {
         <div class="folder-panel">
             <div class="folder-panel-header">
                 <div class="sidebar-top-control-row">
+                    <div class="sidebar-brand" aria-label="LXZ">
+                        <span class="sidebar-brand-mark" aria-hidden="true"></span>
+                        <span class="sidebar-brand-name">LXZ</span>
+                    </div>
                     <button class="sidebar-panel-button" onClick={props.onCollapse} title="折叠侧边栏" aria-label="折叠侧边栏">
                         <PanelLeft class="sidebar-lucide-icon" size={17} strokeWidth={1.8} />
                     </button>
@@ -874,9 +890,21 @@ export function FolderPanel(props: { onCollapse: () => void }) {
                 </Show>
             </div>
 
-            <div class="folder-panel-status" title="服务器在线">
-                <span class="status-dot online"></span>
-                <span>服务在线</span>
+            <div class="folder-panel-status">
+                <button
+                    type="button"
+                    class="theme-cycle-button"
+                    onClick={() => props.onThemeModeChange(nextThemeMode(props.themeMode))}
+                    title={`主题：${currentThemeModeOption().label}。点击切换到${nextThemeModeOption().label}`}
+                    aria-label={`主题：${currentThemeModeOption().label}。点击切换到${nextThemeModeOption().label}`}
+                >
+                    <Dynamic component={currentThemeModeOption().icon} class="sidebar-lucide-icon" size={14} strokeWidth={1.8} />
+                    <span>{currentThemeModeOption().label}</span>
+                </button>
+                <div class="service-status" title="服务器在线">
+                    <span class="status-dot online"></span>
+                    <span>服务在线</span>
+                </div>
             </div>
 
             <Show when={sidebarMenu()}>
