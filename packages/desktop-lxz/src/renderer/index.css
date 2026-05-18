@@ -592,61 +592,6 @@ body {
     padding-left: 80px;
 }
 
-.sidebar-brand {
-    min-width: 0;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-primary);
-    user-select: none;
-}
-
-.sidebar-brand-mark {
-    position: relative;
-    width: 21px;
-    height: 21px;
-    flex: 0 0 auto;
-    border: 1px solid var(--border-subtle);
-    border-radius: 7px;
-    background: var(--surface-base);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
-}
-
-.sidebar-brand-mark::before,
-.sidebar-brand-mark::after {
-    content: "";
-    position: absolute;
-    border-radius: 2px;
-    background: currentColor;
-}
-
-.sidebar-brand-mark::before {
-    left: 6px;
-    bottom: 5px;
-    width: 3px;
-    height: 11px;
-}
-
-.sidebar-brand-mark::after {
-    left: 6px;
-    bottom: 5px;
-    width: 10px;
-    height: 3px;
-}
-
-.sidebar-brand-name {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 18px;
-    letter-spacing: 0;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .sidebar-panel-button {
     width: 28px;
     height: 28px;

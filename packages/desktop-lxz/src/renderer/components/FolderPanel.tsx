@@ -730,10 +730,6 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
         <div class="folder-panel">
             <div class="folder-panel-header">
                 <div class="sidebar-top-control-row">
-                    <div class="sidebar-brand" aria-label="LXZ">
-                        <span class="sidebar-brand-mark" aria-hidden="true"></span>
-                        <span class="sidebar-brand-name">LXZ</span>
-                    </div>
                     <button class="sidebar-panel-button" onClick={props.onCollapse} title="折叠侧边栏" aria-label="折叠侧边栏">
                         <PanelLeft class="sidebar-lucide-icon" size={17} strokeWidth={1.8} />
                     </button>
