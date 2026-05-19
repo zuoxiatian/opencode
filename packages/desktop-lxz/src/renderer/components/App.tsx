@@ -1,9 +1,9 @@
-import { createEffect, createSignal, Show, onMount, onCleanup } from "solid-js"
+import { createSignal, Show, onMount, onCleanup } from "solid-js"
 import { FolderPanel } from "./FolderPanel"
 import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
-import { isThemeMode, THEME_STORAGE_KEY } from "../theme"
+import type { ThemeMode } from "../theme"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -13,30 +13,18 @@ interface ServerInfo {
 
 interface AppProps {
     serverInfo: ServerInfo
+    themeMode: ThemeMode
+    onThemeModeChange: (mode: ThemeMode) => void
 }
-
-const readStoredThemeMode = () => {
-    const value = localStorage.getItem(THEME_STORAGE_KEY)
-    if (isThemeMode(value)) return value
-    return "system"
-}
-
-const getSystemTheme = () =>
-    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"
 
 export function App(props: AppProps) {
     const [folderWidth, setFolderWidth] = createSignal(260)
     const [folderCollapsed, setFolderCollapsed] = createSignal(false)
     const [isDragging, setIsDragging] = createSignal<"folder" | null>(null)
-    const [themeMode, setThemeMode] = createSignal(readStoredThemeMode())
-    const [systemTheme, setSystemTheme] = createSignal(getSystemTheme())
-    const isMac = () => navigator.platform.toLowerCase().includes("mac")
+    const platform = navigator.platform.toLowerCase()
+    const isMac = platform.includes("mac")
+    const isWindows = platform.includes("win")
     const visibleFolderWidth = () => folderCollapsed() ? 0 : folderWidth()
-    const resolvedTheme = () => {
-        const mode = themeMode()
-        if (mode === "system") return systemTheme()
-        return mode
-    }
 
     // 拖拽处理
     const handleMouseDown = (type: "folder") => (e: MouseEvent) => {
@@ -68,18 +56,6 @@ export function App(props: AppProps) {
     onMount(() => {
         document.addEventListener("mousemove", handleMouseMove)
         document.addEventListener("mouseup", handleMouseUp)
-        const media = window.matchMedia("(prefers-color-scheme: light)")
-        const updateSystemTheme = () => setSystemTheme(media.matches ? "light" : "dark")
-        updateSystemTheme()
-        media.addEventListener("change", updateSystemTheme)
-        onCleanup(() => media.removeEventListener("change", updateSystemTheme))
-    })
-
-    createEffect(() => {
-        document.documentElement.dataset.theme = resolvedTheme()
-        document.documentElement.dataset.themeMode = themeMode()
-        document.documentElement.style.colorScheme = resolvedTheme()
-        localStorage.setItem(THEME_STORAGE_KEY, themeMode())
     })
 
     onCleanup(() => {
@@ -94,7 +70,9 @@ export function App(props: AppProps) {
                 class={[
                     "app-layout",
                     isDragging() ? "dragging" : "",
-                    isMac() ? "app-layout-macos" : "",
+                    isMac || isWindows ? "app-layout-custom-titlebar" : "",
+                    isMac ? "app-layout-macos" : "",
+                    isWindows ? "app-layout-windows" : "",
                     folderCollapsed() ? "app-layout-folder-collapsed" : "",
                 ].filter(Boolean).join(" ")}
             >
@@ -113,8 +91,8 @@ export function App(props: AppProps) {
                     >
                         <FolderPanel
                             onCollapse={() => setFolderCollapsed(true)}
-                            themeMode={themeMode()}
-                            onThemeModeChange={(mode) => setThemeMode(mode)}
+                            themeMode={props.themeMode}
+                            onThemeModeChange={props.onThemeModeChange}
                         />
                     </Show>
                 </div>

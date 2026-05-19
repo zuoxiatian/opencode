@@ -1,8 +1,9 @@
 /* @refresh reload */
 import { render } from "solid-js/web"
-import { createSignal, onMount, Show } from "solid-js"
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
 import "./index.css"
 import { App } from "./components/App"
+import { getSystemTheme, readStoredThemeMode, resolveThemeMode, THEME_STORAGE_KEY } from "./theme"
 import welcomeIcon from "../../build/128x128.png"
 
 // 服务器信息类型
@@ -14,8 +15,29 @@ interface ServerInfo {
 function Root() {
     const [serverInfo, setServerInfo] = createSignal<ServerInfo | null>(null)
     const [isLoading, setIsLoading] = createSignal(true)
+    const [themeMode, setThemeMode] = createSignal(readStoredThemeMode())
+    const [systemTheme, setSystemTheme] = createSignal(getSystemTheme())
+    const resolvedTheme = () => resolveThemeMode(themeMode(), systemTheme())
+    const syncTitleBarOverlay = () => {
+        if (!navigator.platform.toLowerCase().includes("win")) return
+
+        requestAnimationFrame(() => {
+            const rootStyle = getComputedStyle(document.documentElement)
+
+            void window.electronAPI.setTitleBarOverlay({
+                color: "rgba(0, 0, 0, 0)",
+                symbolColor: rootStyle.getPropertyValue("--text-primary").trim(),
+            })
+        })
+    }
 
     onMount(async () => {
+        const media = window.matchMedia("(prefers-color-scheme: light)")
+        const updateSystemTheme = () => setSystemTheme(media.matches ? "light" : "dark")
+        updateSystemTheme()
+        media.addEventListener("change", updateSystemTheme)
+        onCleanup(() => media.removeEventListener("change", updateSystemTheme))
+
         // 监听服务器就绪事件
         window.electronAPI.onServerReady((info) => {
             console.log("服务器就绪:", info)
@@ -29,6 +51,15 @@ function Root() {
             setServerInfo(existingInfo)
             setIsLoading(false)
         }
+    })
+
+    createEffect(() => {
+        document.documentElement.dataset.theme = resolvedTheme()
+        document.documentElement.dataset.themeMode = themeMode()
+        document.documentElement.style.colorScheme = resolvedTheme()
+        localStorage.setItem(THEME_STORAGE_KEY, themeMode())
+        void window.electronAPI.setThemeMode(themeMode())
+        syncTitleBarOverlay()
     })
 
     return (
@@ -60,7 +91,13 @@ function Root() {
                     </div>
                 }
             >
-                {(info) => <App serverInfo={info()} />}
+                {(info) => (
+                    <App
+                        serverInfo={info()}
+                        themeMode={themeMode()}
+                        onThemeModeChange={setThemeMode}
+                    />
+                )}
             </Show>
         </Show>
     )

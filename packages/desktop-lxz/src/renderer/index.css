@@ -399,7 +399,7 @@ body {
     padding-top: 0;
 }
 
-.app-layout-macos {
+.app-layout-custom-titlebar {
     padding-top: 0;
 }
 
@@ -570,12 +570,12 @@ body {
     background: transparent;
 }
 
-.app-layout-macos .folder-panel-header {
+.app-layout-custom-titlebar .folder-panel-header {
     padding-top: 0;
     -webkit-app-region: drag;
 }
 
-.app-layout-macos .folder-panel-header button {
+.app-layout-custom-titlebar .folder-panel-header button {
     -webkit-app-region: no-drag;
 }
 
@@ -587,8 +587,11 @@ body {
     gap: 8px;
 }
 
-.app-layout-macos .sidebar-top-control-row {
+.app-layout-custom-titlebar .sidebar-top-control-row {
     min-height: 52px;
+}
+
+.app-layout-macos .sidebar-top-control-row {
     padding-left: 80px;
 }
 
@@ -2323,7 +2326,10 @@ body {
     height: 100%;
     text-align: center;
     padding: var(--spacing-xl);
-    background: var(--lxz-bg-right);
+    background:
+        radial-gradient(circle at 50% 38%, var(--lxz-selection-bg) 0%, transparent 44%),
+        var(--lxz-bg-app);
+    color: var(--text-primary);
 }
 
 .welcome-icon {
@@ -2339,13 +2345,14 @@ body {
     font-weight: 900;
     font-size: 36px;
     line-height: 44px;
-    color: #FFD100;
+    color: var(--accent-secondary);
+    text-shadow: var(--shadow-glow);
     margin-bottom: 16px;
 }
 
 .welcome-subtitle {
     font-size: 16px;
-    color: rgba(245, 245, 247, 0.5);
+    color: var(--text-secondary);
     margin-bottom: 20px;
     max-width: 400px;
     line-height: 1.6;
@@ -2356,7 +2363,7 @@ body {
     height: 2px;
     position: relative;
     overflow: hidden;
-    background: rgba(245, 245, 247, 0.16);
+    background: var(--border-default);
     margin-bottom: 14px;
 }
 
@@ -2369,10 +2376,11 @@ body {
     height: 100%;
     background: linear-gradient(
         90deg,
-        rgba(250, 208, 3, 0) 0%,
-        rgba(250, 208, 3, 1) 50%,
-        rgba(250, 208, 3, 0) 100%
+        transparent 0%,
+        var(--accent-secondary) 50%,
+        transparent 100%
     );
+    box-shadow: var(--shadow-glow);
     filter: blur(0.5px);
     animation: welcome-progress-shine 1.6s ease-in-out infinite;
 }
@@ -2383,15 +2391,15 @@ body {
     padding: 0;
     background: transparent;
     border: 0;
-    color: rgba(245, 245, 247, 0.45);
+    color: var(--text-tertiary);
 }
 
 .welcome-screen .status-dot {
     width: 7px;
     height: 7px;
     border: 0;
-    background: #FAD003;
-    box-shadow: 0 0 10px rgba(250, 208, 3, 0.45);
+    background: var(--accent-secondary);
+    box-shadow: 0 0 10px var(--border-accent);
 }
 
 @keyframes welcome-progress-shine {
@@ -2801,6 +2809,10 @@ body {
 
 .app-layout-macos.app-layout-folder-collapsed .chat-header {
     padding-left: 88px;
+}
+
+.app-layout-windows .chat-header {
+    padding-right: 148px;
 }
 
 .chat-header-main {

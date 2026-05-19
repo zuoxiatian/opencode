@@ -24,6 +24,8 @@ export interface ElectronAPI {
     readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
     readFileBase64: (path: string) => Promise<{ success: boolean; base64?: string; error?: string }>
     deleteFile: (path: string) => Promise<{ success: boolean; error?: string }>
+    setTitleBarOverlay: (options: { color: string; symbolColor: string }) => Promise<void>
+    setThemeMode: (mode: "system" | "light" | "dark") => Promise<void>
     watchDirectory: (path: string, callback: (event: DirectoryChangeEvent) => void) => () => void
 }
 
@@ -53,6 +55,10 @@ const electronAPI: ElectronAPI = {
     readFileBase64: (path) => ipcRenderer.invoke("read-file-base64", path),
 
     deleteFile: (path) => ipcRenderer.invoke("delete-file", path),
+
+    setTitleBarOverlay: (options) => ipcRenderer.invoke("set-title-bar-overlay", options),
+
+    setThemeMode: (mode) => ipcRenderer.invoke("set-theme-mode", mode),
 
     watchDirectory: (path, callback) => {
         const watcherID = `${Date.now()}-${Math.random().toString(36).slice(2)}`

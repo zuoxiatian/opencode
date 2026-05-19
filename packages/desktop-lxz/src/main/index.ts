@@ -1,5 +1,5 @@
-import type { BrowserWindow as BrowserWindowType } from "electron"
-import { app, BrowserWindow, ipcMain, dialog, shell } from "electron"
+import type { BrowserWindow as BrowserWindowType, TitleBarOverlayOptions } from "electron"
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme } from "electron"
 import { existsSync, watch, type FSWatcher } from "fs"
 import { delimiter, join } from "path"
 import { spawn, ChildProcess } from "child_process"
@@ -22,6 +22,49 @@ interface ServerInfo {
 interface DirectoryWatchOptions {
     path: string
     watcherID: string
+}
+
+type ThemeMode = "system" | "light" | "dark"
+type ResolvedTheme = Exclude<ThemeMode, "system">
+
+function isThemeMode(value: string): value is ThemeMode {
+    return value === "system" || value === "light" || value === "dark"
+}
+
+function themeModePath() {
+    return join(app.getPath("userData"), "theme-mode.txt")
+}
+
+async function readStoredThemeMode(): Promise<ThemeMode> {
+    if (!existsSync(themeModePath())) return "system"
+
+    const value = (await readFile(themeModePath(), "utf8")).trim()
+    if (isThemeMode(value)) return value
+    return "system"
+}
+
+async function writeStoredThemeMode(mode: ThemeMode) {
+    await mkdir(app.getPath("userData"), { recursive: true })
+    await writeFile(themeModePath(), mode)
+}
+
+function resolveThemeMode(mode: ThemeMode): ResolvedTheme {
+    if (mode !== "system") return mode
+    return nativeTheme.shouldUseDarkColors ? "dark" : "light"
+}
+
+function windowThemeColors(theme: ResolvedTheme) {
+    if (theme === "light") {
+        return {
+            backgroundColor: "#ffffff",
+            symbolColor: "#1a1b1f",
+        }
+    }
+
+    return {
+        backgroundColor: "#181818",
+        symbolColor: "#d4d4d4",
+    }
 }
 
 function getRepoRoot() {
@@ -294,10 +337,17 @@ async function startServer(): Promise<ServerInfo> {
  */
 async function createWindow() {
     const appIconPath = getAppIconPath()
-    const useNativeTitlebar = process.platform === "win32"
+    const isWindows = process.platform === "win32"
+    const startupThemeMode = await readStoredThemeMode()
+    nativeTheme.themeSource = startupThemeMode
+    const startupColors = windowThemeColors(resolveThemeMode(startupThemeMode))
 
     if (process.platform === "darwin" && appIconPath) {
         app.dock.setIcon(appIconPath)
+    }
+
+    if (isWindows) {
+        Menu.setApplicationMenu(null)
     }
 
     mainWindow = new BrowserWindow({
@@ -307,17 +357,25 @@ async function createWindow() {
         minHeight: 600,
         title: "LongwiseTechAgent",
         icon: appIconPath,
-        frame: useNativeTitlebar,
-        ...(useNativeTitlebar ? {} : {
-            titleBarStyle: "hidden" as const,
-            trafficLightPosition: { x: 19, y: 19 },
-            titleBarOverlay: {
-                color: "#08080d",
-                symbolColor: "#9ca3af",
-                height: 52,
-            },
-        }),
-        backgroundColor: "#08080d",
+        frame: isWindows,
+        autoHideMenuBar: isWindows,
+        titleBarStyle: "hidden" as const,
+        ...(isWindows
+            ? {
+                titleBarOverlay: {
+                    color: "rgba(0, 0, 0, 0)",
+                    symbolColor: startupColors.symbolColor,
+                },
+            }
+            : {
+                trafficLightPosition: { x: 19, y: 19 },
+                titleBarOverlay: {
+                    color: startupColors.backgroundColor,
+                    symbolColor: startupColors.symbolColor,
+                    height: 52,
+                },
+            }),
+        backgroundColor: startupColors.backgroundColor,
         webPreferences: {
             preload: join(__dirname, "../preload/index.cjs"),
             contextIsolation: true,
@@ -394,6 +452,19 @@ ipcMain.handle("restart", async () => {
 
 ipcMain.handle("get-server-info", () => {
     return serverInfo
+})
+
+ipcMain.handle("set-title-bar-overlay", (event, options: TitleBarOverlayOptions) => {
+    if (process.platform !== "win32") return
+    BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay(options)
+})
+
+ipcMain.handle("set-theme-mode", async (event, mode: ThemeMode) => {
+    if (!isThemeMode(mode)) return
+
+    await writeStoredThemeMode(mode)
+    nativeTheme.themeSource = mode
+    BrowserWindow.fromWebContents(event.sender)?.setBackgroundColor(windowThemeColors(resolveThemeMode(mode)).backgroundColor)
 })
 
 ipcMain.handle("read-directory", async (_, dirPath: string) => {
