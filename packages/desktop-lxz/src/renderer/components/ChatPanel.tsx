@@ -70,10 +70,14 @@ interface ChatPanelProps {
 
 type PermissionMode = "default" | "auto"
 type PermissionModeMap = Record<string, PermissionMode>
+type MessagePageItem = { info?: Message; parts?: Part[] }
+type MessagePage = { data: MessagePageItem[]; cursor?: string }
 
 const LAST_PROJECT_STORAGE_KEY = "desktop-lxz.lastProjectFolder"
 const PERMISSION_MODE_STORAGE_KEY = "desktop-lxz.permissionAutoAccept"
 const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
+const MESSAGE_HISTORY_PAGE_SIZE = 50
+const MESSAGE_HISTORY_SCROLL_THRESHOLD = 48
 const PERMISSION_MODE_OPTIONS = [
     { mode: "default", label: "默认权限", description: "遇到权限请求时手动确认" },
     { mode: "auto", label: "自动获取权限", description: "自动允许每次请求" },
@@ -376,10 +380,14 @@ export function ChatPanel(props: ChatPanelProps) {
     const [failedQueuedPrompt, setFailedQueuedPrompt] = createSignal<string | null>(null)
     const [permissionModes, setPermissionModes] = createSignal<PermissionModeMap>(readPermissionMode())
     const [newSessionPermissionMode, setNewSessionPermissionMode] = createSignal<PermissionMode>("default")
+    const [historyCursors, setHistoryCursors] = createSignal<Record<string, string | undefined>>({})
+    const [historyLoadingSessions, setHistoryLoadingSessions] = createSignal<Set<string>>(new Set())
     const loadedSessions = new Set<string>()
     const loadingSessions = new Set<string>()
     const autoRespondingPermissions = new Set<string>()
     let messagesContainer: HTMLDivElement | undefined
+    let preservingHistoryScroll = false
+    let historyScrollFrame: number | undefined
     let chatInputComposing = false
     let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -392,6 +400,24 @@ export function ChatPanel(props: ChatPanelProps) {
     })
 
     const currentPermissionModeInfo = createMemo(() => permissionModeInfo(currentPermissionMode()))
+
+    const historyMore = createMemo(() => {
+        const sid = currentSessionId()
+        return sid ? Boolean(historyCursors()[sid]) : false
+    })
+
+    const historyLoading = createMemo(() => {
+        const sid = currentSessionId()
+        return sid ? historyLoadingSessions().has(sid) : false
+    })
+
+    const setHistoryLoading = (sessionId: string, loading: boolean) => {
+        setHistoryLoadingSessions((prev) => {
+            if (loading) return prev.has(sessionId) ? prev : new Set(prev).add(sessionId)
+            if (!prev.has(sessionId)) return prev
+            return new Set([...prev].filter((item) => item !== sessionId))
+        })
+    }
 
     const setSessionPermissionMode = (sessionId: string, mode: PermissionMode) => {
         setPermissionModes((current) => {
@@ -493,6 +519,7 @@ export function ChatPanel(props: ChatPanelProps) {
     const canSend = createMemo(() => Boolean(inputText().trim() && !hasPendingRequest() && sdk.directory()))
 
     onCleanup(() => {
+        if (historyScrollFrame !== undefined) cancelAnimationFrame(historyScrollFrame)
         if (chatInputCompositionEndTimer) clearTimeout(chatInputCompositionEndTimer)
     })
 
@@ -501,6 +528,29 @@ export function ChatPanel(props: ChatPanelProps) {
         if (messagesContainer) {
             messagesContainer.scrollTop = messagesContainer.scrollHeight
         }
+    }
+
+    const isNearBottom = () => {
+        if (!messagesContainer) return true
+        return messagesContainer.scrollHeight - messagesContainer.clientHeight - messagesContainer.scrollTop <= 96
+    }
+
+    const preserveMessagesScroll = (update: () => void) => {
+        if (!messagesContainer) {
+            update()
+            return
+        }
+        const element = messagesContainer
+        const scrollTop = element.scrollTop
+        const scrollHeight = element.scrollHeight
+        preservingHistoryScroll = true
+        update()
+        if (historyScrollFrame !== undefined) cancelAnimationFrame(historyScrollFrame)
+        historyScrollFrame = requestAnimationFrame(() => {
+            historyScrollFrame = undefined
+            element.scrollTop = scrollTop + element.scrollHeight - scrollHeight
+            preservingHistoryScroll = false
+        })
     }
 
     // 消息列表或当前会话流式状态变化时滚动到底部
@@ -512,6 +562,7 @@ export function ChatPanel(props: ChatPanelProps) {
             if (last.role === "assistant") sdk.store.part[last.id]
         }
         isBusy()
+        if (preservingHistoryScroll || !isNearBottom()) return
         queueMicrotask(scrollToBottom)
     })
 
@@ -701,6 +752,75 @@ export function ChatPanel(props: ChatPanelProps) {
         return headers
     }
 
+    const sortMessages = (items: Message[]) => items.toSorted((a, b) => a.id.localeCompare(b.id))
+
+    const mergeMessages = (loaded: Message[], cached: Message[]) =>
+        sortMessages(Array.from(new Map([...loaded, ...cached].map((message) => [message.id, message])).values()))
+
+    const parseMessagePage = (data: MessagePageItem[]) => {
+        const items = data.filter((item): item is { info: Message; parts?: Part[] } => Boolean(item.info?.id))
+        return {
+            messages: sortMessages(items.map((item) => item.info)),
+            parts: Object.fromEntries(items.flatMap((item) => item.parts?.length ? [[item.info.id, item.parts]] : [])),
+        }
+    }
+
+    const fetchMessagePage = async (sessionId: string, before?: string): Promise<MessagePage | undefined> => {
+        const url = new URL(`${sdk.serverInfo.url}/session/${encodeURIComponent(sessionId)}/message`)
+        url.searchParams.set("limit", MESSAGE_HISTORY_PAGE_SIZE.toString())
+        if (before) url.searchParams.set("before", before)
+
+        const response = await fetch(url, { headers: getHeaders() })
+        if (!response.ok) return
+        return {
+            data: await response.json() as MessagePageItem[],
+            cursor: response.headers.get("x-next-cursor") ?? undefined,
+        }
+    }
+
+    const applyMessagePage = (sessionId: string, page: MessagePage, mode: "replace" | "prepend") => {
+        const parsed = parseMessagePage(page.data)
+        batch(() => {
+            sdk.setStore(
+                "message",
+                sessionId,
+                reconcile(
+                    mode === "prepend" ? mergeMessages(parsed.messages, sdk.store.message[sessionId] ?? []) : parsed.messages,
+                    { key: "id" },
+                ),
+            )
+            Object.entries(parsed.parts).forEach(([messageID, parts]) => {
+                sdk.setStore("part", messageID, reconcile(parts, { key: "id" }))
+            })
+            setHistoryCursors((prev) => ({ ...prev, [sessionId]: page.cursor }))
+        })
+        if (mode === "replace") queueMicrotask(scrollToBottom)
+    }
+
+    const loadOlderMessages = async (sessionId = currentSessionId()) => {
+        if (!sessionId) return
+        const before = historyCursors()[sessionId]
+        if (!before || historyLoadingSessions().has(sessionId)) return
+
+        setHistoryLoading(sessionId, true)
+        try {
+            const page = await fetchMessagePage(sessionId, before)
+            if (!page || currentSessionId() !== sessionId) return
+            preserveMessagesScroll(() => applyMessagePage(sessionId, page, "prepend"))
+        } catch (error) {
+            console.error("加载更早会话消息失败:", error)
+        } finally {
+            setHistoryLoading(sessionId, false)
+        }
+    }
+
+    const handleMessagesScroll = () => {
+        const sessionId = currentSessionId()
+        if (!sessionId || !historyCursors()[sessionId] || historyLoadingSessions().has(sessionId)) return
+        if (!messagesContainer || messagesContainer.scrollTop > MESSAGE_HISTORY_SCROLL_THRESHOLD) return
+        void loadOlderMessages(sessionId)
+    }
+
     // 加载历史会话（只在 store 没有该会话数据时拉一次）
     const loadSession = async (sessionId: string) => {
         if (loadedSessions.has(sessionId) || loadingSessions.has(sessionId)) return
@@ -710,34 +830,13 @@ export function ChatPanel(props: ChatPanelProps) {
         }
         loadingSessions.add(sessionId)
         try {
-            const { serverInfo } = sdk
-            const headers = getHeaders()
-
-            const [messagesResponse, permissions, questions] = await Promise.all([
-                fetch(`${serverInfo.url}/session/${sessionId}/message?limit=50`, { headers }),
+            const [messagePage, permissions, questions] = await Promise.all([
+                fetchMessagePage(sessionId),
                 sdk.client.permission.list(undefined, { throwOnError: false }).catch(() => undefined),
                 sdk.client.question.list(undefined, { throwOnError: false }).catch(() => undefined),
             ])
 
-            if (messagesResponse.ok) {
-                const data = await messagesResponse.json() as Array<{ info: Message; parts?: Part[] }>
-                batch(() => {
-                    const nextMessages: Message[] = []
-                    const nextParts: Record<string, Part[]> = {}
-                    for (const item of data) {
-                        if (!item?.info?.id) continue
-                        nextMessages.push(item.info)
-                        if (item.parts && item.parts.length > 0) {
-                            nextParts[item.info.id] = item.parts
-                        }
-                    }
-                    nextMessages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-                    sdk.setStore("message", sessionId, reconcile(nextMessages, { key: "id" }))
-                    for (const [messageID, parts] of Object.entries(nextParts)) {
-                        sdk.setStore("part", messageID, reconcile(parts, { key: "id" }))
-                    }
-                })
-            }
+            if (messagePage) applyMessagePage(sessionId, messagePage, "replace")
 
             if (permissions?.data) {
                 const list = permissions.data.filter((request) => request.sessionID === sessionId)
@@ -1141,7 +1240,7 @@ export function ChatPanel(props: ChatPanelProps) {
                 </div>
             </div>
 
-            <div class="chat-messages" ref={messagesContainer}>
+            <div class="chat-messages" ref={messagesContainer} onScroll={handleMessagesScroll}>
                 <Show
                     when={messages().length > 0 || isLoading() || sendError()}
                     fallback={
@@ -1153,6 +1252,18 @@ export function ChatPanel(props: ChatPanelProps) {
                     }
                 >
                     <div class="chat-timeline">
+                        <Show when={historyMore()}>
+                            <div class="chat-history-loader">
+                                <button
+                                    class="chat-history-button"
+                                    type="button"
+                                    disabled={historyLoading()}
+                                    onClick={() => void loadOlderMessages()}
+                                >
+                                    {historyLoading() ? "加载中..." : "加载更早对话"}
+                                </button>
+                            </div>
+                        </Show>
                         <For each={messages()}>
                             {(message) => (
                                 <Show

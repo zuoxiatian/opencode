@@ -2975,6 +2975,36 @@ body {
     padding: 0 18px;
 }
 
+.chat-history-loader {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.chat-history-button {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.chat-history-button:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--button-ghost-hover);
+    color: var(--text-secondary);
+}
+
+.chat-history-button:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+
 .chat-turn {
     width: 100%;
     min-width: 0;
