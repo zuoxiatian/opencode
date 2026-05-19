@@ -1,7 +1,7 @@
 import type { BrowserWindow as BrowserWindowType } from "electron"
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron"
 import { existsSync, watch, type FSWatcher } from "fs"
-import { join } from "path"
+import { delimiter, join } from "path"
 import { spawn, ChildProcess } from "child_process"
 import { fileURLToPath } from "url"
 import { cp, mkdir, readFile, readdir, writeFile } from "fs/promises"
@@ -96,6 +96,58 @@ function bundledSkillsDir() {
         : join(process.resourcesPath, "skills")
 }
 
+function bundledRuntimeDir() {
+    return process.env.NODE_ENV === "development"
+        ? join(getRepoRoot(), "packages", "desktop-lxz", "runtimes", `${process.platform}-${process.arch}`)
+        : join(process.resourcesPath, "runtimes", `${process.platform}-${process.arch}`)
+}
+
+function runtimeExecutable(dir: string, name: "node" | "python") {
+    return (
+        process.platform === "win32"
+            ? [
+                join(dir, name, `${name}.exe`),
+                join(dir, "bin", `${name}.exe`),
+                join(dir, "bin", `${name}.cmd`),
+            ]
+            : [
+                join(dir, name, "bin", name),
+                ...(name === "python" ? [join(dir, "python", "bin", "python3")] : []),
+                join(dir, "bin", name),
+            ]
+    ).find((item) => existsSync(item))
+}
+
+function runtimePathDirs(dir: string) {
+    return [
+        join(dir, "bin"),
+        join(dir, "node"),
+        join(dir, "node", "bin"),
+        join(dir, "python"),
+        join(dir, "python", "bin"),
+        process.platform === "win32" ? join(dir, "python", "Scripts") : undefined,
+    ].filter((item): item is string => !!item && existsSync(item))
+}
+
+function runtimeEnv() {
+    const dir = bundledRuntimeDir()
+    if (!existsSync(dir)) return {}
+
+    const node = runtimeExecutable(dir, "node")
+    const python = runtimeExecutable(dir, "python")
+    const pythonHome = join(dir, "python")
+
+    return {
+        OPENCODE_RUNTIME_DIR: dir,
+        ...(node ? { OPENCODE_NODE: node } : {}),
+        ...(python ? { OPENCODE_PYTHON: python } : {}),
+        ...(existsSync(pythonHome) ? { PYTHONHOME: pythonHome } : {}),
+        PYTHONPATH: "",
+        PYTHONNOUSERSITE: "1",
+        PATH: [...runtimePathDirs(dir), process.env.PATH ?? ""].join(delimiter),
+    }
+}
+
 async function ensureBundledSkills() {
     const source = bundledSkillsDir()
     if (!existsSync(source)) return
@@ -154,12 +206,12 @@ async function startServer(): Promise<ServerInfo> {
             // 不使用 shell，直接执行 bun.cmd
             env: {
                 ...process.env,
+                ...runtimeEnv(),
                 OPENCODE_AUTO_UPDATE: "false",
                 OPENCODE_SERVER_PASSWORD: password,
                 // 确保 Windows 系统环境变量存在
                 ComSpec: process.env.ComSpec || "C:\\WINDOWS\\system32\\cmd.exe",
                 SystemRoot: process.env.SystemRoot || "C:\\WINDOWS",
-                PATH: process.env.PATH || "",
             },
         })
 

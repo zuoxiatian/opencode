@@ -9,7 +9,7 @@ do not edit upstream source to fix desktop packaging issues.
 - Node: `22.13.1` via nvm-windows
 - Bun: `1.3.13`
 - Electron: `33.0.0`
-- Build target: Windows x64 installer/portable exe; macOS x64/arm64 dmg and zip
+- Build target: Windows x64 installer/portable exe/zip directory package; macOS x64/arm64 dmg and zip
 
 Before running Electron or packaging, clear Electron's Node mode flag:
 
@@ -110,6 +110,25 @@ packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-win-x64-Installer.exe
 packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-win-x64-Portable.exe
 ```
 
+To build a Windows zip package instead of a single-file portable exe, run:
+
+```powershell
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+$env:npm_config_electron_mirror = "https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
+$env:npm_config_electron_builder_binaries_mirror = "https://npmmirror.com/mirrors/electron-builder-binaries/"
+bun run dist:win:zip
+```
+
+Expected zip artifact:
+
+```text
+packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-win-x64.zip
+```
+
+This zip is the recommended "green" package for large bundled resources. Users should extract the zip directory and run `LongwiseTechAgent.exe` from the extracted folder; unlike `Portable.exe`, it does not need to unpack the whole app into a temporary directory on every launch.
+
 ## macOS Build
 
 Create macOS artifacts on a macOS host. The app packages one `opencode` backend
@@ -141,7 +160,7 @@ packages/desktop-lxz/release/LongwiseTechAgent-1.0.0-mac-arm64.zip
 
 ## Cleanup
 
-After a successful package, keep only the final exe:
+After a successful package, keep only the final artifacts:
 
 ```powershell
 Set-Location C:\Users\LZ-DSJ-01\Desktop\work\git_work\opencode\opencode
@@ -157,5 +176,6 @@ Remove-Item packages\app\dist -Recurse -Force -ErrorAction SilentlyContinue
 ```text
 LongwiseTechAgent-1.0.0-win-x64-Installer.exe
 LongwiseTechAgent-1.0.0-win-x64-Portable.exe
+LongwiseTechAgent-1.0.0-win-x64.zip
 ```
 

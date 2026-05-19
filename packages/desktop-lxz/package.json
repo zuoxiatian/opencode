@@ -13,6 +13,7 @@
         "pack:mac": "electron-builder --mac --dir",
         "dist": "electron-builder",
         "dist:win": "electron-builder --win",
+        "dist:win:zip": "electron-builder --win zip",
         "dist:mac": "electron-builder --mac",
         "dist:mac:x64": "electron-builder --mac --x64",
         "dist:mac:arm64": "electron-builder --mac --arm64"

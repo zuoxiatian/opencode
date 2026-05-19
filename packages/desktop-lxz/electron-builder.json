@@ -20,6 +20,10 @@
             "to": "skills/"
         },
         {
+            "from": "runtimes/",
+            "to": "runtimes/"
+        },
+        {
             "from": "config/opencode.jsonc",
             "to": "config/opencode.jsonc"
         }
