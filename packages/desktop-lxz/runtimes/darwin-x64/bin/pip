@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+export PYTHONHOME="$DIR/python"
+export PYTHONPATH=
+export PYTHONNOUSERSITE=1
+exec "$DIR/python/bin/python3" -m pip "$@"
