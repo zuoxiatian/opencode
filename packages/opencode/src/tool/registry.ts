@@ -6,8 +6,6 @@ import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
-import { OfficeReadTool } from "./office-read/index"
-import { PdfReadTool } from "./pdf-read/index"
 import { TaskTool } from "./task"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
@@ -103,8 +101,6 @@ export const layer: Layer.Layer<
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
     const read = yield* ReadTool
-    const officeread = yield* OfficeReadTool
-    const pdfread = yield* PdfReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
@@ -194,8 +190,6 @@ export const layer: Layer.Layer<
           invalid: Tool.init(invalid),
           bash: Tool.init(bash),
           read: Tool.init(read),
-          office: Tool.init(officeread),
-          pdf: Tool.init(pdfread),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
           edit: Tool.init(edit),
@@ -219,8 +213,6 @@ export const layer: Layer.Layer<
             ...(questionEnabled ? [tool.question] : []),
             tool.bash,
             tool.read,
-            tool.office,
-            tool.pdf,
             tool.glob,
             tool.grep,
             tool.edit,
