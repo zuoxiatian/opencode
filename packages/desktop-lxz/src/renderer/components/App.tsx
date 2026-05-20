@@ -4,6 +4,7 @@ import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import type { ThemeMode } from "../theme"
+import { readChatVisibility, writeChatVisibility, type ChatVisibilitySettings } from "../settings"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -21,10 +22,15 @@ export function App(props: AppProps) {
     const [folderWidth, setFolderWidth] = createSignal(260)
     const [folderCollapsed, setFolderCollapsed] = createSignal(false)
     const [isDragging, setIsDragging] = createSignal<"folder" | null>(null)
+    const [chatVisibility, setChatVisibility] = createSignal(readChatVisibility())
     const platform = navigator.platform.toLowerCase()
     const isMac = platform.includes("mac")
     const isWindows = platform.includes("win")
     const visibleFolderWidth = () => folderCollapsed() ? 0 : folderWidth()
+    const handleChatVisibilityChange = (settings: ChatVisibilitySettings) => {
+        writeChatVisibility(settings)
+        setChatVisibility(settings)
+    }
 
     // 拖拽处理
     const handleMouseDown = (type: "folder") => (e: MouseEvent) => {
@@ -93,6 +99,8 @@ export function App(props: AppProps) {
                             onCollapse={() => setFolderCollapsed(true)}
                             themeMode={props.themeMode}
                             onThemeModeChange={props.onThemeModeChange}
+                            chatVisibility={chatVisibility()}
+                            onChatVisibilityChange={handleChatVisibilityChange}
                         />
                     </Show>
                 </div>
@@ -107,7 +115,11 @@ export function App(props: AppProps) {
 
                 {/* 聊天面板 */}
                 <div class="chat-panel-wrapper expanded">
-                    <ChatPanel sidebarCollapsed={folderCollapsed()} onOpenSidebar={() => setFolderCollapsed(false)} />
+                    <ChatPanel
+                        sidebarCollapsed={folderCollapsed()}
+                        onOpenSidebar={() => setFolderCollapsed(false)}
+                        chatVisibility={chatVisibility()}
+                    />
                 </div>
             </div>
         </SDKProvider>

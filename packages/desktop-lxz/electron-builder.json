@@ -74,20 +74,13 @@
         "artifactName": "${productName}-${version}-win-${arch}-Portable.${ext}"
     },
     "mac": {
+        "sign": "./script/ad-hoc-sign.cjs",
         "target": [
             {
-                "target": "dmg",
-                "arch": [
-                    "x64",
-                    "arm64"
-                ]
+                "target": "dmg"
             },
             {
-                "target": "zip",
-                "arch": [
-                    "x64",
-                    "arm64"
-                ]
+                "target": "zip"
             }
         ],
         "extraResources": [

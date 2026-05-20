@@ -11,13 +11,13 @@
         "build": "electron-vite build",
         "preview": "electron-vite preview",
         "pack": "electron-builder --dir",
-        "pack:mac": "electron-builder --mac --dir",
+        "pack:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
         "dist": "electron-builder",
         "dist:win": "electron-builder --win",
         "dist:win:zip": "electron-builder --win zip",
-        "dist:mac": "electron-builder --mac",
-        "dist:mac:x64": "electron-builder --mac --x64",
-        "dist:mac:arm64": "electron-builder --mac --arm64"
+        "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+        "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64",
+        "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64"
     },
     "dependencies": {
         "@opencode-ai/sdk": "workspace:*",

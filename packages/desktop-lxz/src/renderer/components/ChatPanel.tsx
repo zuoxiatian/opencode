@@ -19,21 +19,33 @@ import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Markdown } from "@opencode-ai/ui/markdown"
 import type { LucideIcon } from "lucide-solid"
 import ArrowUp from "lucide-solid/icons/arrow-up"
+import Brain from "lucide-solid/icons/brain"
 import Check from "lucide-solid/icons/check"
+import ChevronRight from "lucide-solid/icons/chevron-right"
 import ChevronDown from "lucide-solid/icons/chevron-down"
+import CircleAlert from "lucide-solid/icons/circle-alert"
 import CircleCheck from "lucide-solid/icons/circle-check"
+import CircleQuestionMark from "lucide-solid/icons/circle-question-mark"
+import ClipboardCopy from "lucide-solid/icons/clipboard-copy"
+import FileText from "lucide-solid/icons/file-text"
 import Folder from "lucide-solid/icons/folder"
 import FolderPlus from "lucide-solid/icons/folder-plus"
+import Globe from "lucide-solid/icons/globe"
 import ListChecks from "lucide-solid/icons/list-checks"
 import MonitorCheck from "lucide-solid/icons/monitor-check"
 import Package from "lucide-solid/icons/package"
 import PanelLeftOpen from "lucide-solid/icons/panel-left-open"
+import Pencil from "lucide-solid/icons/pencil"
 import Plus from "lucide-solid/icons/plus"
+import Puzzle from "lucide-solid/icons/puzzle"
 import Search from "lucide-solid/icons/search"
 import ShieldCheck from "lucide-solid/icons/shield-check"
 import Square from "lucide-solid/icons/square"
+import SquareTerminal from "lucide-solid/icons/square-terminal"
+import Wrench from "lucide-solid/icons/wrench"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
 import { isIMECompositionEvent } from "../lib/ime"
+import type { ChatVisibilitySettings } from "../settings"
 
 interface QueuedPrompt {
     id: string
@@ -66,6 +78,7 @@ interface ModelOption extends ModelSelection {
 interface ChatPanelProps {
     sidebarCollapsed?: boolean
     onOpenSidebar?: () => void
+    chatVisibility: ChatVisibilitySettings
 }
 
 type PermissionMode = "default" | "auto"
@@ -78,10 +91,28 @@ const PERMISSION_MODE_STORAGE_KEY = "desktop-lxz.permissionAutoAccept"
 const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
 const MESSAGE_HISTORY_PAGE_SIZE = 50
 const MESSAGE_HISTORY_SCROLL_THRESHOLD = 48
+const MESSAGE_AUTO_SCROLL_DESKTOP_VH = 0.1
+const MESSAGE_AUTO_SCROLL_MIN_THRESHOLD = 48
+const MESSAGE_PROGRAMMATIC_SCROLL_MS = 200
+const MESSAGE_AUTO_FOLLOW_LERP = 0.18
+const MESSAGE_AUTO_FOLLOW_SETTLE_EPSILON = 0.5
+const MESSAGE_AUTO_FOLLOW_SETTLE_FRAMES = 4
+const MESSAGE_AUTO_FOLLOW_SETTLE_BURST_MS = 280
+const MESSAGE_AUTO_FOLLOW_REPIN_GRACE_MS = 1200
+const MESSAGE_TOUCH_FINGER_DOWN_THRESHOLD = 2
 const PERMISSION_MODE_OPTIONS = [
     { mode: "default", label: "默认权限", description: "遇到权限请求时手动确认" },
     { mode: "auto", label: "自动获取权限", description: "自动允许每次请求" },
 ] as const
+type ToolPartView = Part & { type: "tool" }
+type ToolStateView = ToolPartView["state"]
+type QuestionInputOption = { label: string; description?: string }
+type QuestionInputItem = {
+    header?: string
+    question: string
+    options: QuestionInputOption[]
+    multiple: boolean
+}
 
 const agentLabel = (name: string) => {
     if (name === "plan") return "计划"
@@ -258,44 +289,496 @@ function reasoningHeading(text: string) {
     }
 }
 
-function ReasoningBlock(props: { text: string; heading?: string; streaming?: boolean; cacheKey: string }) {
+function ReasoningBlock(props: { text: string; heading?: string; streaming?: boolean; cacheKey: string; time?: { start?: number; end?: number } }) {
     const [open, setOpen] = createSignal(false)
     const heading = createMemo(() => props.heading || reasoningHeading(props.text) || "")
 
     return (
-        <div class="chat-reasoning" data-open={open() ? "true" : "false"}>
-            <button class="chat-reasoning-trigger" type="button" onClick={() => setOpen((value) => !value)}>
-                <Show when={props.streaming}>
-                    <span class="chat-thinking-spinner" aria-hidden="true"></span>
+        <div class="tool-calls chat-reasoning">
+            <div class="tool-call-card" data-status={props.streaming ? "running" : "completed"} data-open={open() ? "true" : "false"}>
+                <button
+                    class="tool-call-summary"
+                    type="button"
+                    onClick={() => setOpen((value) => !value)}
+                    aria-expanded={open()}
+                    title={heading()}
+                >
+                    <span class="tool-call-leading">
+                        <span class="tool-call-icon" aria-hidden="true">
+                            <Brain class="tool-call-lucide" size={15} strokeWidth={1.9} />
+                        </span>
+                        <span class="tool-call-title">{props.streaming ? "思考中" : "思考"}</span>
+                    </span>
+                    <span class="tool-call-description">{heading()}</span>
+                    <ToolDuration time={props.time} active={props.streaming === true} />
+                    <ChevronRight class="tool-call-chevron" size={14} strokeWidth={1.9} />
+                </button>
+                <Show when={open()}>
+                    <div class="tool-call-details chat-reasoning-details">
+                        <Markdown
+                            class="chat-reasoning-content"
+                            text={props.text}
+                            cacheKey={`${props.cacheKey}:reasoning`}
+                            streaming={props.streaming}
+                        />
+                    </div>
                 </Show>
-                <span class="chat-reasoning-chevron" aria-hidden="true"></span>
-                <span class="chat-reasoning-label">{props.streaming ? "思考中" : "···"}</span>
-                <span class="chat-reasoning-heading">{heading()}</span>
-            </button>
-            <Show when={open()}>
-                <Markdown
-                    class="chat-reasoning-content"
-                    text={props.text}
-                    cacheKey={`${props.cacheKey}:reasoning`}
-                    streaming={props.streaming}
-                />
+            </div>
+        </div>
+    )
+}
+
+function cleanToolError(error: string) {
+    return error.replace(/^Error:\s*/, "").trim()
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const normalizeToolName = (tool: string) => {
+    const value = tool.trim().toLowerCase()
+    if (!value.includes(".")) return value
+    return value.split(".").filter(Boolean).slice(-1)[0] ?? value
+}
+
+const toolLabel = (part: ToolPartView) => {
+    if ("title" in part.state && typeof part.state.title === "string" && part.state.title.trim()) return part.state.title.trim()
+    const labels: Record<string, string> = {
+        apply_patch: "应用补丁",
+        bash: "Shell 执行",
+        codesearch: "代码搜索",
+        create: "创建文件",
+        edit: "编辑文件",
+        file_read: "读取文件",
+        file_write: "写入文件",
+        glob: "查找文件",
+        grep: "搜索文件",
+        list: "列出目录",
+        multiedit: "批量编辑",
+        question: "问题",
+        read: "读取文件",
+        shell: "Shell 执行",
+        task: "子任务",
+        todoread: "读取待办",
+        todowrite: "更新待办",
+        webfetch: "访问网页",
+        websearch: "网络搜索",
+        write: "写入文件",
+    }
+    const normalized = normalizeToolName(part.tool)
+    return labels[normalized] ?? part.tool
+}
+
+const toolIcon = (part: ToolPartView): LucideIcon => {
+    const normalized = normalizeToolName(part.tool)
+    const title = "title" in part.state && typeof part.state.title === "string" ? part.state.title.toLowerCase() : ""
+    if (normalized === "bash" || normalized === "shell") return SquareTerminal
+    if (normalized === "question") return CircleQuestionMark
+    if (normalized === "skill" || title.includes("技能") || title.includes("skill")) return Puzzle
+    if (normalized === "task") return Brain
+    if (normalized === "edit" || normalized === "multiedit" || normalized === "apply_patch") return Pencil
+    if (normalized === "write" || normalized === "create" || normalized === "file_write") return Pencil
+    if (normalized === "read" || normalized === "file_read") return FileText
+    if (normalized === "grep" || normalized === "glob" || normalized === "codesearch") return Search
+    if (normalized === "webfetch" || normalized === "websearch") return Globe
+    if (normalized === "todowrite" || normalized === "todoread") return ListChecks
+    return Wrench
+}
+
+function ToolIcon(props: { part: ToolPartView; class?: string }) {
+    return <Dynamic component={toolIcon(props.part)} class={props.class ?? "tool-call-lucide"} size={15} strokeWidth={1.9} />
+}
+
+const stringField = (record: Record<string, unknown> | undefined, keys: string[]) =>
+    keys
+        .map((key) => record?.[key])
+        .find((value): value is string => typeof value === "string" && value.trim().length > 0)
+        ?.trim()
+
+const stateMetadata = (state: ToolStateView) => "metadata" in state ? state.metadata : undefined
+const stateOutput = (state: ToolStateView) => "output" in state ? state.output : ""
+const stateError = (state: ToolStateView) => "error" in state ? state.error : ""
+const stateTime = (state: ToolStateView) => "time" in state ? state.time : undefined
+
+const formatToolStatus = (status: ToolStateView["status"]) => {
+    if (status === "pending") return "等待中"
+    if (status === "running") return "执行中"
+    if (status === "completed") return "已完成"
+    return "出错"
+}
+
+const isToolActive = (state: ToolStateView) => state.status === "pending" || state.status === "running"
+
+const isShellToolPart = (part: ToolPartView) => {
+    const normalized = normalizeToolName(part.tool)
+    return normalized === "bash" || normalized === "shell"
+}
+
+const activeToolStatusLabel = (part: ToolPartView) => {
+    const label = toolLabel(part)
+    if (label.endsWith("中")) return label
+    return `${label}中`
+}
+
+const compactPath = (value: string) => {
+    const parts = value.replace(/\\/g, "/").split("/").filter(Boolean)
+    if (parts.length <= 3) return value
+    return parts.slice(-3).join("/")
+}
+
+const metadataFileSummary = (metadata?: Record<string, unknown>) => {
+    const files = Array.isArray(metadata?.files) ? metadata.files : []
+    const paths = files
+        .filter(isRecord)
+        .map((file) => stringField(file, ["relativePath", "filePath", "path"]))
+        .filter((path): path is string => Boolean(path))
+    if (paths.length === 1) return compactPath(paths[0])
+    if (paths.length > 1) return `${paths.length} 个文件`
+}
+
+const shellCommand = (input: Record<string, unknown>) => {
+    if (typeof input.command === "string") return input.command
+    return stringField(input, ["cmd", "command_line"])
+}
+
+const toolDescription = (part: ToolPartView) => {
+    const input = part.state.input
+    const metadata = stateMetadata(part.state)
+    const normalized = normalizeToolName(part.tool)
+    const file = metadataFileSummary(metadata) ?? stringField(input, ["filePath", "file_path", "path", "sourcePath", "targetPath"])
+    if (file) return compactPath(file)
+    if (normalized === "question" && Array.isArray(input.questions)) return `${input.questions.length} 个问题`
+    if ((normalized === "bash" || normalized === "shell") && shellCommand(input)) return shellCommand(input)?.split("\n")[0].slice(0, 120)
+    if (normalized === "task") return stringField(input, ["description", "prompt"])?.slice(0, 120)
+    if (normalized === "webfetch") return stringField(input, ["url"])
+    if (normalized === "websearch" || normalized === "codesearch") return stringField(input, ["query"])
+    if (normalized === "grep") return stringField(input, ["pattern"])
+    if (normalized === "glob") return stringField(input, ["pattern"])
+    return stringField(input, ["description", "title"]) ?? stringField(metadata, ["description", "title"])
+}
+
+const formatDuration = (start: number, end = Date.now()) => {
+    const seconds = Math.max(0, (end - start) / 1000)
+    if (seconds < 60) return `${seconds.toFixed(1)}s`
+    return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+}
+
+const partScrollSignature = (part: Part) => {
+    if (part.type === "text" || part.type === "reasoning") return `${part.id}:${part.type}:${part.text.length}:${part.time?.end ?? ""}`
+    if (part.type === "tool") {
+        return `${part.id}:${part.type}:${part.state.status}:${stateOutput(part.state).length}:${stateError(part.state).length}`
+    }
+    return `${part.id}:${part.type}`
+}
+
+const messagesBottomThreshold = (element: HTMLElement) =>
+    Math.max(MESSAGE_AUTO_SCROLL_MIN_THRESHOLD, element.clientHeight * MESSAGE_AUTO_SCROLL_DESKTOP_VH)
+
+const nestedScrollableTarget = (root: HTMLElement, target: EventTarget | null): HTMLElement | null => {
+    if (!(target instanceof Element)) return null
+    const nested = target.closest("[data-scrollable]")
+    if (!nested || nested === root || !(nested instanceof HTMLElement)) return null
+    return nested
+}
+
+const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | null) => {
+    const nested = nestedScrollableTarget(root, target)
+    return Boolean(nested && nested.scrollTop > 0)
+}
+
+const isReleaseKey = (event: KeyboardEvent) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return false
+    return event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home"
+}
+
+function ToolDuration(props: { time?: { start?: number; end?: number }; active: boolean }) {
+    const [now, setNow] = createSignal(Date.now())
+    createEffect(() => {
+        if (!props.active) return
+        const timer = setInterval(() => setNow(Date.now()), 1000)
+        onCleanup(() => clearInterval(timer))
+    })
+    const text = createMemo(() => typeof props.time?.start === "number" ? formatDuration(props.time.start, props.time.end ?? now()) : "")
+    return <Show when={text()}>{(value) => <span class="tool-call-duration">{value()}</span>}</Show>
+}
+
+const formatToolInput = (input: Record<string, unknown>, tool: string) => {
+    const normalized = normalizeToolName(tool)
+    if (normalized === "bash" || normalized === "shell") return shellCommand(input) ?? ""
+    if (typeof input.content === "string") return input.content
+    const entries = Object.entries(input).filter((entry) => entry[1] !== undefined)
+    if (entries.length === 0) return ""
+    return JSON.stringify(Object.fromEntries(entries), null, 2) ?? ""
+}
+
+const parseQuestionInput = (input: Record<string, unknown>): QuestionInputItem[] => {
+    if (!Array.isArray(input.questions)) return []
+    return input.questions
+        .filter(isRecord)
+        .map((question) => ({
+            header: stringField(question, ["header"]),
+            question: stringField(question, ["question"]) ?? stringField(question, ["header"]) ?? "问题",
+            options: Array.isArray(question.options)
+                ? question.options
+                    .filter(isRecord)
+                    .map((option) => ({
+                        label: stringField(option, ["label"]) ?? "",
+                        description: stringField(option, ["description"]),
+                    }))
+                    .filter((option) => option.label.length > 0)
+                : [],
+            multiple: question.multiple === true,
+        }))
+}
+
+const parseQuestionOutput = (output: string) => {
+    const match = output.match(/^User has answered your questions:\s*(.+?)\.\s*You can now/s)
+    if (!match?.[1]) return []
+    return Array.from(match[1].matchAll(/"([^"]+)"="([^"]*(?:[^"\\]|\\.)*)"/g)).map((item) => ({
+        question: item[1],
+        answer: item[2],
+    }))
+}
+
+const hasToolDetails = (part: ToolPartView) => {
+    const output = stateOutput(part.state)
+    const error = stateError(part.state)
+    if (normalizeToolName(part.tool) === "question") return true
+    if (normalizeToolName(part.tool) === "bash" || normalizeToolName(part.tool) === "shell") return true
+    if (error.trim().length > 0 || output.trim().length > 0) return true
+    return Object.keys(part.state.input).length > 0
+}
+
+function CopyToolTextButton(props: { text: string }) {
+    const [copied, setCopied] = createSignal(false)
+    let resetTimer: ReturnType<typeof setTimeout> | undefined
+    onCleanup(() => {
+        if (resetTimer) clearTimeout(resetTimer)
+    })
+    const copy = (event: MouseEvent) => {
+        event.stopPropagation()
+        if (!props.text || !navigator.clipboard) return
+        void navigator.clipboard.writeText(props.text).then(() => {
+            if (resetTimer) clearTimeout(resetTimer)
+            setCopied(true)
+            resetTimer = setTimeout(() => setCopied(false), 1600)
+        }).catch(() => undefined)
+    }
+    return (
+        <button class="tool-copy-btn" type="button" onClick={copy} title={copied() ? "已复制" : "复制"}>
+            <Show when={copied()} fallback={<ClipboardCopy class="tool-copy-icon" size={14} strokeWidth={1.9} />}>
+                <Check class="tool-copy-icon" size={14} strokeWidth={2.1} />
+            </Show>
+        </button>
+    )
+}
+
+function ToolCodeBlock(props: { children: string; tone?: "default" | "error" }) {
+    return <pre class="tool-code-block" data-scrollable data-tone={props.tone ?? "default"}>{props.children}</pre>
+}
+
+function ShellToolDetails(props: { part: ToolPartView }) {
+    const [outputOpen, setOutputOpen] = createSignal(false)
+    const command = createMemo(() => shellCommand(props.part.state.input) ?? "")
+    const output = createMemo(() => stateOutput(props.part.state))
+    const error = createMemo(() => stateError(props.part.state))
+    return (
+        <div class="tool-detail-stack">
+            <Show when={command()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">命令</div>
+                        <ToolCodeBlock>{value()}</ToolCodeBlock>
+                    </section>
+                )}
+            </Show>
+            <Show when={output().trim().length > 0}>
+                <section class="tool-detail-section">
+                    <div class="tool-output-header">
+                        <span class="tool-detail-heading">输出</span>
+                        <div class="tool-output-actions">
+                            <button class="tool-output-toggle" type="button" onClick={() => setOutputOpen((value) => !value)}>
+                                {outputOpen() ? "隐藏输出" : "显示输出"}
+                            </button>
+                            <CopyToolTextButton text={output()} />
+                        </div>
+                    </div>
+                    <Show when={outputOpen()}>
+                        <ToolCodeBlock>{output()}</ToolCodeBlock>
+                    </Show>
+                </section>
+            </Show>
+            <Show when={error().trim()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">错误</div>
+                        <ToolCodeBlock tone="error">{cleanToolError(value())}</ToolCodeBlock>
+                    </section>
+                )}
             </Show>
         </div>
     )
 }
 
-function getToolStatusIcon(status: string) {
-    switch (status) {
-        case "pending": return "..."
-        case "running": return ">"
-        case "completed": return "✓"
-        case "error": return "!"
-        default: return "-"
-    }
+function QuestionToolDetails(props: { part: ToolPartView }) {
+    const questions = createMemo(() => parseQuestionInput(props.part.state.input))
+    const answers = createMemo(() => parseQuestionOutput(stateOutput(props.part.state)))
+    const error = createMemo(() => stateError(props.part.state))
+    return (
+        <div class="tool-detail-stack">
+            <Show when={answers().length > 0}>
+                <section class="tool-detail-section">
+                    <div class="tool-detail-heading">已回答</div>
+                    <div class="tool-question-list">
+                        <For each={answers()}>
+                            {(answer) => (
+                                <div class="tool-question-item">
+                                    <div class="tool-question-text">{answer.question}</div>
+                                    <div class="tool-answer-text">{answer.answer}</div>
+                                </div>
+                            )}
+                        </For>
+                    </div>
+                </section>
+            </Show>
+            <Show when={questions().length > 0}>
+                <section class="tool-detail-section">
+                    <div class="tool-detail-heading">问题</div>
+                    <div class="tool-question-list">
+                        <For each={questions()}>
+                            {(question) => (
+                                <div class="tool-question-item">
+                                    <Show when={question.header}>
+                                        {(value) => <div class="tool-question-header">{value()}</div>}
+                                    </Show>
+                                    <div class="tool-question-text">{question.question}</div>
+                                    <Show when={question.options.length > 0}>
+                                        <div class="tool-question-options">
+                                            <For each={question.options}>
+                                                {(option) => <span class="tool-question-option">{option.label}</span>}
+                                            </For>
+                                            <Show when={question.multiple}>
+                                                <span class="tool-question-option" data-muted="true">多选</span>
+                                            </Show>
+                                        </div>
+                                    </Show>
+                                </div>
+                            )}
+                        </For>
+                    </div>
+                </section>
+            </Show>
+            <Show when={error().trim()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">错误</div>
+                        <ToolCodeBlock tone="error">{cleanToolError(value())}</ToolCodeBlock>
+                    </section>
+                )}
+            </Show>
+            <Show when={questions().length === 0 && answers().length === 0 && !error()}>
+                <div class="tool-empty-detail">等待用户回答</div>
+            </Show>
+        </div>
+    )
 }
 
-function cleanToolError(error: string) {
-    return error.replace(/^Error:\s*/, "").trim()
+function GenericToolDetails(props: { part: ToolPartView }) {
+    const inputText = createMemo(() => formatToolInput(props.part.state.input, props.part.tool))
+    const output = createMemo(() => stateOutput(props.part.state))
+    const error = createMemo(() => stateError(props.part.state))
+    return (
+        <div class="tool-detail-stack">
+            <Show when={inputText().trim().length > 0}>
+                <section class="tool-detail-section">
+                    <div class="tool-detail-heading">输入</div>
+                    <ToolCodeBlock>{inputText()}</ToolCodeBlock>
+                </section>
+            </Show>
+            <Show when={output().trim().length > 0}>
+                <section class="tool-detail-section">
+                    <div class="tool-output-header">
+                        <span class="tool-detail-heading">输出</span>
+                        <CopyToolTextButton text={output()} />
+                    </div>
+                    <ToolCodeBlock>{output()}</ToolCodeBlock>
+                </section>
+            </Show>
+            <Show when={error().trim()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">错误</div>
+                        <ToolCodeBlock tone="error">{cleanToolError(value())}</ToolCodeBlock>
+                    </section>
+                )}
+            </Show>
+            <Show when={!inputText().trim() && !output().trim() && !error().trim()}>
+                <div class="tool-empty-detail">暂无可展示内容</div>
+            </Show>
+        </div>
+    )
+}
+
+function ToolCallDetails(props: { part: ToolPartView }) {
+    const normalized = createMemo(() => normalizeToolName(props.part.tool))
+    return (
+        <Show
+            when={normalized() === "question"}
+            fallback={
+                <Show when={normalized() === "bash" || normalized() === "shell"} fallback={<GenericToolDetails part={props.part} />}>
+                    <ShellToolDetails part={props.part} />
+                </Show>
+            }
+        >
+            <QuestionToolDetails part={props.part} />
+        </Show>
+    )
+}
+
+function ToolCallBlock(props: { part: ToolPartView }) {
+    const [open, setOpen] = createSignal(false)
+    const status = createMemo(() => props.part.state.status)
+    const active = createMemo(() => isToolActive(props.part.state))
+    const details = createMemo(() => hasToolDetails(props.part))
+    const description = createMemo(() => toolDescription(props.part))
+    const toggle = () => {
+        if (!details()) return
+        setOpen((value) => !value)
+    }
+    return (
+        <div class="tool-call-card" data-status={status()} data-open={open() ? "true" : "false"}>
+            <button
+                class="tool-call-summary"
+                type="button"
+                onClick={toggle}
+                aria-expanded={details() ? open() : undefined}
+                aria-disabled={!details()}
+                title={description() ?? ""}
+            >
+                <span class="tool-call-leading">
+                    <span class="tool-call-icon" aria-hidden="true">
+                        <ToolIcon part={props.part} />
+                    </span>
+                    <span class="tool-call-title">{toolLabel(props.part)}</span>
+                </span>
+                <span class="tool-call-description">{description() ?? ""}</span>
+                <ToolDuration time={stateTime(props.part.state)} active={active()} />
+                <span class="tool-call-status">
+                    <Show when={status() === "error"} fallback={formatToolStatus(status())}>
+                        <CircleAlert class="tool-call-status-icon" size={13} strokeWidth={2} />
+                        <span>{formatToolStatus(status())}</span>
+                    </Show>
+                </span>
+                <Show when={details()}>
+                    <ChevronRight class="tool-call-chevron" size={14} strokeWidth={1.9} />
+                </Show>
+            </button>
+            <Show when={details() && open()}>
+                <div class="tool-call-details">
+                    <ToolCallDetails part={props.part} />
+                </div>
+            </Show>
+        </div>
+    )
 }
 
 function partKey(part: Part) {
@@ -386,8 +869,19 @@ export function ChatPanel(props: ChatPanelProps) {
     const loadingSessions = new Set<string>()
     const autoRespondingPermissions = new Set<string>()
     let messagesContainer: HTMLDivElement | undefined
+    let messagesTimeline: HTMLDivElement | undefined
     let preservingHistoryScroll = false
     let historyScrollFrame: number | undefined
+    let autoScrollFrame: number | undefined
+    let autoFollowFrame: number | undefined
+    let autoSettleFrame: number | undefined
+    let autoFollowSettledFrames = 0
+    let messagesResizeObserver: ResizeObserver | undefined
+    let shouldAutoFollowMessages = true
+    let lastMessagesScrollTop = 0
+    let lastUserReleaseAt = 0
+    let programmaticScrollUntil = 0
+    let detachMessagesIntentListeners: (() => void) | undefined
     let chatInputComposing = false
     let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -518,22 +1012,216 @@ export function ChatPanel(props: ChatPanelProps) {
     const hasPendingRequest = createMemo(() => Boolean(activePermissionRequest() || activeQuestionRequest()))
     const canSend = createMemo(() => Boolean(inputText().trim() && !hasPendingRequest() && sdk.directory()))
 
-    onCleanup(() => {
-        if (historyScrollFrame !== undefined) cancelAnimationFrame(historyScrollFrame)
-        if (chatInputCompositionEndTimer) clearTimeout(chatInputCompositionEndTimer)
-    })
+    const scrollNow = () => typeof performance !== "undefined" ? performance.now() : Date.now()
+
+    const markProgrammaticScroll = () => {
+        programmaticScrollUntil = scrollNow() + MESSAGE_PROGRAMMATIC_SCROLL_MS
+    }
+
+    const isProgrammaticScroll = () => scrollNow() < programmaticScrollUntil
+
+    const canRepinMessagesAutoFollow = () => scrollNow() - lastUserReleaseAt >= MESSAGE_AUTO_FOLLOW_REPIN_GRACE_MS
+
+    const stopAutoFollowLoop = () => {
+        if (autoFollowFrame !== undefined) cancelAnimationFrame(autoFollowFrame)
+        autoFollowFrame = undefined
+        autoFollowSettledFrames = 0
+    }
+
+    const stopAutoSettleBurst = () => {
+        if (autoSettleFrame !== undefined) cancelAnimationFrame(autoSettleFrame)
+        autoSettleFrame = undefined
+    }
+
+    const messagesMaxScrollTop = () => {
+        if (!messagesContainer) return 0
+        return Math.max(0, messagesContainer.scrollHeight - messagesContainer.clientHeight)
+    }
+
+    const writeMessagesScrollTop = (target: number) => {
+        if (!messagesContainer) return
+        markProgrammaticScroll()
+        messagesContainer.scrollTop = Math.max(0, Math.min(target, messagesMaxScrollTop()))
+        lastMessagesScrollTop = messagesContainer.scrollTop
+    }
 
     // 滚动到底部
     const scrollToBottom = () => {
-        if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight
-        }
+        shouldAutoFollowMessages = true
+        lastUserReleaseAt = 0
+        writeMessagesScrollTop(messagesMaxScrollTop())
     }
 
     const isNearBottom = () => {
         if (!messagesContainer) return true
-        return messagesContainer.scrollHeight - messagesContainer.clientHeight - messagesContainer.scrollTop <= 96
+        return messagesMaxScrollTop() - messagesContainer.scrollTop <= messagesBottomThreshold(messagesContainer)
     }
+
+    const startAutoSettleBurst = () => {
+        if (!messagesContainer) return
+        stopAutoSettleBurst()
+        const until = scrollNow() + MESSAGE_AUTO_FOLLOW_SETTLE_BURST_MS
+        const tick = () => {
+            autoSettleFrame = undefined
+            if (!messagesContainer || preservingHistoryScroll || !shouldAutoFollowMessages) return
+            writeMessagesScrollTop(messagesMaxScrollTop())
+            if (scrollNow() < until) autoSettleFrame = requestAnimationFrame(tick)
+        }
+        autoSettleFrame = requestAnimationFrame(tick)
+    }
+
+    const tickAutoFollow = () => {
+        autoFollowFrame = undefined
+        if (!messagesContainer || preservingHistoryScroll || !shouldAutoFollowMessages || !isBusy()) {
+            stopAutoFollowLoop()
+            return
+        }
+        const target = messagesMaxScrollTop()
+        const delta = target - messagesContainer.scrollTop
+        if (Math.abs(delta) <= MESSAGE_AUTO_FOLLOW_SETTLE_EPSILON) {
+            if (messagesContainer.scrollTop !== target) writeMessagesScrollTop(target)
+            autoFollowSettledFrames += 1
+            if (autoFollowSettledFrames >= MESSAGE_AUTO_FOLLOW_SETTLE_FRAMES) {
+                stopAutoFollowLoop()
+                return
+            }
+            autoFollowFrame = requestAnimationFrame(tickAutoFollow)
+            return
+        }
+        autoFollowSettledFrames = 0
+        writeMessagesScrollTop(messagesContainer.scrollTop + delta * MESSAGE_AUTO_FOLLOW_LERP)
+        autoFollowFrame = requestAnimationFrame(tickAutoFollow)
+    }
+
+    const startAutoFollowLoop = () => {
+        if (!messagesContainer || preservingHistoryScroll || !shouldAutoFollowMessages) return
+        if (!isBusy()) {
+            startAutoSettleBurst()
+            return
+        }
+        if (autoFollowFrame !== undefined) return
+        autoFollowSettledFrames = 0
+        autoFollowFrame = requestAnimationFrame(tickAutoFollow)
+    }
+
+    const releaseMessagesAutoFollow = () => {
+        lastUserReleaseAt = scrollNow()
+        shouldAutoFollowMessages = false
+        stopAutoFollowLoop()
+        stopAutoSettleBurst()
+    }
+
+    const releaseFromMessagesIntent = () => {
+        if (shouldAutoFollowMessages) {
+            releaseMessagesAutoFollow()
+            return
+        }
+        lastUserReleaseAt = scrollNow()
+    }
+
+    const resumeMessagesAutoFollow = () => {
+        shouldAutoFollowMessages = true
+        lastUserReleaseAt = 0
+        scheduleScrollToBottom()
+    }
+
+    const scheduleScrollToBottom = () => {
+        if (!messagesContainer || preservingHistoryScroll || !shouldAutoFollowMessages) return
+        if (autoScrollFrame !== undefined) cancelAnimationFrame(autoScrollFrame)
+        autoScrollFrame = requestAnimationFrame(() => {
+            autoScrollFrame = undefined
+            if (!messagesContainer || preservingHistoryScroll || !shouldAutoFollowMessages) return
+            if (isBusy()) {
+                startAutoFollowLoop()
+                return
+            }
+            scrollToBottom()
+            startAutoSettleBurst()
+        })
+    }
+
+    const resetMessagesResizeObserver = () => {
+        messagesResizeObserver?.disconnect()
+        messagesResizeObserver = undefined
+        if (typeof ResizeObserver === "undefined") return
+        messagesResizeObserver = new ResizeObserver(() => {
+            if (preservingHistoryScroll || !shouldAutoFollowMessages) return
+            scheduleScrollToBottom()
+        })
+        if (messagesContainer) messagesResizeObserver.observe(messagesContainer)
+        if (messagesTimeline) messagesResizeObserver.observe(messagesTimeline)
+    }
+
+    const bindMessagesIntentListeners = (element: HTMLDivElement) => {
+        detachMessagesIntentListeners?.()
+        const handleWheel = (event: WheelEvent) => {
+            if (event.deltaY >= 0) return
+            if (nestedScrollableCanConsumeUp(element, event.target)) return
+            releaseFromMessagesIntent()
+        }
+        let touchLastY: number | null = null
+        const handleTouchStart = (event: TouchEvent) => {
+            touchLastY = event.touches.item(0)?.clientY ?? null
+        }
+        const handleTouchMove = (event: TouchEvent) => {
+            const touch = event.touches.item(0)
+            if (!touch) {
+                touchLastY = null
+                return
+            }
+            const previousY = touchLastY
+            touchLastY = touch.clientY
+            if (previousY === null) return
+            if (touch.clientY - previousY <= MESSAGE_TOUCH_FINGER_DOWN_THRESHOLD) return
+            if (nestedScrollableCanConsumeUp(element, event.target)) return
+            releaseFromMessagesIntent()
+        }
+        const handleTouchEnd = () => {
+            touchLastY = null
+        }
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (isReleaseKey(event)) releaseFromMessagesIntent()
+        }
+        element.addEventListener("wheel", handleWheel, { passive: true })
+        element.addEventListener("touchstart", handleTouchStart, { passive: true })
+        element.addEventListener("touchmove", handleTouchMove, { passive: true })
+        element.addEventListener("touchend", handleTouchEnd, { passive: true })
+        element.addEventListener("touchcancel", handleTouchEnd, { passive: true })
+        element.addEventListener("keydown", handleKeyDown)
+        detachMessagesIntentListeners = () => {
+            element.removeEventListener("wheel", handleWheel)
+            element.removeEventListener("touchstart", handleTouchStart)
+            element.removeEventListener("touchmove", handleTouchMove)
+            element.removeEventListener("touchend", handleTouchEnd)
+            element.removeEventListener("touchcancel", handleTouchEnd)
+            element.removeEventListener("keydown", handleKeyDown)
+        }
+    }
+
+    const setMessagesContainerRef = (element: HTMLDivElement) => {
+        if (messagesContainer === element) return
+        messagesContainer = element
+        lastMessagesScrollTop = element.scrollTop
+        bindMessagesIntentListeners(element)
+        resetMessagesResizeObserver()
+        if (shouldAutoFollowMessages) scheduleScrollToBottom()
+    }
+
+    const setMessagesTimelineRef = (element: HTMLDivElement) => {
+        messagesTimeline = element
+        resetMessagesResizeObserver()
+        if (shouldAutoFollowMessages) scheduleScrollToBottom()
+    }
+
+    onCleanup(() => {
+        if (historyScrollFrame !== undefined) cancelAnimationFrame(historyScrollFrame)
+        if (autoScrollFrame !== undefined) cancelAnimationFrame(autoScrollFrame)
+        stopAutoFollowLoop()
+        stopAutoSettleBurst()
+        messagesResizeObserver?.disconnect()
+        detachMessagesIntentListeners?.()
+        if (chatInputCompositionEndTimer) clearTimeout(chatInputCompositionEndTimer)
+    })
 
     const preserveMessagesScroll = (update: () => void) => {
         if (!messagesContainer) {
@@ -548,22 +1236,35 @@ export function ChatPanel(props: ChatPanelProps) {
         if (historyScrollFrame !== undefined) cancelAnimationFrame(historyScrollFrame)
         historyScrollFrame = requestAnimationFrame(() => {
             historyScrollFrame = undefined
+            markProgrammaticScroll()
             element.scrollTop = scrollTop + element.scrollHeight - scrollHeight
+            lastMessagesScrollTop = element.scrollTop
             preservingHistoryScroll = false
         })
     }
 
+    const messageScrollSignature = createMemo(() =>
+        messages()
+            .map((message) => `${message.id}:${partsOf(message.id).map(partScrollSignature).join(",")}`)
+            .join("|"),
+    )
+
     // 消息列表或当前会话流式状态变化时滚动到底部
     createEffect(() => {
-        const list = messages()
-        // 也跟踪最后一条 assistant 消息的 parts（流式追加 part 时也要滚动）
-        if (list.length > 0) {
-            const last = list[list.length - 1]
-            if (last.role === "assistant") sdk.store.part[last.id]
+        messageScrollSignature()
+        workingStatusText()
+        if (preservingHistoryScroll) return
+        if (!shouldAutoFollowMessages) {
+            if (!isNearBottom() || !canRepinMessagesAutoFollow()) return
+            shouldAutoFollowMessages = true
+            lastUserReleaseAt = 0
         }
-        isBusy()
-        if (preservingHistoryScroll || !isNearBottom()) return
-        queueMicrotask(scrollToBottom)
+        scheduleScrollToBottom()
+    })
+
+    createEffect(() => {
+        currentSessionId()
+        queueMicrotask(resumeMessagesAutoFollow)
     })
 
     const currentAgentInfo = createMemo(() => agents().find((agent) => agent.name === currentAgent()))
@@ -809,7 +1510,7 @@ export function ChatPanel(props: ChatPanelProps) {
             })
             setHistoryCursors((prev) => ({ ...prev, [sessionId]: page.cursor }))
         })
-        if (mode === "replace") queueMicrotask(scrollToBottom)
+        if (mode === "replace") queueMicrotask(resumeMessagesAutoFollow)
     }
 
     const loadOlderMessages = async (sessionId = currentSessionId()) => {
@@ -830,6 +1531,19 @@ export function ChatPanel(props: ChatPanelProps) {
     }
 
     const handleMessagesScroll = () => {
+        if (messagesContainer && !preservingHistoryScroll) {
+            const currentTop = messagesContainer.scrollTop
+            const previousTop = lastMessagesScrollTop
+            lastMessagesScrollTop = currentTop
+            if (!isProgrammaticScroll()) {
+                if (currentTop < previousTop && shouldAutoFollowMessages) releaseMessagesAutoFollow()
+                if (!shouldAutoFollowMessages && isNearBottom() && canRepinMessagesAutoFollow()) {
+                    shouldAutoFollowMessages = true
+                    lastUserReleaseAt = 0
+                    startAutoFollowLoop()
+                }
+            }
+        }
         const sessionId = currentSessionId()
         if (!sessionId || !historyCursors()[sessionId] || historyLoadingSessions().has(sessionId)) return
         if (!messagesContainer || messagesContainer.scrollTop > MESSAGE_HISTORY_SCROLL_THRESHOLD) return
@@ -1178,7 +1892,12 @@ export function ChatPanel(props: ChatPanelProps) {
     }
 
     // 一个 part 是否应该在 chat-turn 中被渲染（与 reducer 的 SKIP_PARTS 一致）
-    const isVisiblePart = (part: Part) => part.type === "text" || part.type === "reasoning" || part.type === "tool"
+    const isVisiblePart = (part: Part) => {
+        if (part.type === "text") return props.chatVisibility.answers
+        if (part.type === "reasoning") return props.chatVisibility.reasoning
+        if (part.type !== "tool") return false
+        return isShellToolPart(part as ToolPartView) ? props.chatVisibility.shellCalls : props.chatVisibility.toolCalls
+    }
 
     // 当前会话中，最后一个可被流式展示（text 或 reasoning）的 part 的 id。
     // streaming 标记只落到这一个 id 命中的行上，其余行的属性不变 → DOM 不重建。
@@ -1191,16 +1910,30 @@ export function ChatPanel(props: ChatPanelProps) {
             const parts = sdk.store.part[message.id] ?? []
             for (let j = parts.length - 1; j >= 0; j--) {
                 const part = parts[j]
-                if (part.type === "text" || part.type === "reasoning") return part.id
+                if (part.type === "text" && props.chatVisibility.answers) return part.id
+                if (part.type === "reasoning" && props.chatVisibility.reasoning) return part.id
             }
         }
         return null
     })
 
-    // 是否显示底部"思考中…"占位：busy 且当前会话没有任何可流式 part（用户刚发完、还没有 assistant 输出）
-    const showThinkingPlaceholder = createMemo(() => {
-        if (!isBusy()) return false
-        return lastStreamablePartId() === null
+    const workingStatusText = createMemo(() => {
+        if (!isBusy()) return ""
+        if (activePermissionRequest()) return "等待权限确认"
+        if (activeQuestionRequest()) return "等待回答"
+        const list = messages()
+        for (let i = list.length - 1; i >= 0; i--) {
+            const message = list[i]
+            if (message.role !== "assistant") continue
+            const parts = sdk.store.part[message.id] ?? []
+            for (let j = parts.length - 1; j >= 0; j--) {
+                const part = parts[j]
+                if (part.type === "tool" && isToolActive(part.state)) return activeToolStatusLabel(part as ToolPartView)
+                if (part.type === "reasoning") return "正在思考"
+                if (part.type === "text") return "生成回复中"
+            }
+        }
+        return "正在思考"
     })
 
     const emptyConversation = createMemo(() => messages().length === 0 && !isLoading() && !sendError() && !hasPendingRequest())
@@ -1255,7 +1988,7 @@ export function ChatPanel(props: ChatPanelProps) {
                 </div>
             </div>
 
-            <div class="chat-messages" ref={messagesContainer} onScroll={handleMessagesScroll}>
+            <div class="chat-messages" ref={setMessagesContainerRef} onScroll={handleMessagesScroll}>
                 <Show
                     when={messages().length > 0 || isLoading() || sendError()}
                     fallback={
@@ -1266,7 +1999,7 @@ export function ChatPanel(props: ChatPanelProps) {
                         </div>
                     }
                 >
-                    <div class="chat-timeline">
+                    <div class="chat-timeline" ref={setMessagesTimelineRef}>
                         <Show when={historyMore()}>
                             <div class="chat-history-loader">
                                 <button
@@ -1327,6 +2060,7 @@ export function ChatPanel(props: ChatPanelProps) {
                                                                     text={reasoningPart.text}
                                                                     cacheKey={reasoningPart.id}
                                                                     streaming={streaming()}
+                                                                    time={reasoningPart.time}
                                                                 />
                                                             </div>
                                                         )
@@ -1334,21 +2068,11 @@ export function ChatPanel(props: ChatPanelProps) {
                                                 </Show>
                                                 <Show when={part.type === "tool"}>
                                                     {(() => {
-                                                        const tool = part as Part & { type: "tool" }
+                                                        const tool = part as ToolPartView
                                                         return (
                                                             <div class="chat-turn assistant">
                                                                 <div class="tool-calls">
-                                                                    <div class={`tool-call ${tool.state.status}`}>
-                                                                        <span class="tool-icon">{getToolStatusIcon(tool.state.status)}</span>
-                                                                        <span class="tool-body">
-                                                                            <span class="tool-name">
-                                                                                {"title" in tool.state && tool.state.title ? tool.state.title : tool.tool}
-                                                                            </span>
-                                                                            <Show when={tool.state.status === "error" && "error" in tool.state ? tool.state.error : undefined}>
-                                                                                {(error) => <span class="tool-error-text">{cleanToolError(error())}</span>}
-                                                                            </Show>
-                                                                        </span>
-                                                                    </div>
+                                                                    <ToolCallBlock part={tool} />
                                                                 </div>
                                                             </div>
                                                         )
@@ -1361,11 +2085,10 @@ export function ChatPanel(props: ChatPanelProps) {
                             )}
                         </For>
 
-                        <Show when={showThinkingPlaceholder()}>
+                        <Show when={workingStatusText()}>
                             <div class="chat-turn assistant">
                                 <div class="chat-thinking">
-                                    <span class="chat-thinking-spinner" aria-hidden="true"></span>
-                                    <span class="chat-thinking-label">思考中</span>
+                                    <span class="chat-thinking-label" data-text={workingStatusText()}>{workingStatusText()}</span>
                                 </div>
                             </div>
                         </Show>

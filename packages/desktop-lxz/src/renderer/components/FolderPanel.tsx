@@ -16,15 +16,23 @@ import FileVideo from "lucide-solid/icons/file-video"
 import Folder from "lucide-solid/icons/folder"
 import FolderOpen from "lucide-solid/icons/folder-open"
 import Image from "lucide-solid/icons/image"
+import Brain from "lucide-solid/icons/brain"
+import MessageCircle from "lucide-solid/icons/message-circle"
 import Monitor from "lucide-solid/icons/monitor"
 import Moon from "lucide-solid/icons/moon"
+import Palette from "lucide-solid/icons/palette"
 import PanelLeft from "lucide-solid/icons/panel-left"
 import PencilLine from "lucide-solid/icons/pencil-line"
 import Presentation from "lucide-solid/icons/presentation"
+import Settings from "lucide-solid/icons/settings"
+import SquareTerminal from "lucide-solid/icons/square-terminal"
 import SquarePen from "lucide-solid/icons/square-pen"
 import Sun from "lucide-solid/icons/sun"
 import Trash2 from "lucide-solid/icons/trash-2"
-import { nextThemeMode, type ThemeMode } from "../theme"
+import Wrench from "lucide-solid/icons/wrench"
+import X from "lucide-solid/icons/x"
+import type { ThemeMode } from "../theme"
+import type { ChatVisibilitySettings } from "../settings"
 import appIcon from "../../../build/128x128.png"
 
 interface FileItem {
@@ -42,6 +50,16 @@ type SidebarDialog =
     | { kind: "delete-project"; project: Project }
     | { kind: "delete-session"; folder: string; session: Session }
 
+type SettingsSection = "appearance" | "chat"
+
+interface FolderPanelProps {
+    onCollapse: () => void
+    themeMode: ThemeMode
+    onThemeModeChange: (mode: ThemeMode) => void
+    chatVisibility: ChatVisibilitySettings
+    onChatVisibilityChange: (settings: ChatVisibilitySettings) => void
+}
+
 const LAST_PROJECT_STORAGE_KEY = "desktop-lxz.lastProjectFolder"
 const PROJECT_ADDED_EVENT = "desktop-lxz.project-added"
 const SYSTEM_THEME_MODE_OPTION = { mode: "system", label: "系统", icon: Monitor } as const
@@ -50,13 +68,41 @@ const THEME_MODE_OPTIONS = [
     { mode: "light", label: "亮色", icon: Sun },
     { mode: "dark", label: "暗色", icon: Moon },
 ] as const
+const SETTINGS_SECTION_OPTIONS = [
+    { section: "appearance", label: "外观", description: "主题与界面", icon: Palette },
+    { section: "chat", label: "聊天", description: "消息显示", icon: MessageCircle },
+] as const
 
 function isDefaultSessionTitle(title?: string) {
     const value = title?.trim()
     return value === "新对话" || /^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value ?? "")
 }
 
-export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void }) {
+function SettingsSwitchRow(props: { icon: LucideIcon; title: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+    return (
+        <button
+            type="button"
+            class="settings-option-row"
+            role="switch"
+            aria-checked={props.checked}
+            data-active={props.checked ? "true" : "false"}
+            onClick={() => props.onChange(!props.checked)}
+        >
+            <span class="settings-option-icon" aria-hidden="true">
+                <Dynamic component={props.icon} class="sidebar-lucide-icon" size={16} strokeWidth={1.85} />
+            </span>
+            <span class="settings-option-copy">
+                <span class="settings-option-title">{props.title}</span>
+                <span class="settings-option-description">{props.description}</span>
+            </span>
+            <span class="settings-switch-track" aria-hidden="true">
+                <span class="settings-switch-thumb" />
+            </span>
+        </button>
+    )
+}
+
+export function FolderPanel(props: FolderPanelProps) {
     const sdk = useSDK()
     const [projects, setProjects] = createSignal<Project[]>([])
     const [files, setFiles] = createSignal<FileItem[]>([])
@@ -73,6 +119,8 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
     const [unreadSessions, setUnreadSessions] = createSignal<Set<string>>(new Set())
     const [sidebarMenu, setSidebarMenu] = createSignal<SidebarMenu | null>(null)
     const [sidebarDialog, setSidebarDialog] = createSignal<SidebarDialog | null>(null)
+    const [settingsOpen, setSettingsOpen] = createSignal(false)
+    const [settingsSection, setSettingsSection] = createSignal<SettingsSection>("appearance")
     const sessionLoadFolders = new Set<string>()
     let fileLoadRequest = 0
     let fileRefreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -84,6 +132,15 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
     })
 
     const closeSidebarMenu = () => setSidebarMenu(null)
+
+    const openSettings = () => {
+        closeSidebarMenu()
+        setSettingsOpen(true)
+    }
+
+    const updateChatVisibility = (changes: Partial<ChatVisibilitySettings>) => {
+        props.onChatVisibilityChange({ ...props.chatVisibility, ...changes })
+    }
 
     const closeSidebarDialog = () => {
         setSidebarDialog(null)
@@ -274,6 +331,15 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
                 applyProjectUpdate(project)
             }
         })
+    })
+
+    createEffect(() => {
+        if (!settingsOpen()) return
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setSettingsOpen(false)
+        }
+        document.addEventListener("keydown", handleKeyDown)
+        onCleanup(() => document.removeEventListener("keydown", handleKeyDown))
     })
 
     onCleanup(() => {
@@ -582,7 +648,7 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
     const isSessionBusy = (sessionID: string) => sdk.store.session_status[sessionID]?.type === "busy"
     const isSessionUnread = (sessionID: string) => sdk.selectedSession()?.id !== sessionID && unreadSessions().has(sessionID)
     const currentThemeModeOption = () => THEME_MODE_OPTIONS.find((item) => item.mode === props.themeMode) ?? SYSTEM_THEME_MODE_OPTION
-    const nextThemeModeOption = () => THEME_MODE_OPTIONS.find((item) => item.mode === nextThemeMode(props.themeMode)) ?? SYSTEM_THEME_MODE_OPTION
+    const currentSettingsSection = () => SETTINGS_SECTION_OPTIONS.find((item) => item.section === settingsSection()) ?? SETTINGS_SECTION_OPTIONS[0]
 
     const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
         ...session,
@@ -884,19 +950,151 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
             <div class="folder-panel-status">
                 <button
                     type="button"
-                    class="theme-cycle-button"
-                    onClick={() => props.onThemeModeChange(nextThemeMode(props.themeMode))}
-                    title={`主题：${currentThemeModeOption().label}。点击切换到${nextThemeModeOption().label}`}
-                    aria-label={`主题：${currentThemeModeOption().label}。点击切换到${nextThemeModeOption().label}`}
+                    class="settings-entry-button"
+                    onClick={openSettings}
+                    title="打开设置"
+                    aria-label="打开设置"
                 >
-                    <Dynamic component={currentThemeModeOption().icon} class="sidebar-lucide-icon" size={14} strokeWidth={1.8} />
-                    <span>{currentThemeModeOption().label}</span>
+                    <Settings class="sidebar-lucide-icon" size={14} strokeWidth={1.8} />
+                    <span>设置</span>
                 </button>
                 <div class="service-status" title="服务器在线">
                     <span class="status-dot online"></span>
                     <span>服务在线</span>
                 </div>
             </div>
+
+            <Show when={settingsOpen()}>
+                <Portal>
+                    <div class="settings-dialog-root">
+                        <button
+                            type="button"
+                            class="settings-dialog-backdrop"
+                            aria-label="关闭设置"
+                            onClick={() => setSettingsOpen(false)}
+                        />
+                        <div
+                            class="settings-dialog"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="desktop-lxz-settings-title"
+                        >
+                            <button
+                                type="button"
+                                class="settings-dialog-close"
+                                onClick={() => setSettingsOpen(false)}
+                                title="关闭"
+                                aria-label="关闭设置"
+                            >
+                                <X class="sidebar-lucide-icon" size={16} strokeWidth={1.9} />
+                            </button>
+                            <aside class="settings-dialog-sidebar">
+                                <div class="settings-dialog-titlebar">
+                                    <div>
+                                        <div class="settings-dialog-kicker">LongwiseTechAgent</div>
+                                        <h2 id="desktop-lxz-settings-title">设置</h2>
+                                    </div>
+                                </div>
+                                <nav class="settings-dialog-nav" aria-label="设置分类">
+                                    <For each={SETTINGS_SECTION_OPTIONS}>
+                                        {(item) => (
+                                            <button
+                                                type="button"
+                                                class="settings-dialog-nav-item"
+                                                classList={{ active: settingsSection() === item.section }}
+                                                onClick={() => setSettingsSection(item.section)}
+                                                aria-current={settingsSection() === item.section ? "page" : undefined}
+                                            >
+                                                <Dynamic component={item.icon} class="sidebar-lucide-icon" size={16} strokeWidth={1.85} />
+                                                <span>
+                                                    <span class="settings-dialog-nav-label">{item.label}</span>
+                                                    <span class="settings-dialog-nav-description">{item.description}</span>
+                                                </span>
+                                            </button>
+                                        )}
+                                    </For>
+                                </nav>
+                            </aside>
+                            <main class="settings-dialog-content">
+                                <div class="settings-page-heading">
+                                    <Dynamic component={currentSettingsSection().icon} class="settings-page-icon" size={19} strokeWidth={1.85} />
+                                    <div>
+                                        <h3>{currentSettingsSection().label}</h3>
+                                        <p>{currentSettingsSection().description}</p>
+                                    </div>
+                                </div>
+                                <Show
+                                    when={settingsSection() === "appearance"}
+                                    fallback={
+                                        <section class="settings-section">
+                                            <div class="settings-section-heading">
+                                                <h4>消息显示</h4>
+                                                <p>控制聊天记录中辅助信息的展示方式。</p>
+                                            </div>
+                                            <div class="settings-option-list">
+                                                <SettingsSwitchRow
+                                                    icon={MessageCircle}
+                                                    title="显示回答"
+                                                    description="展示助手生成的正式回复内容。"
+                                                    checked={props.chatVisibility.answers}
+                                                    onChange={(answers) => updateChatVisibility({ answers })}
+                                                />
+                                                <SettingsSwitchRow
+                                                    icon={Brain}
+                                                    title="显示思考"
+                                                    description="展示模型的思考过程。默认关闭。"
+                                                    checked={props.chatVisibility.reasoning}
+                                                    onChange={(reasoning) => updateChatVisibility({ reasoning })}
+                                                />
+                                                <SettingsSwitchRow
+                                                    icon={SquareTerminal}
+                                                    title="显示 Shell 调用"
+                                                    description="展示 bash、shell 等终端命令调用。默认关闭。"
+                                                    checked={props.chatVisibility.shellCalls}
+                                                    onChange={(shellCalls) => updateChatVisibility({ shellCalls })}
+                                                />
+                                                <SettingsSwitchRow
+                                                    icon={Wrench}
+                                                    title="显示工具调用"
+                                                    description="展示文件、搜索、任务等非 Shell 工具调用。默认关闭。"
+                                                    checked={props.chatVisibility.toolCalls}
+                                                    onChange={(toolCalls) => updateChatVisibility({ toolCalls })}
+                                                />
+                                            </div>
+                                        </section>
+                                    }
+                                >
+                                    <section class="settings-section">
+                                        <div class="settings-section-heading">
+                                            <h4>主题</h4>
+                                            <p>选择界面跟随系统、亮色或暗色显示。</p>
+                                        </div>
+                                        <div class="settings-theme-options" role="group" aria-label="主题">
+                                            <For each={THEME_MODE_OPTIONS}>
+                                                {(option) => (
+                                                    <button
+                                                        type="button"
+                                                        class="settings-theme-option"
+                                                        classList={{ active: props.themeMode === option.mode }}
+                                                        onClick={() => props.onThemeModeChange(option.mode)}
+                                                        aria-pressed={props.themeMode === option.mode}
+                                                    >
+                                                        <Dynamic component={option.icon} class="sidebar-lucide-icon" size={16} strokeWidth={1.85} />
+                                                        <span>{option.label}</span>
+                                                    </button>
+                                                )}
+                                            </For>
+                                        </div>
+                                        <div class="settings-current-value">
+                                            当前：{currentThemeModeOption().label}
+                                        </div>
+                                    </section>
+                                </Show>
+                            </main>
+                        </div>
+                    </div>
+                </Portal>
+            </Show>
 
             <Show when={sidebarMenu()}>
                 {(menu) => (
