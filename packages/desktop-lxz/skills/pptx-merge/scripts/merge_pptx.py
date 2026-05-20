@@ -54,8 +54,24 @@ def merge_pptx(input_files, output_path):
 
         with zipfile.ZipFile(src_path, 'r') as zf:
             src_namelist = zf.namelist()
-            src_slides = sorted([n for n in src_namelist if re.match(r'ppt/slides/slide\d+\.xml', n)])
+            src_pres_xml = zf.read('ppt/presentation.xml').decode('utf-8')
             src_rels_xml = zf.read('ppt/_rels/presentation.xml.rels').decode('utf-8')
+
+            rid_to_slide = {}
+            for rel_match in re.finditer(r'<Relationship[^>]+/>', src_rels_xml):
+                rel_str = rel_match.group(0)
+                rid, rel_type, target = parse_rel(rel_str)
+                if rid and rel_type and 'slide' in rel_type.lower():
+                    if target.startswith('slides/'):
+                        rid_to_slide[rid] = target
+
+            sld_order = []
+            for sld_id_match in re.finditer(r'<p:sldId id="(\d+)"[^>]*r:id="(rId\d+)"', src_pres_xml):
+                rid = sld_id_match.group(2)
+                if rid in rid_to_slide:
+                    sld_order.append(f"ppt/{rid_to_slide[rid]}")
+
+            src_slides = sld_order
 
             for slide_name in src_slides:
                 src_slide_num = re.search(r'slide(\d+)\.xml', slide_name).group(1)

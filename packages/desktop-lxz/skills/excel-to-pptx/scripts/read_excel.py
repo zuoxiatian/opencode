@@ -61,7 +61,7 @@ def clean_text(value):
         text = text.replace("\n", "")
         text = text.replace("<<NEWLINE>>", "\n")
         return text if text else None
-    return value
+    return str(value)
 
 
 def clean_header(value):
@@ -69,6 +69,191 @@ def clean_header(value):
     if text is None:
         return None
     return str(text).strip()
+
+
+def is_date_format(number_format):
+    """Check if number_format indicates a date type."""
+    if not number_format or number_format == 'General':
+        return False
+    date_chars = {'y', 'm', 'd', 'h', 's'}
+    fmt_lower = number_format.lower()
+    return any(c in fmt_lower for c in date_chars)
+
+
+def is_time_format(number_format):
+    """Check if number_format indicates a time type."""
+    if not number_format or number_format == 'General':
+        return False
+    fmt_lower = number_format.lower()
+    return 'h' in fmt_lower or 's' in fmt_lower
+
+
+def round_to_decimal_places(value, decimal_places):
+    """Round a float to specified decimal places."""
+    if decimal_places == 0:
+        return round(value)
+    multiplier = 10 ** decimal_places
+    return round(value * multiplier) / multiplier
+
+
+def format_numeric(value, number_format):
+    """Format numeric value according to Excel number_format."""
+    if not isinstance(value, (int, float)):
+        return None
+
+    fmt = (number_format or 'General').strip()
+
+    # Handle General format - just return the number as string
+    if fmt == 'General':
+        return str(value)
+
+    # Determine decimal places from format
+    decimal_places = 0
+    has_decimal = '.' in fmt
+    if has_decimal:
+        # Count digits after decimal point in format string (before any trailing zeros removed)
+        parts = fmt.split('.')
+        if len(parts) > 1:
+            # Get the decimal part, stop at first non-digit character (like space, _, etc.)
+            decimal_part = ''
+            for ch in parts[1]:
+                if ch.isdigit():
+                    decimal_part += ch
+                else:
+                    break
+            decimal_places = len(decimal_part) if decimal_part else 0
+
+    # Format with proper decimal places
+    formatted = round_to_decimal_places(value, decimal_places)
+
+    # Add thousand separator if format has it
+    if '#,##0' in fmt or (',' in fmt and decimal_places > 0):
+        return f"{formatted:,}"
+    return str(formatted)
+
+
+def format_date(value, number_format):
+    """Format Excel date serial number or datetime object to date string."""
+    import datetime as dt_module
+
+    if isinstance(value, dt_module.datetime):
+        dt = value
+    elif isinstance(value, dt_module.date):
+        dt = dt_module.datetime.combine(value, dt_module.time())
+    elif isinstance(value, (int, float)):
+        from openpyxl.utils.datetime import from_excel
+        try:
+            dt = from_excel(value)
+        except Exception:
+            return str(value)
+    else:
+        return None
+
+    fmt = (number_format or 'yyyy/m/d').strip()
+    if fmt.lower() == 'general':
+        return dt.strftime('%m月%d日')
+    # Remove Excel section separator and everything after it (e.g., ";@" or ";@")
+    if ';' in fmt:
+        fmt = fmt.split(';')[0]
+
+    # Handle Chinese date format: m"月"d"日" or mm"月"dd"日"
+    # Also handle yyyy"年"m"月"d"日" etc.
+    chinese_date_pattern = re.compile(r'(yyyy|yy|m+|d+|h+|s+)(["""\'\']([^"""\']+)["""\'\'])?', re.IGNORECASE)
+
+    def replace_token(match):
+        token = match.group(1).lower()
+        literal = match.group(3) or ''
+
+        # Map Excel format tokens to Python strftime
+        token_map = {
+            'yyyy': '%Y',   # 4-digit year
+            'yy': '%y',     # 2-digit year
+            'mmmm': '%B',   # Full month name (locale)
+            'mmm': '%b',    # Abbreviated month (locale)
+            'mm': '%m',     # Zero-padded month
+            'm': '%m',      # Month without zero-padding
+            'dd': '%d',     # Zero-padded day
+            'd': '%d',      # Day without zero-padding
+            'hh': '%H',     # 24-hour
+            'h': '%H',      # 24-hour without zero-padding
+            'ss': '%S',     # Second
+            's': '%S',      # Second without zero-padding
+        }
+
+        if token in token_map:
+            fmt_token = token_map[token]
+            try:
+                formatted = dt.strftime(fmt_token)
+                # Remove leading zero for non-zero-padded formats
+                if token == 'm' and literal != '月':
+                    formatted = str(int(formatted))
+                elif token == 'd' and literal != '日':
+                    formatted = str(int(formatted))
+                return formatted + literal
+            except Exception:
+                return match.group(0)
+        return match.group(0)
+
+    # Replace tokens while preserving literals
+    result = chinese_date_pattern.sub(replace_token, fmt)
+
+    # Handle any remaining tokens that weren't in the pattern
+    # e.g., simple formats like "yyyy/m/d"
+    simple_tokens = {
+        'yyyy': '%Y', 'yy': '%y',
+        'mm': '%m', 'm': '%m',
+        'dd': '%d', 'd': '%d',
+    }
+    for token, strftime_token in simple_tokens.items():
+        if token in result.lower():
+            try:
+                result = dt.strftime(result)
+                break
+            except Exception:
+                pass
+
+    try:
+        return dt.strftime(result)
+    except Exception:
+        return str(value)
+
+
+def format_cell_value(value, number_format):
+    """Format cell value according to its number_format."""
+    if value is None:
+        return None
+
+    import datetime as dt_module
+
+    # If it's a string, use original clean_text behavior
+    if isinstance(value, str):
+        return clean_text(value)
+
+    # Handle datetime objects (already converted by openpyxl)
+    if isinstance(value, (dt_module.datetime, dt_module.date)):
+        formatted = format_date(value, number_format)
+        if formatted:
+            return formatted
+        return clean_text(value)
+
+    # If it's a number (int or float)
+    if isinstance(value, (int, float)):
+        # Skip boolean
+        if isinstance(value, bool):
+            return clean_text(value)
+
+        # Check for date format
+        if is_date_format(number_format):
+            formatted = format_date(value, number_format)
+            if formatted:
+                return formatted
+
+        # Otherwise format as numeric
+        formatted = format_numeric(value, number_format)
+        if formatted:
+            return formatted
+
+    return clean_text(value)
 
 
 def expand_merged_cells(ws):
@@ -139,8 +324,12 @@ def build_value_matrix(ws, merged_map):
     for r in range(1, ws.max_row + 1):
         row_values = []
         for c in range(1, ws.max_column + 1):
-            value = merged_map.get((r, c), ws.cell(r, c).value)
-            row_values.append(clean_text(value))
+            cell = ws.cell(r, c)
+            # For merged cells, use top-left value from merged_map
+            value = merged_map.get((r, c), cell.value)
+            # Get number_format for formatting
+            number_format = cell.number_format
+            row_values.append(format_cell_value(value, number_format))
             if not is_blank(value):
                 row_has_value.add(r)
                 col_has_value.add(c)
@@ -295,14 +484,37 @@ def infer_voucher_label(column_name):
 
 
 def build_image_caption(headers, row_values, column_name, data_row_idx):
-    """Build image caption as {发布平台}-{媒体名称}-{数据截图/发票凭证/付款凭证/等}."""
-    platform = find_row_value_by_headers(headers, row_values, ["发布平台", "平台"])
-    media = find_row_value_by_headers(headers, row_values, ["媒体名称", "媒体名", "达人", "账号名称", "账号", "名称", "kol", "koc"])
-    voucher = infer_voucher_label(column_name)
+    """Build image caption as {发布平台列的内容}-{媒体名称列的内容}-{图片所在列的名字}.
+
+    Uses exact column name matching to find 发布平台 and 媒体名称 values,
+    then uses the actual cell values from those columns for the current row.
+    The column_name (voucher type) is used as-is without inference.
+    """
+    platform_col_idx = None
+    media_col_idx = None
+
+    for idx, header in enumerate(headers or []):
+        if idx >= len(row_values):
+            break
+        h = normalize_match_text(header)
+        if not h:
+            continue
+        if platform_col_idx is None and "发布平台" in h:
+            if row_values[idx] is not None and str(row_values[idx]).strip() != "":
+                platform_col_idx = idx
+        if media_col_idx is None:
+            media_keywords = ["媒体名称", "媒体名", "达人", "账号名称", "账号", "名称", "kol", "koc"]
+            if any(normalize_match_text(k) in h for k in media_keywords):
+                if row_values[idx] is not None and str(row_values[idx]).strip() != "":
+                    media_col_idx = idx
+
+    platform = row_values[platform_col_idx] if platform_col_idx is not None and platform_col_idx < len(row_values) else None
+    media = row_values[media_col_idx] if media_col_idx is not None and media_col_idx < len(row_values) else None
+
     return "-".join([
         caption_safe(platform, "未知平台"),
         caption_safe(media, f"第{data_row_idx + 1}行"),
-        caption_safe(voucher, "图片凭证"),
+        caption_safe(column_name, "图片凭证"),
     ])
 
 

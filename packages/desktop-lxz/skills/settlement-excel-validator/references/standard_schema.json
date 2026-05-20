@@ -1,0 +1,63 @@
+{
+  "schema_name": "settlement_original_input_v1",
+  "description": "Standard schema inferred from 结算原始输入文件-测试002.xlsx for pre-validating Excel before excel-to-pptx conversion.",
+  "strict_sheet_names": [
+    "汇总",
+    "1-车马费合作-云评",
+    "2-车马费合作-通稿",
+    "3-媒体合作-线下合同",
+    "4-媒体合作-平台单链接",
+    "5-媒体合作-平台多链接",
+    "6-差旅"
+  ],
+  "summary_sheet_keywords": ["汇总", "summary"],
+  "summary_required_headers": [
+    "板块（必填）",
+    "描述方向（必填）",
+    "媒体名称（必填）",
+    "平台单价/刊例价（必填）",
+    "执行单价（含平台服务费）（必填）",
+    "数量（必填）",
+    "单位（必填）",
+    "执行总价（含平台服务费）（必填）",
+    "对应RFQ（必填）",
+    "备注（必填）"
+  ],
+  "detail_sheets": {
+    "1-车马费合作-云评": {
+      "critical_headers": ["序号（必填）", "类型（必填）", "发布平台（必填）", "媒体名称（必填）", "见刊标题（必填）", "见刊链接（必填）", "见刊截图（必填）", "播放量（必填）", "互动量（必填）"],
+      "min_required_marker_count": 8,
+      "expect_images": false
+    },
+    "2-车马费合作-通稿": {
+      "critical_headers": ["序号", "发布时间", "属性", "媒体名称", "发布平台", "链接"],
+      "min_required_marker_count": 0,
+      "expect_images": false
+    },
+    "3-媒体合作-线下合同": {
+      "critical_headers": ["媒体名称", "发布平台", "发布时间", "见刊标题", "见刊链接", "播放量/阅读量", "互动量", "数据截图", "发票凭证", "付款凭证", "合同"],
+      "min_required_marker_count": 0,
+      "expect_images": true
+    },
+    "4-媒体合作-平台单链接": {
+      "critical_headers": ["序号", "属性", "达人", "发布平台", "见刊时间", "见刊链接", "播放量", "CPM", "数据凭证", "平台凭证", "下单截图"],
+      "min_required_marker_count": 0,
+      "expect_images": true
+    },
+    "5-媒体合作-平台多链接": {
+      "critical_headers": ["属性", "达人", "发布平台", "见刊时间", "见刊链接", "播放量", "CPM", "数据凭证", "平台凭证", "下单截图"],
+      "min_required_marker_count": 0,
+      "expect_images": true
+    },
+    "6-差旅": {
+      "critical_headers": ["媒体名称", "发布平台", "发布时间", "见刊标题", "见刊链接", "播放量/阅读量", "互动量", "数据截图", "发票凭证", "付款凭证", "合同"],
+      "min_required_marker_count": 0,
+      "expect_images": true
+    }
+  },
+  "thresholds": {
+    "summary_min_required_marker_count": 8,
+    "detail_min_header_match_ratio": 0.8,
+    "max_repeated_header_ratio": 0.6
+  }
+}
