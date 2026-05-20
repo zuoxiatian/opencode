@@ -413,6 +413,8 @@ const isShellToolPart = (part: ToolPartView) => {
     return normalized === "bash" || normalized === "shell"
 }
 
+const isQuestionToolPart = (part: ToolPartView) => normalizeToolName(part.tool) === "question"
+
 const activeToolStatusLabel = (part: ToolPartView) => {
     const label = toolLabel(part)
     if (label.endsWith("中")) return label
@@ -1893,10 +1895,12 @@ export function ChatPanel(props: ChatPanelProps) {
 
     // 一个 part 是否应该在 chat-turn 中被渲染（与 reducer 的 SKIP_PARTS 一致）
     const isVisiblePart = (part: Part) => {
-        if (part.type === "text") return props.chatVisibility.answers
+        if (part.type === "text") return true
         if (part.type === "reasoning") return props.chatVisibility.reasoning
         if (part.type !== "tool") return false
-        return isShellToolPart(part as ToolPartView) ? props.chatVisibility.shellCalls : props.chatVisibility.toolCalls
+        const tool = part as ToolPartView
+        if (isQuestionToolPart(tool)) return props.chatVisibility.questionAnswers
+        return isShellToolPart(tool) ? props.chatVisibility.shellCalls : props.chatVisibility.toolCalls
     }
 
     // 当前会话中，最后一个可被流式展示（text 或 reasoning）的 part 的 id。
@@ -1910,7 +1914,7 @@ export function ChatPanel(props: ChatPanelProps) {
             const parts = sdk.store.part[message.id] ?? []
             for (let j = parts.length - 1; j >= 0; j--) {
                 const part = parts[j]
-                if (part.type === "text" && props.chatVisibility.answers) return part.id
+                if (part.type === "text") return part.id
                 if (part.type === "reasoning" && props.chatVisibility.reasoning) return part.id
             }
         }

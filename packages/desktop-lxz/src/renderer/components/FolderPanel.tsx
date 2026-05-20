@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-solid"
 import ChartColumn from "lucide-solid/icons/chart-column"
 import Check from "lucide-solid/icons/check"
 import CircleMinus from "lucide-solid/icons/circle-minus"
+import CircleQuestionMark from "lucide-solid/icons/circle-question-mark"
 import FileCode from "lucide-solid/icons/file-code"
 import FileIcon from "lucide-solid/icons/file"
 import FileAudio from "lucide-solid/icons/file-audio"
@@ -1033,11 +1034,11 @@ export function FolderPanel(props: FolderPanelProps) {
                                             </div>
                                             <div class="settings-option-list">
                                                 <SettingsSwitchRow
-                                                    icon={MessageCircle}
-                                                    title="显示回答"
-                                                    description="展示助手生成的正式回复内容。"
-                                                    checked={props.chatVisibility.answers}
-                                                    onChange={(answers) => updateChatVisibility({ answers })}
+                                                    icon={CircleQuestionMark}
+                                                    title="显示问答"
+                                                    description="展示历史问题与用户回答。"
+                                                    checked={props.chatVisibility.questionAnswers}
+                                                    onChange={(questionAnswers) => updateChatVisibility({ questionAnswers })}
                                                 />
                                                 <SettingsSwitchRow
                                                     icon={Brain}
