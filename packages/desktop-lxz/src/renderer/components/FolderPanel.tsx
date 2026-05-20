@@ -27,6 +27,7 @@ import SquarePen from "lucide-solid/icons/square-pen"
 import Sun from "lucide-solid/icons/sun"
 import Trash2 from "lucide-solid/icons/trash-2"
 import { nextThemeMode, type ThemeMode } from "../theme"
+import appIcon from "../../../build/128x128.png"
 
 interface FileItem {
     name: string
@@ -733,6 +734,13 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
                     <button class="sidebar-panel-button" onClick={props.onCollapse} title="折叠侧边栏" aria-label="折叠侧边栏">
                         <PanelLeft class="sidebar-lucide-icon" size={17} strokeWidth={1.8} />
                     </button>
+                </div>
+                <div class="folder-panel-brand" title="LongwiseTechAgent">
+                    <img class="folder-panel-brand-icon" src={appIcon} alt="" draggable={false} />
+                    <span class="folder-panel-brand-copy">
+                        <span class="folder-panel-brand-title">LongwiseTechAgent</span>
+                        <span class="folder-panel-brand-subtitle">朗知科技智能体</span>
+                    </span>
                 </div>
                 <button class="folder-open-button" onClick={handleOpenFolder} title="打开文件夹">
                     <FolderOpen class="sidebar-lucide-icon" size={17} strokeWidth={1.9} />
