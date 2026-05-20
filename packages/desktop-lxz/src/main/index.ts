@@ -162,6 +162,34 @@ function configureApplicationMenu(appIconPath: string | undefined) {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+function registerEditShortcuts(window: BrowserWindowType) {
+    window.webContents.on("before-input-event", (event, input) => {
+        if (input.type !== "keyDown" || input.alt) return
+        if (process.platform === "darwin" ? !input.meta : !input.control) return
+
+        const key = input.key.toLowerCase()
+        const command = key === "a" && !input.shift
+            ? () => window.webContents.selectAll()
+            : key === "c" && !input.shift
+                ? () => window.webContents.copy()
+                : key === "v" && !input.shift
+                    ? () => window.webContents.paste()
+                    : key === "x" && !input.shift
+                        ? () => window.webContents.cut()
+                        : key === "z"
+                            ? input.shift
+                                ? () => window.webContents.redo()
+                                : () => window.webContents.undo()
+                            : key === "y" && !input.shift && process.platform !== "darwin"
+                                ? () => window.webContents.redo()
+                                : undefined
+
+        if (!command) return
+        event.preventDefault()
+        command()
+    })
+}
+
 async function ensureDefaultOpencodeConfig() {
     const configDir = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "config")
     const configFiles = ["opencode.jsonc", "opencode.json", "config.json"].map((file) => join(configDir, file))
@@ -441,6 +469,8 @@ async function createWindow() {
         closeDirectoryWatchers()
         mainWindow = null
     })
+
+    registerEditShortcuts(mainWindow)
 
     // 先加载页面
     if (process.env.NODE_ENV === "development") {

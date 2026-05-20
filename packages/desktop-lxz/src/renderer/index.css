@@ -5358,3 +5358,115 @@ body {
     background: var(--accent-secondary);
     animation: blink 1s infinite;
 }
+
+.composer-add-trigger[data-open="true"] {
+    background: var(--surface-raised-base-hover);
+    color: var(--text-primary);
+    box-shadow: none;
+}
+
+.composer-add-menu,
+.composer-skill-menu {
+    min-height: 34px;
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    background: var(--lxz-popover-bg);
+    backdrop-filter: blur(18px) saturate(1.04);
+    border: 1px solid var(--lxz-popover-separator);
+    border-radius: 12px;
+    box-shadow:
+        0 18px 42px -26px rgba(0, 0, 0, 0.92),
+        0 6px 18px -14px rgba(0, 0, 0, 0.74);
+    z-index: 11000;
+}
+
+.composer-add-menu {
+    min-width: 190px;
+    overflow: visible;
+}
+
+.composer-skill-menu {
+    min-width: 220px;
+    max-width: min(280px, 72vw);
+    max-height: min(320px, 70vh);
+    overflow-x: hidden;
+    overflow-y: auto;
+    z-index: 11001;
+}
+
+.composer-add-menu-item,
+.composer-skill-menu-item {
+    width: 100%;
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    position: relative;
+    text-align: left;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.composer-add-menu-item[data-highlighted],
+.composer-add-menu-item[data-expanded],
+.composer-add-menu-item:hover,
+.composer-skill-menu-item[data-highlighted],
+.composer-skill-menu-item:hover {
+    background: var(--lxz-popover-hover);
+    color: var(--text-primary);
+}
+
+.composer-add-menu-item [data-slot="composer-add-menu-label"],
+.composer-skill-menu-main {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-add-menu-item .lucide-chevron-icon {
+    margin-left: auto;
+    color: var(--text-tertiary);
+}
+
+.composer-skill-menu-header {
+    padding: 5px 9px 6px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.35;
+}
+
+.composer-skill-menu-empty {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    padding: 8px 9px;
+    color: var(--text-tertiary);
+    font-size: 13px;
+}
+
+.composer-skill-menu-item {
+    padding-right: 32px;
+}
+
+.composer-skill-menu-item.active {
+    background: var(--lxz-menu-selected-bg);
+    color: var(--text-primary);
+}
+
+.composer-skill-menu-item .check-icon {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+    color: var(--lxz-menu-selected-icon);
+}

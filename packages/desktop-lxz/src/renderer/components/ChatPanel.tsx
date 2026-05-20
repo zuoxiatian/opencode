@@ -1,4 +1,4 @@
-import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch } from "solid-js"
+import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch, untrack } from "solid-js"
 import { reconcile } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { useSDK, type DiscussIssue } from "../context/sdk"
@@ -75,6 +75,12 @@ interface ModelOption extends ModelSelection {
     isDefault: boolean
 }
 
+interface SkillOption {
+    name: string
+    description?: string
+    location: string
+}
+
 interface ChatPanelProps {
     sidebarCollapsed?: boolean
     onOpenSidebar?: () => void
@@ -100,6 +106,7 @@ const MESSAGE_AUTO_FOLLOW_SETTLE_FRAMES = 4
 const MESSAGE_AUTO_FOLLOW_SETTLE_BURST_MS = 280
 const MESSAGE_AUTO_FOLLOW_REPIN_GRACE_MS = 1200
 const MESSAGE_TOUCH_FINGER_DOWN_THRESHOLD = 2
+const SKILL_MENTION_PATTERN = /(?:^|\s)\/(\S+)/g
 const PERMISSION_MODE_OPTIONS = [
     { mode: "default", label: "默认权限", description: "遇到权限请求时手动确认" },
     { mode: "auto", label: "自动获取权限", description: "自动允许每次请求" },
@@ -208,6 +215,20 @@ function toModelSelection(model: ModelSelection): ModelSelection {
         providerID: model.providerID,
         modelID: model.modelID,
     }
+}
+
+const cleanSkillToken = (value: string) => value.replace(/[.,;:!?)]$/, "")
+
+const collectInlineSkillMentions = (text: string, skillNames: Set<string>) => {
+    SKILL_MENTION_PATTERN.lastIndex = 0
+    return Array.from(text.matchAll(SKILL_MENTION_PATTERN))
+        .map((match) => cleanSkillToken(match[1] ?? ""))
+        .filter((name, index, items) => skillNames.has(name) && items.indexOf(name) === index)
+}
+
+const buildSkillMentionInstruction = (skillNames: string[]) => {
+    if (skillNames.length === 0) return
+    return `The user explicitly selected these skills in their message: ${skillNames.map((name) => `/${name}`).join(", ")}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`
 }
 
 function sortModelOptions(options: ModelOption[]) {
@@ -850,10 +871,13 @@ export function ChatPanel(props: ChatPanelProps) {
     const [inputText, setInputText] = createSignal("")
     const [agents, setAgents] = createSignal<AgentOption[]>([])
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
+    const [skillOptions, setSkillOptions] = createSignal<SkillOption[]>([])
+    const [skillsLoading, setSkillsLoading] = createSignal(false)
     const [projectOptions, setProjectOptions] = createSignal<Project[]>([])
     const [projectSearch, setProjectSearch] = createSignal("")
     const [currentAgent, setCurrentAgent] = createSignal("build")
     const [currentModel, setCurrentModel] = createSignal<ModelSelection | null>(null)
+    const [showAddMenu, setShowAddMenu] = createSignal(false)
     const [showProjectMenu, setShowProjectMenu] = createSignal(false)
     const [showAgentMenu, setShowAgentMenu] = createSignal(false)
     const [showModelMenu, setShowModelMenu] = createSignal(false)
@@ -886,6 +910,7 @@ export function ChatPanel(props: ChatPanelProps) {
     let detachMessagesIntentListeners: (() => void) | undefined
     let chatInputComposing = false
     let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
+    let chatInputElement: HTMLTextAreaElement | undefined
 
     // 当前选中的会话 ID 派生自 SDK 的 selectedSession
     const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
@@ -936,6 +961,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const setPermissionMenuOpen = (open: boolean) => {
         if (open) {
+            setShowAddMenu(false)
             setShowProjectMenu(false)
             setShowAgentMenu(false)
             setShowModelMenu(false)
@@ -945,6 +971,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const setProjectMenuOpen = (open: boolean) => {
         if (open) {
+            setShowAddMenu(false)
             setShowPermissionMenu(false)
             setShowAgentMenu(false)
             setShowModelMenu(false)
@@ -957,6 +984,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const setAgentMenuOpen = (open: boolean) => {
         if (open) {
+            setShowAddMenu(false)
             setShowProjectMenu(false)
             setShowPermissionMenu(false)
             setShowModelMenu(false)
@@ -970,11 +998,23 @@ export function ChatPanel(props: ChatPanelProps) {
             return
         }
         if (open) {
+            setShowAddMenu(false)
             setShowProjectMenu(false)
             setShowPermissionMenu(false)
             setShowAgentMenu(false)
         }
         setShowModelMenu(open)
+    }
+
+    const setAddMenuOpen = (open: boolean) => {
+        if (open) {
+            setShowProjectMenu(false)
+            setShowPermissionMenu(false)
+            setShowAgentMenu(false)
+            setShowModelMenu(false)
+            void loadSkillOptions()
+        }
+        setShowAddMenu(open)
     }
 
     // 当前会话的消息列表
@@ -1290,6 +1330,10 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const modelMenuAvailable = createMemo(() => modelOptions().length > 1)
 
+    const skillNameSet = createMemo(() => new Set(skillOptions().map((skill) => skill.name)))
+
+    const selectedSkillNames = createMemo(() => new Set(collectInlineSkillMentions(inputText(), skillNameSet())))
+
     const sessionTitle = createMemo(() => formatSessionTitle(sdk.selectedSession()?.title))
 
     const contextLabel = createMemo(() => {
@@ -1320,10 +1364,11 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const promptParts = (text: string): TextPartInput[] => {
         const selectedFiles = sdk.selectedFiles().filter((file) => !file.isDirectory)
-        if (selectedFiles.length === 0) return [{ id: createAscendingID("prt"), type: "text", text }]
+        const selectedSkills = collectInlineSkillMentions(text, skillNameSet())
+        const skillInstruction = buildSkillMentionInstruction(selectedSkills)
         return [
             { id: createAscendingID("prt"), type: "text", text },
-            {
+            ...(selectedFiles.length === 0 ? [] : [{
                 id: createAscendingID("prt"),
                 type: "text",
                 text: [
@@ -1337,8 +1382,63 @@ export function ChatPanel(props: ChatPanelProps) {
                         path: file.path,
                     })),
                 },
-            },
+            } satisfies TextPartInput]),
+            ...(skillInstruction ? [{
+                id: createAscendingID("prt"),
+                type: "text",
+                text: skillInstruction,
+                synthetic: true,
+                metadata: { selectedSkills },
+            } satisfies TextPartInput] : []),
         ]
+    }
+
+    const loadSkillOptions = async () => {
+        if (untrack(skillsLoading)) return
+        setSkillsLoading(true)
+        const result = await sdk.client.app.skills(undefined, { throwOnError: false })
+            .catch((error) => {
+                console.error("加载技能列表失败:", error)
+                return undefined
+            })
+            .finally(() => setSkillsLoading(false))
+        if (!result?.data) return
+
+        setSkillOptions(
+            result.data
+                .filter((skill) => skill.location !== "<built-in>")
+                .map((skill): SkillOption => ({
+                    name: skill.name,
+                    location: skill.location,
+                    description: skill.description.replace(/\s+/g, " ").trim(),
+                }))
+                .filter((skill, index, items) => items.findIndex((item) => item.name === skill.name) === index)
+                .toSorted((a, b) => a.name.localeCompare(b.name)),
+        )
+    }
+
+    const handleSkillSelect = (skill: SkillOption) => {
+        const text = inputText()
+        const mention = `/${skill.name} `
+        const selectionStart = chatInputElement?.selectionStart ?? text.length
+        const selectionEnd = chatInputElement?.selectionEnd ?? text.length
+        const before = text.slice(0, selectionStart)
+        const after = text.slice(selectionEnd)
+        const leadingSpace = before && !/\s$/.test(before) ? " " : ""
+        const trailingSpace = after && !/^\s/.test(after) ? " " : ""
+        const nextText = selectedSkillNames().has(skill.name)
+            ? text
+            : `${before}${leadingSpace}${mention}${trailingSpace}${after}`
+        const nextCursor = selectedSkillNames().has(skill.name)
+            ? selectionEnd
+            : before.length + leadingSpace.length + mention.length
+
+        setInputText(nextText)
+        setShowAddMenu(false)
+        requestAnimationFrame(() => {
+            chatInputElement?.focus()
+            chatInputElement?.setSelectionRange(nextCursor, nextCursor)
+        })
     }
 
     const loadProjectOptions = async () => {
@@ -1447,11 +1547,17 @@ export function ChatPanel(props: ChatPanelProps) {
 
     onMount(() => {
         void loadChatOptions()
+        void loadSkillOptions()
     })
 
     createEffect(() => {
         sdk.sessionListVersion()
         void loadProjectOptions()
+    })
+
+    createEffect(() => {
+        sdk.directory()
+        void loadSkillOptions()
     })
 
     // 构建认证头
@@ -2143,6 +2249,9 @@ export function ChatPanel(props: ChatPanelProps) {
                 </Show>
                 <div class="chat-input-container">
                     <textarea
+                        ref={(element) => {
+                            chatInputElement = element
+                        }}
                         class="chat-input"
                         placeholder={hasPendingRequest() ? "请先处理上方询问或权限请求" : sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
                         value={inputText()}
@@ -2155,13 +2264,66 @@ export function ChatPanel(props: ChatPanelProps) {
                     />
                     <div class="chat-toolbar">
                         <div class="agent-selector">
-                            <button
-                                class="toolbar-btn"
-                                title="添加附件"
-                                aria-label="添加附件"
+                            <DropdownMenu
+                                gutter={8}
+                                placement="top-start"
+                                open={showAddMenu()}
+                                onOpenChange={setAddMenuOpen}
                             >
-                                <Plus class="lucide-control-icon" size={16} strokeWidth={1.8} />
-                            </button>
+                                <DropdownMenu.Trigger
+                                    as={Button}
+                                    variant="ghost"
+                                    size="small"
+                                    class="toolbar-btn composer-add-trigger"
+                                    data-open={showAddMenu() ? "true" : "false"}
+                                    title="添加"
+                                    aria-label="添加"
+                                >
+                                    <Plus class="lucide-control-icon" size={16} strokeWidth={1.8} />
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Portal>
+                                    <DropdownMenu.Content class="composer-add-menu">
+                                        <DropdownMenu.Sub>
+                                            <DropdownMenu.SubTrigger class="composer-add-menu-item">
+                                                <Puzzle class="lucide-control-icon" size={15} strokeWidth={1.8} />
+                                                <span data-slot="composer-add-menu-label">技能</span>
+                                                <ChevronRight class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
+                                            </DropdownMenu.SubTrigger>
+                                            <DropdownMenu.SubContent class="composer-skill-menu">
+                                                <div class="composer-skill-menu-header">
+                                                    {skillsLoading() ? "正在加载技能" : `${skillOptions().length} 个已安装技能`}
+                                                </div>
+                                                <Show
+                                                    when={!skillsLoading()}
+                                                    fallback={<div class="composer-skill-menu-empty">正在加载技能...</div>}
+                                                >
+                                                    <Show
+                                                        when={skillOptions().length > 0}
+                                                        fallback={<div class="composer-skill-menu-empty">暂无已安装技能</div>}
+                                                    >
+                                                        <For each={skillOptions()}>
+                                                            {(skill) => (
+                                                                <DropdownMenu.Item
+                                                                    class="composer-skill-menu-item"
+                                                                    classList={{ active: selectedSkillNames().has(skill.name) }}
+                                                                    onSelect={() => handleSkillSelect(skill)}
+                                                                    title={skill.description || skill.location}
+                                                                >
+                                                                    <Puzzle class="lucide-control-icon" size={15} strokeWidth={1.8} />
+                                                                    <span class="composer-skill-menu-main">{skill.name}</span>
+                                                                    <Show when={selectedSkillNames().has(skill.name)}>
+                                                                        <Check class="check-icon" size={14} strokeWidth={2} />
+                                                                    </Show>
+                                                                </DropdownMenu.Item>
+                                                            )}
+                                                        </For>
+                                                    </Show>
+                                                </Show>
+                                            </DropdownMenu.SubContent>
+                                        </DropdownMenu.Sub>
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Portal>
+                            </DropdownMenu>
                             <DropdownMenu
                                 gutter={8}
                                 placement="top-start"
