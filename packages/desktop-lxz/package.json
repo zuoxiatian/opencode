@@ -1,5 +1,6 @@
 {
     "name": "@opencode-ai/desktop-lxz",
+    "productName": "LongwiseTechAgent",
     "version": "1.0.0",
     "private": true,
     "main": "dist/main/index.cjs",

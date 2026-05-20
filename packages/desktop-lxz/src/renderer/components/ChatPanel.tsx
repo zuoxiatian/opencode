@@ -667,6 +667,21 @@ export function ChatPanel(props: ChatPanelProps) {
         activateProjectFolder(project.worktree)
     }
 
+    const openProjectInFileManagerLabel = () => {
+        const platform = navigator.platform.toLowerCase()
+        if (platform.includes("mac")) return "在访达中打开"
+        if (platform.includes("win")) return "在资源管理器中打开"
+        return "在文件管理器中打开"
+    }
+
+    const openCurrentProjectInFileManager = async () => {
+        const directory = sdk.directory()
+        if (!directory) return
+        const result = await window.electronAPI.openPath(directory)
+        if (result.success) return
+        console.error("打开项目目录失败:", result.error)
+    }
+
     const addProjectFolder = async () => {
         const folder = await window.electronAPI.pickDirectory()
         if (!folder) return
@@ -1571,6 +1586,16 @@ export function ChatPanel(props: ChatPanelProps) {
                                 </DropdownMenu.Portal>
                             </DropdownMenu>
                         </div>
+                        <button
+                            type="button"
+                            class="toolbar-btn composer-open-folder-btn"
+                            onClick={() => void openCurrentProjectInFileManager()}
+                            disabled={!sdk.directory()}
+                            title={openProjectInFileManagerLabel()}
+                            aria-label={openProjectInFileManagerLabel()}
+                        >
+                            <span>{openProjectInFileManagerLabel()}</span>
+                        </button>
                         <Show
                             when={isLoading() && !canSend()}
                             fallback={

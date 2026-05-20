@@ -641,6 +641,7 @@ body {
 }
 
 .folder-panel-brand-subtitle {
+    min-height: 15px;
     color: var(--lxz-sidebar-muted);
     font-size: 12px;
     font-weight: 400;
@@ -684,9 +685,8 @@ body {
 
 .folder-panel-content {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: var(--spacing-sm);
+    overflow: hidden;
+    padding: 4px var(--spacing-sm) var(--spacing-sm);
     min-height: 0;
 }
 
@@ -789,6 +789,15 @@ body {
     flex-direction: column;
     gap: 12px;
     min-width: 0;
+    min-height: 0;
+}
+
+.project-history-scroll {
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .project-section-title {
@@ -796,12 +805,13 @@ body {
     color: var(--lxz-sidebar-muted);
     font-size: 13px;
     line-height: 24px;
+    margin-bottom: 8px;
 }
 
 .project-list {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 8px;
 }
 
 .project-group {
@@ -812,8 +822,7 @@ body {
 
 .project-folder-row,
 .project-conversation-item,
-.project-expand,
-.file-toggle {
+.project-expand {
     width: 100%;
     border: 0;
     background: transparent;
@@ -1183,18 +1192,6 @@ body {
     line-height: 1.5;
 }
 
-.file-toggle {
-    height: 28px;
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: 0 8px;
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    color: var(--lxz-sidebar-muted);
-    text-align: left;
-}
-
 .file-preview-header {
     min-width: 0;
     display: grid;
@@ -1203,9 +1200,15 @@ body {
     gap: 6px;
 }
 
-.file-toggle:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
+.file-preview-title {
+    min-width: 0;
+    padding: 0 8px;
+    color: var(--lxz-sidebar-muted);
+    font-size: 13px;
+    line-height: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .file-select-all {
@@ -1260,10 +1263,13 @@ body {
 
 .file-preview-section {
     min-width: 0;
+    height: 240px;
+    flex: 0 0 240px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding-top: 4px;
+    margin-top: auto;
+    padding-top: 8px;
     border-top: 1px solid var(--border-subtle);
     overflow-x: hidden;
 }
@@ -2494,6 +2500,9 @@ body {
 
 .file-list {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     overflow-y: auto;
     overflow-x: hidden;
     min-width: 0;
@@ -2502,7 +2511,7 @@ body {
 
 .file-item {
     width: 100%;
-    height: 36px;
+    min-height: 30px;
     min-width: 0;
     border: 0;
     background: transparent;
@@ -2514,20 +2523,20 @@ body {
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);
-    color: var(--lxz-sidebar-control);
+    color: var(--lxz-sidebar-conversation);
     font-size: 13px;
+    font-weight: 450;
     line-height: 16px;
-    margin-bottom: 2px;
     text-align: left;
 }
 
 .file-item:hover {
-    background: var(--lxz-sidebar-control-hover-bg);
+    background: var(--bg-tertiary);
     color: var(--text-primary);
 }
 
 .file-item.active {
-    background: transparent;
+    background: var(--bg-hover);
     color: var(--text-primary);
 }
 
@@ -4160,6 +4169,33 @@ body {
 .toolbar-btn {
     width: 28px;
     padding: 0;
+}
+
+.composer-open-folder-btn {
+    width: auto;
+    min-width: 0;
+    height: 30px;
+    flex: 0 0 auto;
+    padding: 0 10px;
+    color: var(--lxz-muted-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.composer-open-folder-btn span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.composer-open-folder-btn:disabled,
+.composer-open-folder-btn:disabled:hover {
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: not-allowed;
+    opacity: 0.45;
 }
 
 .toolbar-icon,

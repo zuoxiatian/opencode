@@ -1,4 +1,4 @@
-import type { BrowserWindow as BrowserWindowType, TitleBarOverlayOptions } from "electron"
+import type { BrowserWindow as BrowserWindowType, MenuItemConstructorOptions, TitleBarOverlayOptions } from "electron"
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme } from "electron"
 import { existsSync, watch, type FSWatcher } from "fs"
 import { delimiter, join } from "path"
@@ -9,10 +9,19 @@ import { homedir } from "os"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 
+const APP_ID = "ai.opencode.desktop"
+const APP_NAME = "LongwiseTechAgent"
+const APP_VERSION = "1.0.0"
+
 let mainWindow: BrowserWindowType | null = null
 let serverProcess: ChildProcess | null = null
 let serverInfo: ServerInfo | null = null
 const directoryWatchers = new Map<string, FSWatcher>()
+
+app.setName(APP_NAME)
+if (process.platform === "win32") {
+    app.setAppUserModelId(APP_ID)
+}
 
 interface ServerInfo {
     url: string
@@ -109,12 +118,48 @@ function getBunCommand() {
 }
 
 function getAppIconPath() {
+    const iconFile = process.platform === "win32" ? "icon.ico" : "icon.png"
     const iconPath = process.env.NODE_ENV === "development"
-        ? join(getRepoRoot(), "packages", "desktop-lxz", "build", "icon.png")
-        : join(process.resourcesPath, "icon.png")
+        ? join(getRepoRoot(), "packages", "desktop-lxz", "build", iconFile)
+        : join(process.resourcesPath, iconFile)
 
     if (existsSync(iconPath)) return iconPath
     return undefined
+}
+
+function configureApplicationMenu(appIconPath: string | undefined) {
+    if (process.platform === "win32") {
+        Menu.setApplicationMenu(null)
+        return
+    }
+
+    if (process.platform !== "darwin") return
+
+    app.setAboutPanelOptions({
+        applicationName: APP_NAME,
+        applicationVersion: APP_VERSION,
+        version: APP_VERSION,
+        ...(appIconPath ? { iconPath: appIconPath } : {}),
+    })
+
+    const template: MenuItemConstructorOptions[] = [
+        {
+            label: APP_NAME,
+            submenu: [
+                { label: `关于 ${APP_NAME}`, role: "about" },
+                { type: "separator" },
+                { label: "服务", role: "services" },
+                { type: "separator" },
+                { label: `隐藏 ${APP_NAME}`, role: "hide" },
+                { label: "隐藏其他", role: "hideOthers" },
+                { label: "全部显示", role: "unhide" },
+                { type: "separator" },
+                { label: `退出 ${APP_NAME}`, role: "quit" },
+            ],
+        },
+    ]
+
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 async function ensureDefaultOpencodeConfig() {
@@ -346,16 +391,14 @@ async function createWindow() {
         app.dock.setIcon(appIconPath)
     }
 
-    if (isWindows) {
-        Menu.setApplicationMenu(null)
-    }
+    configureApplicationMenu(appIconPath)
 
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
         minWidth: 800,
         minHeight: 600,
-        title: "LongwiseTechAgent",
+        title: APP_NAME,
         icon: appIconPath,
         frame: isWindows,
         autoHideMenuBar: isWindows,

@@ -5,8 +5,6 @@ import { useSDK } from "../context/sdk"
 import type { LucideIcon } from "lucide-solid"
 import ChartColumn from "lucide-solid/icons/chart-column"
 import Check from "lucide-solid/icons/check"
-import ChevronDown from "lucide-solid/icons/chevron-down"
-import ChevronRight from "lucide-solid/icons/chevron-right"
 import CircleMinus from "lucide-solid/icons/circle-minus"
 import FileCode from "lucide-solid/icons/file-code"
 import FileIcon from "lucide-solid/icons/file"
@@ -58,10 +56,6 @@ function isDefaultSessionTitle(title?: string) {
     return value === "新对话" || /^(New|Child) session - \d{4}-\d{2}-\d{2}T/.test(value ?? "")
 }
 
-function SidebarChevron(props: { expanded: boolean; class?: string }) {
-    return <Dynamic component={props.expanded ? ChevronDown : ChevronRight} class={props.class ?? "sidebar-chevron-icon"} size={14} strokeWidth={1.8} />
-}
-
 export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void }) {
     const sdk = useSDK()
     const [projects, setProjects] = createSignal<Project[]>([])
@@ -75,7 +69,6 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
     const [renameSessionTitle, setRenameSessionTitle] = createSignal("")
     const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
     const [expandedSessionFolders, setExpandedSessionFolders] = createSignal<Set<string>>(new Set())
-    const [showFiles, setShowFiles] = createSignal(true)
     const [lastSelectedFilePath, setLastSelectedFilePath] = createSignal<string | null>(null)
     const [unreadSessions, setUnreadSessions] = createSignal<Set<string>>(new Set())
     const [sidebarMenu, setSidebarMenu] = createSignal<SidebarMenu | null>(null)
@@ -227,7 +220,7 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
             if (!sdk.directory() && listed.length > 0) {
                 activateFolder(
                     (listed.find((project) => project.worktree === localStorage.getItem(LAST_PROJECT_STORAGE_KEY)) ?? listed[0]).worktree,
-                    { resetFiles: true, reloadSessions: true },
+                    { reloadSessions: true },
                 )
             }
         } catch (error) {
@@ -386,7 +379,7 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
         const folder = await window.electronAPI.pickDirectory()
         if (!folder) return
         setCollapsedFolders((prev) => new Set(prev).add(folder))
-        activateFolder(folder, { resetFiles: true, reloadSessions: true })
+        activateFolder(folder, { reloadSessions: true })
         await sdk.client.instance.dispose({ directory: folder }, { throwOnError: true })
             .catch((error) => {
                 console.error("释放项目实例失败:", error)
@@ -401,11 +394,10 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
         void loadProjects()
     }
 
-    const activateFolder = (folder: string, options: { reloadSessions?: boolean; resetFiles?: boolean } = {}) => {
+    const activateFolder = (folder: string, options: { reloadSessions?: boolean } = {}) => {
         const changed = sdk.directory() !== folder
         rememberProjectFolder(folder)
         if (changed) sdk.setDirectory(folder)
-        if (changed || options.resetFiles) setShowFiles(true)
         if (options.reloadSessions ?? changed) void loadSessions(folder)
     }
 
@@ -421,7 +413,6 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
         sdk.setDirectory("")
         sdk.setSelectedSession(null)
         setFiles([])
-        setShowFiles(false)
     }
 
     const removeProject = (project: Project) => {
@@ -435,7 +426,7 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
 
     const startSessionDraft = (folder: string) => {
         batch(() => {
-            activateFolder(folder, { resetFiles: true, reloadSessions: false })
+            activateFolder(folder, { reloadSessions: false })
             sdk.setSelectedSession(null)
         })
     }
@@ -478,13 +469,12 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
                 })
             if (sdk.directory() === project.worktree) {
                 if (fallback) {
-                    activateFolder(fallback.worktree, { resetFiles: true, reloadSessions: true })
+                    activateFolder(fallback.worktree, { reloadSessions: true })
                 } else {
                     forgetProjectFolder(project.worktree)
                     sdk.setDirectory("")
                     sdk.setSelectedSession(null)
                     setFiles([])
-                    setShowFiles(false)
                 }
             }
             await sdk.client.project.delete({ projectID: project.id, directory: fallback?.worktree }, { throwOnError: true })
@@ -739,7 +729,7 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
                     <img class="folder-panel-brand-icon" src={appIcon} alt="" draggable={false} />
                     <span class="folder-panel-brand-copy">
                         <span class="folder-panel-brand-title">LongwiseTechAgent</span>
-                        <span class="folder-panel-brand-subtitle">朗知科技智能体</span>
+                        <span class="folder-panel-brand-subtitle" aria-hidden="true"></span>
                     </span>
                 </div>
                 <button class="folder-open-button" onClick={handleOpenFolder} title="打开文件夹">
@@ -749,102 +739,101 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
             </div>
 
             <div class="folder-panel-content project-history-layout">
-                <Show
-                    when={sortedProjectFolders().length > 0}
-                    fallback={
-                        <div class="empty-state">
-                            <div class="empty-state-title">还没有打开任何文件夹</div>
-                            <div class="empty-state-subtitle">选择一个文件夹后，对话会按文件夹保存。</div>
-                        </div>
-                    }
-                >
-                    <div class="project-section-title">项目</div>
-                    <div class="project-list">
-                        <For each={sortedProjects()}>
-                            {(project) => {
-                                const folder = project.worktree
-                                return (
-                                    <div class="project-group">
-                                        <div
-                                            class={`project-folder-row ${folder === sdk.directory() ? "active" : ""}`}
-                                            onClick={() => toggleFolder(folder)}
-                                            onContextMenu={(event) => openProjectMenu(project, event)}
-                                            title={folder}
-                                        >
-                                            <Dynamic
-                                                component={isFolderExpanded(folder) ? FolderOpen : Folder}
-                                                class="project-folder-mark"
-                                                size={16}
-                                                strokeWidth={1.8}
-                                                aria-hidden="true"
-                                            />
-                                            <span class="project-folder-name">{getFolderName(folder)}</span>
-                                            <button
-                                                class="project-row-action project-new-session"
-                                                onClick={(event) => startSessionDraftForFolder(folder, event)}
-                                                title="新建会话"
-                                                aria-label="新建会话"
+                <div class="project-history-scroll">
+                    <Show
+                        when={sortedProjectFolders().length > 0}
+                        fallback={
+                            <div class="empty-state">
+                                <div class="empty-state-title">还没有打开任何文件夹</div>
+                                <div class="empty-state-subtitle">选择一个文件夹后，对话会按文件夹保存。</div>
+                            </div>
+                        }
+                    >
+                        <div class="project-section-title">项目</div>
+                        <div class="project-list">
+                            <For each={sortedProjects()}>
+                                {(project) => {
+                                    const folder = project.worktree
+                                    return (
+                                        <div class="project-group">
+                                            <div
+                                                class={`project-folder-row ${folder === sdk.directory() ? "active" : ""}`}
+                                                onClick={() => toggleFolder(folder)}
+                                                onContextMenu={(event) => openProjectMenu(project, event)}
+                                                title={folder}
                                             >
-                                                <SquarePen class="sidebar-action-icon" size={14} strokeWidth={1.8} />
-                                            </button>
-                                        </div>
-
-                                    <Show when={isFolderExpanded(folder)}>
-                                        <div class="project-conversation-list">
-                                            <Show when={loadingFolders().has(folder)}>
-                                                <div class="project-conversation-empty">加载中...</div>
-                                            </Show>
-                                            <Show when={!loadingFolders().has(folder) && (sessionsByFolder()[folder]?.length ?? 0) === 0}>
-                                                <div class="project-conversation-empty">暂无对话</div>
-                                            </Show>
-                                            <Index each={visibleSessions(folder)}>
-                                                {(session) => (
-                                                    <div
-                                                        role="button"
-                                                        tabIndex={0}
-                                                        class={`project-conversation-item ${sdk.selectedSession()?.id === session().id ? "active" : ""}`}
-                                                        onClick={() => selectSession(folder, session())}
-                                                        onContextMenu={(event) => openSessionMenu(folder, session(), event)}
-                                                        onKeyDown={(event) => handleSessionKeyDown(folder, session(), event)}
-                                                        title={session().title}
-                                                    >
-                                                        <Show
-                                                            when={isSessionBusy(session().id)}
-                                                            fallback={
-                                                                <Show when={isSessionUnread(session().id)}>
-                                                                    <span class="project-conversation-unread" aria-hidden="true"></span>
-                                                                </Show>
-                                                            }
-                                                        >
-                                                            <span class="project-conversation-spinner" aria-hidden="true"></span>
-                                                        </Show>
-                                                        <span class="project-conversation-title">{getSessionTitle(session())}</span>
-                                                        <span class="project-conversation-time">{formatRelativeTime(session().time.updated)}</span>
-                                                    </div>
-                                                )}
-                                            </Index>
-                                            <Show when={(sessionsByFolder()[folder]?.length ?? 0) > 5}>
-                                                <button class="project-expand" onClick={() => toggleSessionLimit(folder)}>
-                                                    {expandedSessionFolders().has(folder) ? "收起" : "展开显示"}
+                                                <Dynamic
+                                                    component={isFolderExpanded(folder) ? FolderOpen : Folder}
+                                                    class="project-folder-mark"
+                                                    size={16}
+                                                    strokeWidth={1.8}
+                                                    aria-hidden="true"
+                                                />
+                                                <span class="project-folder-name">{getFolderName(folder)}</span>
+                                                <button
+                                                    class="project-row-action project-new-session"
+                                                    onClick={(event) => startSessionDraftForFolder(folder, event)}
+                                                    title="新建会话"
+                                                    aria-label="新建会话"
+                                                >
+                                                    <SquarePen class="sidebar-action-icon" size={14} strokeWidth={1.8} />
                                                 </button>
+                                            </div>
+
+                                            <Show when={isFolderExpanded(folder)}>
+                                                <div class="project-conversation-list">
+                                                    <Show when={loadingFolders().has(folder)}>
+                                                        <div class="project-conversation-empty">加载中...</div>
+                                                    </Show>
+                                                    <Show when={!loadingFolders().has(folder) && (sessionsByFolder()[folder]?.length ?? 0) === 0}>
+                                                        <div class="project-conversation-empty">暂无对话</div>
+                                                    </Show>
+                                                    <Index each={visibleSessions(folder)}>
+                                                        {(session) => (
+                                                            <div
+                                                                role="button"
+                                                                tabIndex={0}
+                                                                class={`project-conversation-item ${sdk.selectedSession()?.id === session().id ? "active" : ""}`}
+                                                                onClick={() => selectSession(folder, session())}
+                                                                onContextMenu={(event) => openSessionMenu(folder, session(), event)}
+                                                                onKeyDown={(event) => handleSessionKeyDown(folder, session(), event)}
+                                                                title={session().title}
+                                                            >
+                                                                <Show
+                                                                    when={isSessionBusy(session().id)}
+                                                                    fallback={
+                                                                        <Show when={isSessionUnread(session().id)}>
+                                                                            <span class="project-conversation-unread" aria-hidden="true"></span>
+                                                                        </Show>
+                                                                    }
+                                                                >
+                                                                    <span class="project-conversation-spinner" aria-hidden="true"></span>
+                                                                </Show>
+                                                                <span class="project-conversation-title">{getSessionTitle(session())}</span>
+                                                                <span class="project-conversation-time">{formatRelativeTime(session().time.updated)}</span>
+                                                            </div>
+                                                        )}
+                                                    </Index>
+                                                    <Show when={(sessionsByFolder()[folder]?.length ?? 0) > 5}>
+                                                        <button class="project-expand" onClick={() => toggleSessionLimit(folder)}>
+                                                            {expandedSessionFolders().has(folder) ? "收起" : "展开显示"}
+                                                        </button>
+                                                    </Show>
+                                                </div>
                                             </Show>
                                         </div>
-                                    </Show>
-                                    </div>
-                                )
-                            }}
-                        </For>
-                    </div>
-                </Show>
+                                    )
+                                }}
+                            </For>
+                        </div>
+                    </Show>
+                </div>
 
                 <Show when={sdk.directory()}>
                     <div class="file-preview-section">
                         <div class="file-preview-header">
-                            <button class="file-toggle" onClick={() => setShowFiles(!showFiles())}>
-                                <SidebarChevron expanded={showFiles()} />
-                                <span>文件预览</span>
-                            </button>
-                            <Show when={showFiles() && !isLoadingFiles() && files().length > 0}>
+                            <div class="file-preview-title">项目目录</div>
+                            <Show when={!isLoadingFiles() && files().length > 0}>
                                 <button
                                     type="button"
                                     class={`file-select-all ${allFilesSelected() ? "active" : ""}`}
@@ -861,34 +850,32 @@ export function FolderPanel(props: { onCollapse: () => void; themeMode: ThemeMod
                                 </button>
                             </Show>
                         </div>
-                        <Show when={showFiles()}>
-                            <Show when={isLoadingFiles()}>
-                                <div class="conversation-empty">加载文件...</div>
-                            </Show>
-                            <Show when={!isLoadingFiles() && files().length === 0}>
-                                <div class="file-preview-empty">暂无文件</div>
-                            </Show>
-                            <Show when={!isLoadingFiles() && files().length > 0}>
-                                <div class="file-list compact">
-                                    <For each={files()}>
-                                        {(file) => (
-                                            <button
-                                                class={`file-item ${isSelectedFile(file) ? "active" : ""}`}
-                                                onClick={(event) => handleFileClick(file, event)}
-                                                title={file.path}
-                                            >
-                                                <FileTypeIcon file={file} />
-                                                <span class="file-item-name">{file.name}</span>
-                                                <span class="file-checkbox file-item-checkbox" aria-hidden="true">
-                                                    <Show when={isSelectedFile(file)}>
-                                                        <Check class="file-checkbox-check" size={13} strokeWidth={2.2} />
-                                                    </Show>
-                                                </span>
-                                            </button>
-                                        )}
-                                    </For>
-                                </div>
-                            </Show>
+                        <Show when={isLoadingFiles()}>
+                            <div class="file-preview-empty">加载文件...</div>
+                        </Show>
+                        <Show when={!isLoadingFiles() && files().length === 0}>
+                            <div class="file-preview-empty">暂无文件</div>
+                        </Show>
+                        <Show when={!isLoadingFiles() && files().length > 0}>
+                            <div class="file-list compact">
+                                <For each={files()}>
+                                    {(file) => (
+                                        <button
+                                            class={`file-item ${isSelectedFile(file) ? "active" : ""}`}
+                                            onClick={(event) => handleFileClick(file, event)}
+                                            title={file.path}
+                                        >
+                                            <FileTypeIcon file={file} />
+                                            <span class="file-item-name">{file.name}</span>
+                                            <span class="file-checkbox file-item-checkbox" aria-hidden="true">
+                                                <Show when={isSelectedFile(file)}>
+                                                    <Check class="file-checkbox-check" size={13} strokeWidth={2.2} />
+                                                </Show>
+                                            </span>
+                                        </button>
+                                    )}
+                                </For>
+                            </div>
                         </Show>
                     </div>
                 </Show>
