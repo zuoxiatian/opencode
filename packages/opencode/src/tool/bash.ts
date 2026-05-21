@@ -79,6 +79,30 @@ type Chunk = {
   size: number
 }
 
+function powershellUtf8Command(command: string) {
+  if (process.platform !== "win32") return command
+  return [
+    "chcp.com 65001 > $null",
+    "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new()",
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()",
+    "$OutputEncoding = [System.Text.UTF8Encoding]::new()",
+    command,
+  ].join("; ")
+}
+
+function replacementCount(text: string) {
+  return text.match(/\uFFFD/g)?.length ?? 0
+}
+
+function decodeOutput(bytes: Uint8Array) {
+  const utf8 = new TextDecoder("utf-8").decode(bytes)
+  if (process.platform !== "win32" || replacementCount(utf8) === 0) return utf8
+
+  const fallback = new TextDecoder("gb18030").decode(bytes)
+  if (replacementCount(fallback) < replacementCount(utf8)) return fallback
+  return utf8
+}
+
 export const log = Log.create({ service: "bash-tool" })
 
 const resolveWasm = (asset: string) => {
@@ -280,7 +304,7 @@ const ask = Effect.fn("BashTool.ask")(function* (ctx: Tool.Context, scan: Scan) 
 
 function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && Shell.ps(shell)) {
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powershellUtf8Command(command)], {
       cwd,
       env,
       stdin: "ignore",
@@ -440,7 +464,8 @@ export const BashTool = Tool.define(
           const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
 
           yield* Effect.forkScoped(
-            Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
+            Stream.runForEach(handle.all, (bytes) => {
+              const chunk = decodeOutput(bytes)
               const size = Buffer.byteLength(chunk, "utf-8")
               list.push({ text: chunk, size })
               used += size
