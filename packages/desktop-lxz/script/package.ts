@@ -52,7 +52,7 @@ const opencodeBinaries = [
     },
 ]
 type OpencodeBinaryId = (typeof opencodeBinaries)[number]["id"]
-const opencodeBinaryTargetIds: Record<keyof typeof clientTargetGroups | "opencode", OpencodeBinaryId[]> = {
+const packageTargetIds: Record<keyof typeof clientTargetGroups | "opencode", OpencodeBinaryId[]> = {
     all: ["win32-x64", "darwin-x64", "darwin-arm64", "linux-x64"],
     linux: ["linux-x64"],
     mac: ["darwin-x64", "darwin-arm64"],
@@ -99,12 +99,13 @@ if (!options.skipOpencode) {
     ], opencodeDir)
 }
 
-await copyOpencodeBinaries(opencodeBinaryTargetIds[command], options.skipOpencode)
+await copyOpencodeBinaries(packageTargetIds[command], options.skipOpencode)
 
 if (command === "opencode") process.exit(0)
 
 if (!options.skipDesktopBuild) {
-    await run([bun, "run", "build"], packageDir, desktopToolEnv())
+    await run([bun, "run", "runtime:install", "--", ...packageTargetIds[command]], packageDir)
+    await run([bun, "run", "electron-vite", "build"], packageDir, desktopToolEnv())
 }
 
 if (!options.skipClientPackage) {
