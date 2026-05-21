@@ -450,15 +450,15 @@ async function writeLaunchers(target: RuntimeTarget, targetDir: string) {
         )
         await writeFile(
             path.join(binDir, "python.cmd"),
-            '@echo off\r\nset "RUNTIME_DIR=%~dp0.."\r\nset "PYTHONHOME=%RUNTIME_DIR%\\python"\r\nset "PYTHONPATH="\r\nset "PYTHONNOUSERSITE=1"\r\n"%RUNTIME_DIR%\\python\\python.exe" %*\r\n',
+            '@echo off\r\nfor %%I in ("%~dp0..") do set "RUNTIME_DIR=%%~fI"\r\nset "PYTHONHOME=%RUNTIME_DIR%\\python"\r\nset "PYTHONPATH="\r\nset "PYTHONNOUSERSITE=1"\r\n"%RUNTIME_DIR%\\python\\python.exe" %*\r\n',
         )
         await writeFile(
             path.join(binDir, "python3.cmd"),
-            '@echo off\r\nset "RUNTIME_DIR=%~dp0.."\r\nset "PYTHONHOME=%RUNTIME_DIR%\\python"\r\nset "PYTHONPATH="\r\nset "PYTHONNOUSERSITE=1"\r\n"%RUNTIME_DIR%\\python\\python.exe" %*\r\n',
+            '@echo off\r\nfor %%I in ("%~dp0..") do set "RUNTIME_DIR=%%~fI"\r\nset "PYTHONHOME=%RUNTIME_DIR%\\python"\r\nset "PYTHONPATH="\r\nset "PYTHONNOUSERSITE=1"\r\n"%RUNTIME_DIR%\\python\\python.exe" %*\r\n',
         )
         await writeFile(
             path.join(binDir, "pip.cmd"),
-            '@echo off\r\nset "RUNTIME_DIR=%~dp0.."\r\nset "PYTHONHOME=%RUNTIME_DIR%\\python"\r\nset "PYTHONPATH="\r\nset "PYTHONNOUSERSITE=1"\r\n"%RUNTIME_DIR%\\python\\python.exe" -m pip %*\r\n',
+            '@echo off\r\nfor %%I in ("%~dp0..") do set "RUNTIME_DIR=%%~fI"\r\nset "PYTHONHOME=%RUNTIME_DIR%\\python"\r\nset "PYTHONPATH="\r\nset "PYTHONNOUSERSITE=1"\r\n"%RUNTIME_DIR%\\python\\python.exe" -m pip %*\r\n',
         )
         return
     }

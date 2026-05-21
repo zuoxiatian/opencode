@@ -24,7 +24,7 @@ const clientTargetGroups = {
     "mac-arm64": [["--mac", "--arm64"]],
     "mac-x64": [["--mac", "--x64"]],
     win: [["--win"]],
-    "win-zip": [["--win", "zip"]],
+    "win-zip": [["--win", "zip", "--x64"]],
 } as const
 const opencodeBinaries = [
     {

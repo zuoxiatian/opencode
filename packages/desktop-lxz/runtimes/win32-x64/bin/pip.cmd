@@ -1,5 +1,5 @@
 @echo off
-set "RUNTIME_DIR=%~dp0.."
+for %%I in ("%~dp0..") do set "RUNTIME_DIR=%%~fI"
 set "PYTHONHOME=%RUNTIME_DIR%\python"
 set "PYTHONPATH="
 set "PYTHONNOUSERSITE=1"

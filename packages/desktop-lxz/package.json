@@ -22,7 +22,7 @@
         "pack:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
         "dist": "electron-builder",
         "dist:win": "electron-builder --win",
-        "dist:win:zip": "electron-builder --win zip",
+        "dist:win:zip": "electron-builder --win zip --x64",
         "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
         "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64",
         "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64"
