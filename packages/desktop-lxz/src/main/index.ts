@@ -139,7 +139,7 @@ function configureApplicationMenu(appIconPath: string | undefined) {
         applicationName: APP_NAME,
         applicationVersion: APP_VERSION,
         version: APP_VERSION,
-        ...(appIconPath ? { iconPath: appIconPath } : {}),
+        iconPath: appIconPath,
     })
 
     const template: MenuItemConstructorOptions[] = [
@@ -251,18 +251,22 @@ function runtimeEnv() {
 
     const node = runtimeExecutable(dir, "node")
     const python = runtimeExecutable(dir, "python")
-    const pythonHome = join(dir, "python")
 
     return {
         OPENCODE_RUNTIME_DIR: dir,
-        ...(node ? { OPENCODE_NODE: node } : {}),
-        ...(python ? { OPENCODE_PYTHON: python } : {}),
-        ...(existsSync(pythonHome) ? { PYTHONHOME: pythonHome } : {}),
+        OPENCODE_NODE: node,
+        OPENCODE_PYTHON: python,
+        PYTHONHOME: process.platform === "win32"
+            ? undefined
+            : existsSync(join(dir, "python"))
+                ? join(dir, "python")
+                : undefined,
         PIP_INDEX_URL: process.env.PIP_INDEX_URL ?? "https://pypi.tuna.tsinghua.edu.cn/simple",
         PIP_TRUSTED_HOST: process.env.PIP_TRUSTED_HOST ?? "pypi.tuna.tsinghua.edu.cn",
         PIP_DISABLE_PIP_VERSION_CHECK: "1",
         npm_config_registry: process.env.npm_config_registry ?? "https://registry.npmmirror.com",
         BUN_CONFIG_REGISTRY: process.env.BUN_CONFIG_REGISTRY ?? "https://registry.npmmirror.com",
+        NoDefaultCurrentDirectoryInExePath: process.platform === "win32" ? "1" : undefined,
         PYTHONPATH: "",
         PYTHONNOUSERSITE: "1",
         PATH: [...runtimePathDirs(dir), process.env.PATH ?? ""].join(delimiter),
