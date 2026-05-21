@@ -1,8 +1,8 @@
 import type { BrowserWindow as BrowserWindowType, MenuItemConstructorOptions, TitleBarOverlayOptions } from "electron"
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme } from "electron"
 import { existsSync, watch, type FSWatcher } from "fs"
-import { delimiter, join } from "path"
-import { spawn, ChildProcess } from "child_process"
+import { basename, delimiter, join } from "path"
+import { spawn, spawnSync, type ChildProcess } from "child_process"
 import { fileURLToPath } from "url"
 import { cp, mkdir, readFile, readdir, writeFile } from "fs/promises"
 import { homedir } from "os"
@@ -17,8 +17,17 @@ let mainWindow: BrowserWindowType | null = null
 let serverProcess: ChildProcess | null = null
 let serverInfo: ServerInfo | null = null
 const directoryWatchers = new Map<string, FSWatcher>()
+const SHELL_ENV_TIMEOUT_MS = 5_000
+let shellEnvProbed = false
+let cachedShellEnv: NodeJS.ProcessEnv | null = null
+
+if (!app.requestSingleInstanceLock()) {
+    app.exit(0)
+    process.exit(0)
+}
 
 app.setName(APP_NAME)
+app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
 if (process.platform === "win32") {
     app.setAppUserModelId(APP_ID)
 }
@@ -245,7 +254,115 @@ function runtimePathDirs(dir: string) {
     ].filter((item): item is string => !!item && existsSync(item))
 }
 
-function runtimeEnv() {
+function parseShellEnv(stdout: Buffer) {
+    return stdout
+        .toString("utf8")
+        .split("\0")
+        .reduce<NodeJS.ProcessEnv>((result, line) => {
+            const index = line.indexOf("=")
+            if (index <= 0) return result
+            result[line.slice(0, index)] = line.slice(index + 1)
+            return result
+        }, {})
+}
+
+function probeShellEnv(shellPath: string, mode: "-il" | "-l") {
+    const result = spawnSync(shellPath, [mode, "-c", "env -0"], {
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: SHELL_ENV_TIMEOUT_MS,
+        windowsHide: true,
+    })
+    if (result.error || result.status !== 0) return null
+    const env = parseShellEnv(result.stdout)
+    if (Object.keys(env).length === 0) return null
+    return env
+}
+
+function loadShellEnv() {
+    if (shellEnvProbed) return cachedShellEnv
+    shellEnvProbed = true
+    if (process.platform === "win32") return null
+
+    const shellPath = process.env.SHELL ?? "/bin/sh"
+    if (["nu", "nu.exe"].includes(basename(shellPath).toLowerCase())) return null
+
+    cachedShellEnv = probeShellEnv(shellPath, "-il") ?? probeShellEnv(shellPath, "-l")
+    return cachedShellEnv
+}
+
+function pathLooksUserConfigured(value: string | undefined) {
+    if (!value) return false
+
+    const normalizedHome = homedir().replaceAll("\\", "/")
+    const homeWithSep = normalizedHome ? `${normalizedHome}/` : ""
+    const toolchainSegments = ["/opt/homebrew/", "/opt/pkg/", "/opt/pmk/", "/snap/"]
+    const toolchainBasenames = new Set([
+        ".cargo",
+        ".bun",
+        ".nvm",
+        ".pyenv",
+        ".rbenv",
+        ".sdkman",
+        ".asdf",
+        ".volta",
+        ".fnm",
+        ".local",
+        ".opencode",
+        "node_modules",
+    ])
+
+    return value.split(delimiter).some((segment) => {
+        if (!segment) return false
+        const normalizedSegment = segment.replaceAll("\\", "/")
+        if (normalizedHome && (normalizedSegment === normalizedHome || normalizedSegment.startsWith(homeWithSep))) return true
+        if (toolchainSegments.some((prefix) => normalizedSegment.startsWith(prefix))) return true
+        return normalizedSegment
+            .split("/")
+            .filter(Boolean)
+            .some((part) => toolchainBasenames.has(part))
+    })
+}
+
+function mergePathValues(primary: string | undefined, fallback: string | undefined) {
+    const seen = new Set<string>()
+
+    return [primary, fallback]
+        .flatMap((value) => value?.split(delimiter) ?? [])
+        .filter((segment) => {
+            if (!segment || seen.has(segment)) return false
+            seen.add(segment)
+            return true
+        })
+        .join(delimiter)
+}
+
+function inheritUserShellEnv() {
+    const env = { ...process.env }
+    const shellEnv = loadShellEnv()
+    if (shellEnv) {
+        Object.entries(shellEnv).forEach(([key, value]) => {
+            if (key === "PATH") return
+            if (typeof env[key] === "undefined") env[key] = value
+        })
+
+        if (!pathLooksUserConfigured(env.PATH) && shellEnv.PATH) {
+            env.PATH = mergePathValues(shellEnv.PATH, env.PATH)
+        }
+    }
+
+    env.NO_PROXY = env.NO_PROXY || "localhost,127.0.0.1"
+    env.no_proxy = env.no_proxy || "localhost,127.0.0.1"
+
+    return env
+}
+
+function healthUrl(serverUrl: string) {
+    const url = new URL(serverUrl)
+    url.pathname = "/health"
+    return url.toString()
+}
+
+function runtimeEnv(env: NodeJS.ProcessEnv) {
     const dir = bundledRuntimeDir()
     if (!existsSync(dir)) return {}
 
@@ -272,7 +389,7 @@ function runtimeEnv() {
         npm_config_unicode: process.platform === "win32" ? "true" : undefined,
         PYTHONPATH: "",
         PYTHONNOUSERSITE: "1",
-        PATH: [...runtimePathDirs(dir), process.env.PATH ?? ""].join(delimiter),
+        PATH: [...runtimePathDirs(dir), env.PATH ?? process.env.PATH ?? ""].filter(Boolean).join(delimiter),
     }
 }
 
@@ -326,6 +443,7 @@ async function startServer(): Promise<ServerInfo> {
 
         // 确定工作目录
         const cwd = isDev ? getRepoRoot() : app.getPath("userData")
+        const baseEnv = inheritUserShellEnv()
 
         // 在 Windows 上直接调用 bun.exe
         serverProcess = spawn(opencodeCmd, args, {
@@ -333,8 +451,8 @@ async function startServer(): Promise<ServerInfo> {
             cwd,
             // 不使用 shell，直接执行 bun.cmd
             env: {
-                ...process.env,
-                ...runtimeEnv(),
+                ...baseEnv,
+                ...runtimeEnv(baseEnv),
                 OPENCODE_AUTO_UPDATE: "false",
                 OPENCODE_SERVER_PASSWORD: password,
                 // 确保 Windows 系统环境变量存在
@@ -344,7 +462,7 @@ async function startServer(): Promise<ServerInfo> {
         })
 
         let output = ""
-        let serverUrl = ""
+        let serverUrl: string | undefined
 
         serverProcess.stdout?.on("data", (data) => {
             const text = data.toString()
@@ -352,7 +470,7 @@ async function startServer(): Promise<ServerInfo> {
             console.log("Server stdout:", text)
 
             // 从输出中解析服务器 URL
-            const match = text.match(/listening on (http:\/\/[^\s]+)/)
+            const match = output.match(/listening on (http:\/\/[^\s]+)/)
             if (match && match[1]) {
                 serverUrl = match[1].trim()
                 console.log("检测到服务器 URL:", serverUrl)
@@ -382,18 +500,27 @@ async function startServer(): Promise<ServerInfo> {
         const checkServer = async () => {
             attempts++
 
-            // 如果还没有从 stdout 获取到 URL，使用默认的
-            const urlToCheck = serverUrl || "http://127.0.0.1:4096"
+            if (!serverUrl) {
+                console.log(`等待服务器 URL (${attempts}/${maxAttempts})`)
+                if (attempts >= maxAttempts) {
+                    reject(new Error("Server startup timeout"))
+                    return
+                }
+                setTimeout(checkServer, 1000)
+                return
+            }
+
+            const urlToCheck = healthUrl(serverUrl)
             console.log(`检查服务器状态 (${attempts}/${maxAttempts}): ${urlToCheck}`)
 
             try {
-                const response = await fetch(urlToCheck, { method: "HEAD" })
+                const response = await fetch(urlToCheck, { signal: AbortSignal.timeout(1500) })
                 console.log(`服务器响应状态: ${response.status}`)
-                if (response.ok || response.status === 401) {
+                if (response.ok || response.status === 401 || response.status === 403) {
                     // 服务器启动成功
-                    console.log("Server ready:", urlToCheck)
+                    console.log("Server ready:", serverUrl)
                     resolve({
-                        url: urlToCheck,
+                        url: serverUrl,
                         password,
                     })
                     return
@@ -641,6 +768,13 @@ app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
         createWindow()
     }
+})
+
+app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
 })
 
 app.on("window-all-closed", () => {
