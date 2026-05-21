@@ -2,13 +2,21 @@
     "name": "@opencode-ai/desktop-lxz",
     "productName": "LongwiseTechAgent",
     "version": "1.0.0",
+    "description": "LongwiseTechAgent desktop client",
+    "homepage": "https://opencode.ai",
+    "author": {
+        "name": "opencode",
+        "email": "hello@opencode.ai"
+    },
+    "license": "MIT",
     "private": true,
     "main": "dist/main/index.cjs",
     "type": "module",
     "scripts": {
         "dev": "bun run script/dev.ts",
+        "runtime:install": "bun run script/install-runtimes.ts",
         "typecheck": "tsc --noEmit",
-        "build": "electron-vite build",
+        "build": "bun run runtime:install && electron-vite build",
         "preview": "electron-vite preview",
         "pack": "electron-builder --dir",
         "pack:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",

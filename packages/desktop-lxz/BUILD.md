@@ -60,6 +60,46 @@ desktop-lxz (Electron 桌面应用)
 
 ## 打包步骤
 
+### 推荐：根目录一键命令
+
+根目录 `package.json` 已经提供完整打包命令，会先构建 `packages/opencode`，
+再把生成的后端二进制复制到 `packages/desktop-lxz/bin` 对应目录，然后构建
+`desktop-lxz` 网页，最后调用 `electron-builder` 打客户端包：
+
+```powershell
+# 只构建 opencode 并复制后端二进制
+bun run desktop-lxz:opencode
+
+# 构建 opencode + desktop-lxz，并打所有配置的平台客户端
+bun run desktop-lxz:dist
+
+# 构建 opencode + desktop-lxz，并只打某个平台客户端
+bun run desktop-lxz:dist:win
+bun run desktop-lxz:dist:win:zip
+bun run desktop-lxz:dist:mac
+bun run desktop-lxz:dist:mac:x64
+bun run desktop-lxz:dist:mac:arm64
+bun run desktop-lxz:dist:linux
+
+# 复用已有 packages/opencode/dist，不重新构建 opencode
+bun run desktop-lxz:dist:reuse-opencode
+bun run desktop-lxz:dist:win:reuse-opencode
+bun run desktop-lxz:dist:win:zip:reuse-opencode
+bun run desktop-lxz:dist:mac:reuse-opencode
+bun run desktop-lxz:dist:mac:x64:reuse-opencode
+bun run desktop-lxz:dist:mac:arm64:reuse-opencode
+bun run desktop-lxz:dist:linux:reuse-opencode
+```
+
+复制后的目录结构：
+
+```text
+packages/desktop-lxz/bin/opencode.exe
+packages/desktop-lxz/bin/mac/x64/opencode
+packages/desktop-lxz/bin/mac/arm64/opencode
+packages/desktop-lxz/bin/linux/x64/opencode
+```
+
 ### 步骤 1: 安装依赖
 
 在项目根目录安装所有依赖：
@@ -105,6 +145,9 @@ cd ../desktop-lxz
 npm run build
 ```
 
+`npm run build` 会先自动执行 `runtime:install`，为所有支持的平台准备 Node/Python runtime；
+如果 runtime 版本已经匹配，会直接跳过下载。
+
 ### 步骤 4: 打包为 EXE
 
 ```powershell
@@ -132,6 +175,10 @@ chmod +x bin/mac/x64/opencode bin/mac/arm64/opencode
 bun run build
 bun run dist:mac
 ```
+
+如果在 Apple Silicon 上想通过 Rosetta 本地验证 Intel runtime，可以执行
+`bun run runtime:install -- --install-cross-packages darwin-x64`；在 Intel Mac
+上则使用 `bun run runtime:install -- darwin-x64`。
 
 ---
 

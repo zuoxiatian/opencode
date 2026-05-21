@@ -25,10 +25,6 @@
             "to": "skills/"
         },
         {
-            "from": "runtimes/",
-            "to": "runtimes/"
-        },
-        {
             "from": "config/opencode.jsonc",
             "to": "config/opencode.jsonc"
         }
@@ -42,6 +38,10 @@
                 "filter": [
                     "opencode.exe"
                 ]
+            },
+            {
+                "from": "runtimes/win32-${arch}/",
+                "to": "runtimes/win32-${arch}/"
             }
         ],
         "target": [
@@ -90,6 +90,10 @@
                 "filter": [
                     "opencode"
                 ]
+            },
+            {
+                "from": "runtimes/darwin-${arch}/",
+                "to": "runtimes/darwin-${arch}/"
             }
         ],
         "icon": "build/icon.icns",
@@ -137,8 +141,22 @@
                 ]
             }
         ],
+        "extraResources": [
+            {
+                "from": "bin/linux/${arch}/",
+                "to": "bin/",
+                "filter": [
+                    "opencode"
+                ]
+            },
+            {
+                "from": "runtimes/linux-${arch}/",
+                "to": "runtimes/linux-${arch}/"
+            }
+        ],
         "icon": "build/icon.png",
         "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
-        "category": "Development"
+        "category": "Development",
+        "maintainer": "opencode <hello@opencode.ai>"
     }
 }

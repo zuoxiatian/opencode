@@ -54,6 +54,46 @@ node install.js
 
 Run from the repo root unless a command changes directory.
 
+### Root package commands
+
+The root `package.json` exposes packaging commands that build `packages/opencode`,
+copy the generated backend binaries into `packages/desktop-lxz/bin`, build the
+desktop renderer, and then run `electron-builder`:
+
+```bash
+# Build opencode and copy backend binaries only.
+bun run desktop-lxz:opencode
+
+# Build opencode, build desktop-lxz, then package every configured client.
+bun run desktop-lxz:dist
+
+# Build opencode first, then package one client target.
+bun run desktop-lxz:dist:win
+bun run desktop-lxz:dist:win:zip
+bun run desktop-lxz:dist:mac
+bun run desktop-lxz:dist:mac:x64
+bun run desktop-lxz:dist:mac:arm64
+bun run desktop-lxz:dist:linux
+
+# Reuse existing packages/opencode/dist without rebuilding opencode.
+bun run desktop-lxz:dist:reuse-opencode
+bun run desktop-lxz:dist:win:reuse-opencode
+bun run desktop-lxz:dist:win:zip:reuse-opencode
+bun run desktop-lxz:dist:mac:reuse-opencode
+bun run desktop-lxz:dist:mac:x64:reuse-opencode
+bun run desktop-lxz:dist:mac:arm64:reuse-opencode
+bun run desktop-lxz:dist:linux:reuse-opencode
+```
+
+The copied backend binary layout is:
+
+```text
+packages/desktop-lxz/bin/opencode.exe
+packages/desktop-lxz/bin/mac/x64/opencode
+packages/desktop-lxz/bin/mac/arm64/opencode
+packages/desktop-lxz/bin/linux/x64/opencode
+```
+
 1. Use Node 22 and clear Electron Node mode:
 
 ```powershell
@@ -91,6 +131,10 @@ Copy-Item packages\opencode\dist\opencode-windows-x64\bin\opencode.exe packages\
 Set-Location packages\desktop-lxz
 bun run build
 ```
+
+`bun run build` automatically runs `runtime:install` for every supported runtime
+target before invoking `electron-vite build`. If matching runtimes already
+exist, the install step only verifies metadata and skips the downloads.
 
 5. Package the Windows installer and portable exe:
 
@@ -132,8 +176,9 @@ This zip is the recommended "green" package for large bundled resources. Users s
 ## macOS Build
 
 Create macOS artifacts on a macOS host. The app packages one `opencode` backend
-binary per Electron architecture, so prepare both resource directories before
-running `dist:mac`.
+binary and one runtime directory per Electron architecture. `bun run build`
+automatically prepares every supported runtime target; packaging still copies
+only the runtime directory for the Electron architecture being built.
 
 ```bash
 cd packages/opencode
@@ -144,6 +189,11 @@ mkdir -p bin/mac/x64 bin/mac/arm64
 cp ../opencode/dist/opencode-darwin-x64/bin/opencode bin/mac/x64/opencode
 cp ../opencode/dist/opencode-darwin-arm64/bin/opencode bin/mac/arm64/opencode
 chmod +x bin/mac/x64/opencode bin/mac/arm64/opencode
+
+# Optional on Apple Silicon with Rosetta: verify the Intel runtime locally.
+bun run runtime:install -- --install-cross-packages darwin-x64
+# On an Intel Mac, use the same target without --install-cross-packages.
+# bun run runtime:install -- darwin-x64
 
 bun run build
 bun run dist:mac
@@ -178,4 +228,3 @@ LongwiseTechAgent-1.0.0-win-x64-Installer.exe
 LongwiseTechAgent-1.0.0-win-x64-Portable.exe
 LongwiseTechAgent-1.0.0-win-x64.zip
 ```
-

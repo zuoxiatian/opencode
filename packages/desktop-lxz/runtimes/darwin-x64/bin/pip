@@ -3,4 +3,6 @@ DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 export PYTHONHOME="$DIR/python"
 export PYTHONPATH=
 export PYTHONNOUSERSITE=1
-exec "$DIR/python/bin/python3" -m pip "$@"
+PY="$DIR/python/bin/python3"
+[ -x "$PY" ] || PY="$DIR/python/bin/python"
+exec "$PY" -m pip "$@"
