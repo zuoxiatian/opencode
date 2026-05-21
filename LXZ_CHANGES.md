@@ -47,6 +47,15 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
     - `kimi.txt`
     - `trinity.txt`
 
+- `packages/opencode/src/tool/bash.ts`
+  - Added a Windows PowerShell command prelude for shell tool calls.
+  - The prelude switches the console code page to UTF-8 and sets PowerShell input/output encodings to UTF-8 before running the requested command.
+  - Replaced direct `Stream.decodeText(handle.all)` decoding with explicit command-output decoding.
+  - Output is decoded as UTF-8 first.
+  - On Windows, if UTF-8 decoding produces replacement characters, output falls back to `gb18030` when that reduces decoding damage.
+  - This addresses garbled Chinese output from Windows shell commands and `cmd`/`npx` wrappers that emit GBK/CP936 bytes.
+  - Verification: `packages/opencode`: `bun typecheck` passed.
+
 ## Existing code paths affected by the new root
 
 - Session database remains defined in `packages/opencode/src/storage/db.ts`, but `Global.Path.data` now points to `~/.lxz/data`, so the default database becomes `~/.lxz/data/opencode.db`.
