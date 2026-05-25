@@ -2802,6 +2802,14 @@ body {
     margin-bottom: 16px;
 }
 
+.welcome-brand-title {
+    color: #ffd200;
+}
+
+:root[data-theme="light"] .welcome-brand-title {
+    color: #000000;
+}
+
 .welcome-subtitle {
     font-size: 16px;
     color: var(--text-secondary);

@@ -201,12 +201,9 @@ function registerEditShortcuts(window: BrowserWindowType) {
 
 async function ensureDefaultOpencodeConfig() {
     const configDir = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "config")
-    const configFiles = ["opencode.jsonc", "opencode.json", "config.json"].map((file) => join(configDir, file))
-
-    if (configFiles.some((file) => existsSync(file))) return
 
     await mkdir(configDir, { recursive: true })
-    await writeFile(configFiles[0], await readFile(defaultOpencodeConfigPath(), "utf8"))
+    await writeFile(join(configDir, "opencode.jsonc"), await readFile(defaultOpencodeConfigPath(), "utf8"))
 }
 
 function defaultOpencodeConfigPath() {
@@ -393,6 +390,83 @@ function runtimeEnv(env: NodeJS.ProcessEnv) {
     }
 }
 
+function frontmatterLines(markdown: string) {
+    if (!markdown.startsWith("---")) return undefined
+
+    const end = markdown.indexOf("\n---", 3)
+    if (end < 0) return undefined
+
+    return markdown.slice(3, end).split(/\r?\n/)
+}
+
+function cleanFrontmatterValue(value: string) {
+    return value.trim().replace(/^["']|["']$/g, "")
+}
+
+function frontmatterValue(markdown: string, key: string) {
+    const lines = frontmatterLines(markdown)
+    if (!lines) return undefined
+
+    const prefix = `${key}:`
+    const line = lines.find((item) => !item.match(/^\s/) && item.startsWith(prefix))
+    if (!line) return undefined
+
+    return cleanFrontmatterValue(line.slice(line.indexOf(":") + 1))
+}
+
+function metadataValue(markdown: string, key: string) {
+    const lines = frontmatterLines(markdown)
+    if (!lines) return undefined
+
+    const metadataIndex = lines.findIndex((item) => item.trim() === "metadata:")
+    if (metadataIndex < 0) return undefined
+
+    const afterMetadata = lines.slice(metadataIndex + 1)
+    const nextTopLevel = afterMetadata.findIndex((item) => item.trim() && !item.match(/^\s/))
+    const prefix = `${key}:`
+    const line = (nextTopLevel < 0 ? afterMetadata : afterMetadata.slice(0, nextTopLevel)).find((item) =>
+        item.trimStart().startsWith(prefix),
+    )
+    if (!line) return undefined
+
+    return cleanFrontmatterValue(line.slice(line.indexOf(":") + 1))
+}
+
+async function skillVersion(skillDir: string) {
+    const file = join(skillDir, "SKILL.md")
+    if (!existsSync(file)) return undefined
+    const markdown = await readFile(file, "utf8")
+    return metadataValue(markdown, "version") ?? frontmatterValue(markdown, "version")
+}
+
+function versionParts(version: string | undefined) {
+    return (version ?? "0")
+        .trim()
+        .replace(/^v/i, "")
+        .split(/[^0-9]+/)
+        .filter(Boolean)
+        .map((part) => Number(part))
+}
+
+function compareSkillVersions(next: string | undefined, current: string | undefined) {
+    const nextParts = versionParts(next)
+    const currentParts = versionParts(current)
+    const length = Math.max(nextParts.length, currentParts.length)
+
+    return Array.from({ length })
+        .map((_, index) => (nextParts[index] ?? 0) - (currentParts[index] ?? 0))
+        .find((diff) => diff !== 0) ?? 0
+}
+
+async function shouldInstallBundledSkill(source: string, destination: string) {
+    if (!existsSync(destination)) return true
+
+    const sourceVersion = await skillVersion(source)
+    if (!sourceVersion) return false
+
+    return compareSkillVersions(sourceVersion, await skillVersion(destination)) > 0
+}
+
 async function ensureBundledSkills() {
     const source = bundledSkillsDir()
     if (!existsSync(source)) return
@@ -404,10 +478,11 @@ async function ensureBundledSkills() {
     await Promise.all(
         skills
             .filter((entry) => entry.isDirectory() && existsSync(join(source, entry.name, "SKILL.md")))
-            .map((entry) => {
+            .map(async (entry) => {
                 const destination = join(target, entry.name)
-                if (existsSync(destination)) return Promise.resolve()
-                return cp(join(source, entry.name), destination, { recursive: true, force: false })
+                const skillSource = join(source, entry.name)
+                if (!(await shouldInstallBundledSkill(skillSource, destination))) return
+                return cp(skillSource, destination, { recursive: true, force: true })
             }),
     )
 }

@@ -68,7 +68,7 @@ function Root() {
             fallback={
                 <div class="welcome-screen">
                     <img class="welcome-icon" src={welcomeIcon} alt="" />
-                    <div class="welcome-title">LongwiseTechAgent</div>
+                    <div class="welcome-title welcome-brand-title">LongwiseTechAgent</div>
                     <div class="welcome-subtitle">正在启动后端服务...</div>
                     <div class="welcome-progress"></div>
                     <div class="status-indicator">

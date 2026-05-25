@@ -2286,7 +2286,7 @@ export function ChatPanel(props: ChatPanelProps) {
                                         <DropdownMenu.Sub>
                                             <DropdownMenu.SubTrigger class="composer-add-menu-item">
                                                 <Puzzle class="lucide-control-icon" size={15} strokeWidth={1.8} />
-                                                <span data-slot="composer-add-menu-label">技能</span>
+                                                <span data-slot="composer-add-menu-label">使用技能</span>
                                                 <ChevronRight class="lucide-chevron-icon" size={14} strokeWidth={1.8} />
                                             </DropdownMenu.SubTrigger>
                                             <DropdownMenu.SubContent class="composer-skill-menu">

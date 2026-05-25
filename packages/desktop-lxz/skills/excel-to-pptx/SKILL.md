@@ -1,5 +1,7 @@
 ---
 name: excel-to-pptx
+metadata:
+  version: "1.0.0"
 description: >
   Convert Excel spreadsheets (with optional PPTX templates) to well-formatted PowerPoint (.pptx).
   Supports multi-sheet Excel files (summary + detail sheets), embedded images, merged cells,
@@ -232,4 +234,3 @@ Attach all generated PPTX files.
 | 纯表格压缩 | 对没有图片的纯表格页，应采用高度感知的紧凑排版：在 12→10→8→7→6→5pt 字号梯度内选择能让整表不越界的最大可读字号，优先将中等行数的纯表格压缩到单个数据页内；若确实无法单页容纳，再分页。 |
 | 图片字段外置 | 当图片已抽取并放置在表格旁边或下方时，主表格中对应的图片/截图/凭证/发票/付款/下单等源字段必须移除，避免空列重复占位；图片本体、下标和行关联元数据保留。 |
 | 表格边框 | 所有主表格与汇总表格必须添加清晰黑色边框，确保投影、打印和审阅时表格边界明确。 |
-

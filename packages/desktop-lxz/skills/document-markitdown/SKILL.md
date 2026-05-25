@@ -1,5 +1,7 @@
 ---
 name: document-markitdown
+metadata:
+  version: "1.0.0"
 description: >
   Read and extract text content from documents using the bundled MarkItDown Python package.
   Use for PDF, Word, PowerPoint, Excel, HTML, CSV, JSON, XML, text, and other office/document

@@ -1,5 +1,7 @@
 ---
 name: travel-expense-pptx
+metadata:
+  version: "1.0.0"
 description: >
   Generate travel expense settlement PPT from Excel summary data and invoice images using VLM.
   Supports extracting structured data from invoice/travel images (plane tickets, high-speed rail,
