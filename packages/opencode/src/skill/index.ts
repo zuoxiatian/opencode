@@ -21,6 +21,8 @@ import { Discovery } from "./discovery"
 
 const log = Log.create({ service: "skill" })
 const EXTERNAL_SKILL_ROOT = path.join(Global.Path.root, "skills")
+const PROJECT_AGENT_DIRS = [".agent", ".agents"]
+const PROJECT_AGENT_SKILL_PATTERN = "skills/**/SKILL.md"
 const OPENCODE_SKILL_PATTERN = "{skill,skills}/**/SKILL.md"
 const SKILL_PATTERN = "**/SKILL.md"
 
@@ -147,12 +149,21 @@ const discoverSkills = Effect.fnUntraced(function* (
   discovery: Discovery.Interface,
   fsys: AppFileSystem.Interface,
   directory: string,
+  worktree: string,
 ) {
   const state: ScanState = { matches: new Set(), dirs: new Set() }
 
   if (!Flag.OPENCODE_DISABLE_EXTERNAL_SKILLS) {
     if (yield* fsys.isDir(EXTERNAL_SKILL_ROOT)) {
       yield* scan(state, EXTERNAL_SKILL_ROOT, SKILL_PATTERN, { dot: true, scope: "external" })
+    }
+
+    const upDirs = yield* fsys
+      .up({ targets: PROJECT_AGENT_DIRS, start: directory, stop: worktree })
+      .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+
+    for (const root of upDirs) {
+      yield* scan(state, root, PROJECT_AGENT_SKILL_PATTERN, { dot: true, scope: "project-agent" })
     }
   }
 
@@ -206,7 +217,7 @@ export const layer = Layer.effect(
     const fsys = yield* AppFileSystem.Service
     const discovered = yield* InstanceState.make(
       Effect.fn("Skill.discovery")(function* (ctx) {
-        return yield* discoverSkills(config, discovery, fsys, ctx.directory)
+        return yield* discoverSkills(config, discovery, fsys, ctx.directory, ctx.worktree)
       }),
     )
     const state = yield* InstanceState.make(

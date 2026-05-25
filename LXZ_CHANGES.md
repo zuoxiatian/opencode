@@ -26,6 +26,8 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
   - Removed external skill discovery from `~/.claude` and `~/.agents`.
   - Removed upward project scanning for external `.claude` and `.agents` folders.
   - External skills now scan only `~/.lxz/skills/**/SKILL.md`.
+  - Restored project-local agent skill compatibility for `.agent/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md`.
+  - This project-local compatibility is implemented only in the skill service, so `.opencode` config discovery remains unchanged.
 
 - `packages/opencode/src/server/routes/instance/middleware.ts`
   - Added a default project directory for instance requests that do not include `directory` or `x-opencode-directory`.
