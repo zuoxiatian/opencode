@@ -1,7 +1,7 @@
 ---
 name: settlement-excel-validator
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 description: >
   判断 Excel 是否是合格的“结算原始输入文件”。当用户需要在生成 PPT 前检查结算 Excel 的汇总表与分表对应关系、数据区文本字段完整性、真实图片列逐行缺图情况，或说明 Excel 哪里不符合标准时使用本技能。
 ---

@@ -1,7 +1,7 @@
 ---
 name: pptx-merge
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 description: >
   Merge multiple PPTX files into a single presentation while preserving embedded images.
   Handles relationship remapping automatically so all images display correctly after merging.

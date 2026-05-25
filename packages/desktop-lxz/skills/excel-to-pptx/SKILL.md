@@ -1,7 +1,7 @@
 ---
 name: excel-to-pptx
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 description: >
   Convert Excel spreadsheets (with optional PPTX templates) to well-formatted PowerPoint (.pptx).
   Supports multi-sheet Excel files (summary + detail sheets), embedded images, merged cells,
@@ -61,7 +61,7 @@ $PYTHON $SCRIPTS/read_template.py <template2.pptx> -o /tmp/tmpl2.json
 | Summary sheet associations | If a summary sheet is detected, expanded summary rows are associated with detail sheets via `detail_sheet_associations`, `summary_association`, and `summary_context`. Prefer block/module prefixes such as `4-...` over pure sequence matching. If one detail sheet corresponds to multiple expanded summary rows, also build `summary_context_rows` and `summary_row_map` for verification and traceability. The layout engine renders the matched summary information as standalone summary page(s) before the detail table pages, not as an embedded block above the detail table. |
 | Embedded images | Extract images separately from the table matrix, normalize anchors after row/column compaction, attach `data_row_index`, `column_name`, and `caption`. Captions use `列名-行序号` so pictures can be traced back to table rows. |
 
-`read_template.py` extracts slide dimensions, theme colors, font names, and table styles. Template metadata can be attached to each sheet before layout.
+`read_template.py` extracts slide dimensions, theme colors, font names, and table styles. Template metadata can be attached to each sheet before layout. **Important: extracted template dimensions are metadata only; they must not be used to recalculate table/image geometry unless the user explicitly asks to preserve the template's physical page size.**
 
 ## Step 2 — Present structure & collect user preferences
 
@@ -101,7 +101,7 @@ Attach matched template info to each sheet's JSON:
 }
 ```
 
-Unmatched sheets use the default theme. Matched templates must carry the real `file_path` in `sheet["template"]["file_path"]`; `build_pptx.py` then opens that PPTX with `Presentation(template_path)` and clears only sample slides, so masters, layouts, slide size and theme are preserved in the generated output. Do not treat parsed template JSON as the final presentation base by itself.
+Unmatched sheets use the default theme. Matched templates must carry the real `file_path` in `sheet["template"]["file_path"]`; `build_pptx.py` then opens that PPTX with `Presentation(template_path)` and clears only sample slides, so masters, layouts and theme are preserved in the generated output. **The generated table/image layout must remain locked to the built-in default layout canvas; user-template slide dimensions must not override table margins, row density, image-grid geometry, or title positions.** When a user template has a different slide size, the builder should scale the template's master/layout artwork into the default layout canvas rather than scaling the generated data layout to the template.
 
 ### Column filtering
 
@@ -237,7 +237,8 @@ Attach all generated PPTX files.
 | 日期展示保真 | Excel 中只展示月份和日期的日期型单元格，必须按单元格显示格式输出，例如 `m"月"d"日"` 或 `m月d日` 应输出 `2月6日`，不得改写为 `02/06`、`2026-02-06` 或其他未在表格中显示的形式。 |
 | 金额精度保真 | 金额、费用、报价等数值必须按 Excel 显示精度输出，禁止暴露 Python/浮点二进制误差，例如 `107921.52` 不得输出为 `107921.52000000002`。读取阶段应先完成数字字符串化，再进入布局与 PPT 生成。 |
 | 百分数保真 | 百分数字段必须按 Excel 显示倍率输出，禁止在去除尾随零时误删整数位，例如 `80%` 不得输出为 `8%`，`90%` 不得输出为 `9%`，`100%` 不得输出为 `1%`。若列表头含 `%` 且同列存在百分比格式单元格，则同列 `General` 格式的数值单元格也应按百分号语义输出，避免 `0%` 被写成裸 `0`。 |
-| 用户模板保真 | 如果用户上传或指定 PPTX 模板，最终输出必须以该 PPTX 文件作为 presentation base 生成，而不是只读取颜色后新建默认空白 PPT。保留模板的母版、版式、尺寸和主题，仅清除模板自带示例页。 |
+| 用户模板保真 | 如果用户上传或指定 PPTX 模板，最终输出必须以该 PPTX 文件作为 presentation base 生成，而不是只读取颜色后新建默认空白 PPT。保留模板的母版、版式和主题，仅清除模板自带示例页；但表格和图片排版必须锁定内置默认布局画布，不得因为模板页面尺寸不同而改变边距、表格宽度、图片网格或标题位置。若模板尺寸不同，应缩放模板母版/版式内容到默认画布，而不是缩放生成的数据布局。 |
 | 非必填字段过滤 | 列名只要包含 `非必填`、`PPT非必填`、`（非必填）` 等标记，优先级最高：无论该字段是否在 `selected_col_indices`、默认全列选择、图片源字段、图片锚点列或 fallback 列选择中出现，都不得进入最终 PPTX 主表格、匹配到分表的汇总信息块、独立汇总页、图片页、图片下标或任何行关联元数据。若所有列名都不含这些标记，则默认保留全部列，不再按固定优先级或 10 列上限裁剪汇总信息。 |
 | 汇总表精确合并 | 分表 PPTX 只允许合并“汇总表第一列值与当前分表 sheet 名完全一致”的汇总行；不得把第一列属于其他分表、上级分类或相邻板块的汇总行混入当前分表。多行汇总应先生成独立汇总页再展示分表明细；单行汇总应与分表第一页同页展示，汇总占 1 行、分表最多 9 行，剩余分表数据按普通表格分页递归。 |
 | 汇总表独立输出 | 使用 `--all` 批量生成时，检测到的汇总表默认也要单独生成一个 PPTX，其表格内容和图片外置规则与其他 sheet 保持一致；只有用户明确要求不输出汇总表时才使用 `--no-summary`。 |
+

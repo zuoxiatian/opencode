@@ -212,6 +212,76 @@ def clear_template_slides(prs):
         slide_id_list.remove(slide_id)
 
 
+def get_plan_canvas_dims(layout_plan, fallback_w, fallback_h):
+    """Return the deterministic layout canvas stored in the layout plan."""
+    canvas = layout_plan.get("layout_canvas") or {}
+    try:
+        if canvas.get("w") and canvas.get("h"):
+            return float(canvas["w"]), float(canvas["h"])
+    except Exception:
+        pass
+    for page in layout_plan.get("pages", []):
+        dims = page.get("slide_dims") or {}
+        try:
+            if dims.get("w") and dims.get("h"):
+                return float(dims["w"]), float(dims["h"])
+        except Exception:
+            continue
+    return fallback_w, fallback_h
+
+
+def scale_shape_geometry(shape, sx, sy):
+    """Scale template/master/layout shape geometry to the locked layout canvas.
+
+    This preserves the user's template artwork after the presentation canvas is
+    normalized to the built-in layout size. Generated tables and images are then
+    placed with the same coordinates as the default output.
+    """
+    for attr, factor in (("left", sx), ("width", sx), ("top", sy), ("height", sy)):
+        try:
+            value = getattr(shape, attr)
+            if value is not None:
+                setattr(shape, attr, int(value * factor))
+        except Exception:
+            pass
+
+
+def scale_shape_collection(shapes, sx, sy):
+    for shape in list(shapes):
+        scale_shape_geometry(shape, sx, sy)
+
+
+def fit_template_to_layout_canvas(prs, target_w_cm, target_h_cm):
+    """Resize a user template to the canonical layout canvas without losing its style.
+
+    The generated content layout must stay identical to the default output. When
+    a user template has a different physical slide size, scale its master/layout
+    artwork into the canonical canvas, then set the presentation dimensions to
+    that canvas. Template colors, fonts, masters and layouts remain available.
+    """
+    old_w = int(prs.slide_width)
+    old_h = int(prs.slide_height)
+    new_w = int(cm(target_w_cm))
+    new_h = int(cm(target_h_cm))
+    if old_w <= 0 or old_h <= 0:
+        prs.slide_width = Emu(new_w)
+        prs.slide_height = Emu(new_h)
+        return
+    if abs(old_w - new_w) <= 1000 and abs(old_h - new_h) <= 1000:
+        return
+
+    sx = new_w / old_w
+    sy = new_h / old_h
+    for master in prs.slide_masters:
+        scale_shape_collection(master.shapes, sx, sy)
+    for layout in prs.slide_layouts:
+        scale_shape_collection(layout.shapes, sx, sy)
+    for slide in prs.slides:
+        scale_shape_collection(slide.shapes, sx, sy)
+    prs.slide_width = Emu(new_w)
+    prs.slide_height = Emu(new_h)
+
+
 def build_cover(prs, page, theme, sw, sh):
     slide = add_blank_slide(prs)
     tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
@@ -675,17 +745,18 @@ def build_pptx(layout_plan, output_path, theme_path=None, template_path=None):
     template_path = template_path or layout_plan.get("template_file_path")
     template_used = bool(template_path and os.path.exists(template_path))
 
+    default_orient = layout_plan.get("orientation", "portrait")
+    if default_orient == "landscape":
+        fallback_w, fallback_h = 33.867, 19.05
+    else:
+        fallback_w, fallback_h = SLIDE_W_CM, SLIDE_H_CM
+    default_w, default_h = get_plan_canvas_dims(layout_plan, fallback_w, fallback_h)
+
     if template_used:
         prs = Presentation(template_path)
-        default_w = prs.slide_width / EMU_PER_CM
-        default_h = prs.slide_height / EMU_PER_CM
+        fit_template_to_layout_canvas(prs, default_w, default_h)
         clear_template_slides(prs)
     else:
-        default_orient = layout_plan.get("orientation", "portrait")
-        if default_orient == "landscape":
-            default_w, default_h = 33.867, 19.05
-        else:
-            default_w, default_h = SLIDE_W_CM, SLIDE_H_CM
         prs = Presentation()
         prs.slide_width = cm(default_w)
         prs.slide_height = cm(default_h)

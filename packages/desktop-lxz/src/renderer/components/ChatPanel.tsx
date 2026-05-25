@@ -1,4 +1,4 @@
-import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch, untrack } from "solid-js"
+import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch } from "solid-js"
 import { reconcile } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { useSDK, type DiscussIssue } from "../context/sdk"
@@ -873,6 +873,7 @@ export function ChatPanel(props: ChatPanelProps) {
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
     const [skillOptions, setSkillOptions] = createSignal<SkillOption[]>([])
     const [skillsLoading, setSkillsLoading] = createSignal(false)
+    let skillOptionsRequest = 0
     const [projectOptions, setProjectOptions] = createSignal<Project[]>([])
     const [projectSearch, setProjectSearch] = createSignal("")
     const [currentAgent, setCurrentAgent] = createSignal("build")
@@ -1394,14 +1395,22 @@ export function ChatPanel(props: ChatPanelProps) {
     }
 
     const loadSkillOptions = async () => {
-        if (untrack(skillsLoading)) return
+        const directory = sdk.directory()
+        const request = ++skillOptionsRequest
+        if (!directory) {
+            setSkillOptions([])
+            setSkillsLoading(false)
+            return
+        }
+
         setSkillsLoading(true)
         const result = await sdk.client.app.skills(undefined, { throwOnError: false })
             .catch((error) => {
                 console.error("加载技能列表失败:", error)
                 return undefined
             })
-            .finally(() => setSkillsLoading(false))
+        if (request !== skillOptionsRequest || sdk.directory() !== directory) return
+        setSkillsLoading(false)
         if (!result?.data) return
 
         setSkillOptions(

@@ -12,7 +12,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const APP_ID = "ai.opencode.desktop"
 const APP_NAME = "LongwiseTechAgent"
 const APP_VERSION = "1.0.0"
-const DEPRECATED_BUNDLED_SKILLS = ["travel-expense-pptx"]
+const DEPRECATED_BUNDLED_SKILLS = ["travel-expense-pptx", "pptx-layout-optimizer"]
 
 let mainWindow: BrowserWindowType | null = null
 let serverProcess: ChildProcess | null = null
@@ -204,7 +204,25 @@ async function ensureDefaultOpencodeConfig() {
     const configDir = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "config")
 
     await mkdir(configDir, { recursive: true })
-    await writeFile(join(configDir, "opencode.jsonc"), await readFile(defaultOpencodeConfigPath(), "utf8"))
+    await writeFileForce(join(configDir, "opencode.jsonc"), await readFile(defaultOpencodeConfigPath(), "utf8"))
+}
+
+function permissionError(error: unknown) {
+    return typeof error === "object" && error !== null && "code" in error
+        && (error.code === "EPERM" || error.code === "EACCES")
+}
+
+async function writeFileForce(file: string, content: string) {
+    return writeFile(file, content).catch(async (error: unknown) => {
+        if (!permissionError(error)) throw error
+        clearWindowsReadonlyAttribute(file)
+        return writeFile(file, content)
+    })
+}
+
+function clearWindowsReadonlyAttribute(file: string) {
+    if (process.platform !== "win32") return
+    spawnSync("attrib", ["-R", file], { stdio: "ignore", windowsHide: true })
 }
 
 function defaultOpencodeConfigPath() {

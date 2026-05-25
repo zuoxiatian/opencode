@@ -576,9 +576,15 @@ def plan_image_pages(sheet, slide_w, slide_h, include_images):
 
 
 def get_slide_dims(sheet, options):
-    template = sheet.get("template")
-    if template and template.get("slide_width_cm"):
-        return template["slide_width_cm"], template["slide_height_cm"]
+    """Return the canonical layout canvas size.
+
+    User PPTX templates are visual bases only: they may provide masters,
+    backgrounds, layouts, colors and fonts, but they must not change the
+    deterministic table/image layout. Earlier versions used the template slide
+    size here, which caused the same Excel data to be laid out differently when
+    a new template was supplied. Keep layout geometry locked to the built-in
+    default canvas so table density, image grids and margins remain stable.
+    """
     orientation = sheet.get("orientation") or options.get("default_orientation", "portrait")
     if orientation == "landscape":
         return LANDSCAPE_W, LANDSCAPE_H
@@ -602,6 +608,7 @@ def build_plan_for_sheet(sheet, options):
         "title": f"{title} — {sheet.get('name', 'Sheet')}",
         "sheet_name": sheet.get("name", "Sheet"),
         "orientation": options.get("default_orientation", "portrait"),
+        "layout_canvas": {"w": sw, "h": sh, "source": "builtin-default-layout"},
         "pages": [],
     }
     if template_info:
