@@ -31,15 +31,28 @@ def match_header(header, keyword):
     return keyword in cleaned or keyword in header
 
 
+def is_non_required_header(header):
+    """True when header explicitly marks the column as non-required for PPT."""
+    if header is None:
+        return False
+    normalized = str(header).replace(" ", "").replace("\n", "").lower()
+    markers = ["非必填", "(非必填)", "（非必填）", "ppt非必填", "非必填列"]
+    return any(marker in normalized for marker in markers)
+
+
 def filter_sheet(sheet, options):
     """对单个 sheet 设置 selected_col_indices，不修改 headers 和 data"""
     headers = sheet.get("headers", [])
     required_indices = set(sheet.get("required_col_indices", []))
+    non_required_indices = {idx for idx, h in enumerate(headers) if is_non_required_header(h)}
 
     selected = set()
 
     if options.get("include_required"):
-        selected.update(required_indices)
+        if required_indices:
+            selected.update(required_indices)
+        else:
+            selected.update(set(range(len(headers))) - non_required_indices)
 
     exclude_keywords = [k.strip() for k in options.get("exclude", "").split(",") if k.strip()]
     for idx, h in enumerate(headers):
@@ -52,15 +65,24 @@ def filter_sheet(sheet, options):
     if include_keywords:
         selected.clear()
         if options.get("include_required"):
-            selected.update(required_indices)
+            if required_indices:
+                selected.update(required_indices)
+            else:
+                selected.update(set(range(len(headers))) - non_required_indices)
         for idx, h in enumerate(headers):
             for kw in include_keywords:
                 if match_header(h, kw):
                     selected.add(idx)
                     break
 
+    # Hard rule: never keep columns explicitly marked as non-required.
+    selected = {idx for idx in selected if idx not in non_required_indices}
+
     if not selected:
-        selected = set(range(len(headers)))
+        selected = set(range(len(headers))) - non_required_indices
+
+    # Hard rule is applied again after fallback, so fallback can never reintroduce 非必填 columns.
+    selected = {idx for idx in selected if idx not in non_required_indices}
 
     sheet["selected_col_indices"] = sorted(selected)
 
@@ -94,6 +116,7 @@ def main():
         "exclude": args.exclude or "",
         "include": args.include or "",
         "include_required": args.include_required,
+        "include_summary": False,
     }
 
     summary_idx = data.get("summary_sheet_index", 0)

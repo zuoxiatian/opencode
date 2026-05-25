@@ -1,16 +1,16 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "newapi/MiniMax-M2.7",
+  "model": "newapi/kimi-k2.6",
   "disabled_providers": ["opencode"],
   "provider": {
     "newapi": {
       "npm": "@ai-sdk/anthropic",
       "options": {
         "baseURL": "http://116.62.224.41:17600/v1",
-        "apiKey": "sk-OCkl04gKBgSW7liDsN8whz0VZIVLt1xA1XHTCiRE7OFvRoCJ"
+        "apiKey": "sk-R3XhwY7mSghIOyEYOloiWu2tgxU6ag2J3BSKCFmTFM6jH00E"
       },
       "models": {
-        "MiniMax-M2.7": {
+        "kimi-k2.6": {
           "name": "LongwiseTechLLM"
         }
       }

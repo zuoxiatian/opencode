@@ -1,11 +1,11 @@
-"""
-Excel 解析模块 — excel-to-pptx skill
+﻿"""
+Excel 瑙ｆ瀽妯″潡 鈥?excel-to-pptx skill
 
-设计原则：
-  1. 表格忠实优先：表格列只来自单元格内容，图片所在的空列不得混入表格。
-  2. 预处理优先：先展开合并单元格，再删除纯空行、纯空列。
-  3. 图片单独处理：图片锚点保留为元数据，并按锚定行关联到最近的数据行。
-  4. 汇总行上浮：汇总表数据行作为 detail sheet 的 summary_context 进入后续布局。
+璁捐鍘熷垯锛?
+  1. 琛ㄦ牸蹇犲疄浼樺厛锛氳〃鏍煎垪鍙潵鑷崟鍏冩牸鍐呭锛屽浘鐗囨墍鍦ㄧ殑绌哄垪涓嶅緱娣峰叆琛ㄦ牸銆?
+  2. 棰勫鐞嗕紭鍏堬細鍏堝睍寮€鍚堝苟鍗曞厓鏍硷紝鍐嶅垹闄ょ函绌鸿銆佺函绌哄垪銆?
+  3. 鍥剧墖鍗曠嫭澶勭悊锛氬浘鐗囬敋鐐逛繚鐣欎负鍏冩暟鎹紝骞舵寜閿氬畾琛屽叧鑱斿埌鏈€杩戠殑鏁版嵁琛屻€?
+  4. 姹囨€昏涓婃诞锛氭眹鎬昏〃鏁版嵁琛屼綔涓?detail sheet 鐨?summary_context 杩涘叆鍚庣画甯冨眬銆?
 
 Usage:
   python read_excel.py <input.xlsx> [--sheet <name>] [--output <path>]
@@ -37,7 +37,7 @@ def is_blank(value):
     return False
 
 
-LINK_RE = re.compile(r"(https?://[^\s,，;；|｜、]+|www\.[^\s,，;；|｜、]+)", re.IGNORECASE)
+LINK_RE = re.compile(r"(https?://[^\s,;，；|｜、]+|www\.[^\s,;，；|｜、]+)", re.IGNORECASE)
 
 
 def keep_first_link_when_multiple(text):
@@ -71,151 +71,252 @@ def clean_header(value):
     return str(text).strip()
 
 
-def is_date_format(number_format):
-    """Check if number_format indicates a date type."""
-    if not number_format or number_format == 'General':
+def is_non_required_header(header):
+    if header is None:
         return False
-    date_chars = {'y', 'm', 'd', 'h', 's'}
-    fmt_lower = number_format.lower()
-    return any(c in fmt_lower for c in date_chars)
+    text = str(header)
+    normalized = text.replace(" ", "").lower()
+    markers = ["非必填", "(非必填)", "（非必填）", "ppt非必填", "非必填列"]
+    return any(marker in normalized for marker in markers)
+
+
+def _strip_quoted_literals(fmt):
+    """Remove quoted/escaped literal text before inspecting Excel format tokens."""
+    result = []
+    i = 0
+    in_quote = None
+    while i < len(fmt):
+        ch = fmt[i]
+        if ch in ('"', "'"):
+            if in_quote == ch:
+                in_quote = None
+            elif in_quote is None:
+                in_quote = ch
+            i += 1
+            continue
+        if in_quote:
+            i += 1
+            continue
+        if ch == '\\' and i + 1 < len(fmt):
+            i += 2
+            continue
+        result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
+def is_date_format(number_format):
+    """Check if number_format indicates a date/time type without false positives.
+
+    Excel number formats may contain strings such as [Red] or currency literals.
+    A naive substring test for d/m/y misclassifies those as dates. Strip quoted
+    literals, locale/color/condition brackets and numeric placeholders first.
+    """
+    if not number_format or str(number_format).lower() == 'general':
+        return False
+    fmt = str(number_format).split(';')[0]
+    fmt = re.sub(r'\[\$-[^\]]+\]', '', fmt)
+    fmt = re.sub(r'\[[^\]]+\]', '', fmt)
+    fmt = _strip_quoted_literals(fmt).lower()
+    if any(token in fmt for token in ('yy', 'yyyy', '年', '月', '日')):
+        return True
+    # Recognize simple formats such as m/d, d-m, h:mm while ignoring #,##0.
+    token_text = re.sub(r'[#0?,._()\s%￥$€£¥-]+', '', fmt)
+    return bool(re.search(r'[ymdhHsS]', token_text)) and not any(ch in fmt for ch in '#0')
 
 
 def is_time_format(number_format):
     """Check if number_format indicates a time type."""
-    if not number_format or number_format == 'General':
+    if not number_format or str(number_format).lower() == 'general':
         return False
-    fmt_lower = number_format.lower()
-    return 'h' in fmt_lower or 's' in fmt_lower
+    fmt = str(number_format).split(';')[0]
+    fmt = re.sub(r'\[[^\]]+\]', '', fmt)
+    fmt = _strip_quoted_literals(fmt).lower()
+    return ':' in fmt and ('h' in fmt or 's' in fmt)
 
 
-def round_to_decimal_places(value, decimal_places):
-    """Round a float to specified decimal places."""
-    if decimal_places == 0:
-        return round(value)
-    multiplier = 10 ** decimal_places
-    return round(value * multiplier) / multiplier
+def excel_general_number(value):
+    """Return an Excel-like General display string for ordinary numbers.
+
+    Excel stores numbers as binary floating point and displays up to about 15
+    significant digits. Using Python's default str(float) can expose binary
+    artifacts such as 107921.52000000002, so collapse floats to 15 significant
+    digits before exporting JSON.
+    """
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    try:
+        if float(value).is_integer():
+            return str(int(value))
+        text = format(float(value), ".15g")
+        # Avoid scientific notation for normal business amounts when possible.
+        if "e" in text.lower():
+            from decimal import Decimal
+            dec = Decimal(text)
+            plain = format(dec, "f").rstrip("0").rstrip(".")
+            return plain or "0"
+        return text
+    except Exception:
+        return str(value)
+
+
+def decimal_places_from_format(fmt):
+    """Infer fixed decimal places from an Excel number format string."""
+    fmt = (fmt or "General").split(';')[0]
+    if '.' not in fmt:
+        return 0, False
+    decimal_part = fmt.split('.', 1)[1]
+    places = 0
+    for ch in decimal_part:
+        if ch in '0#?':
+            places += 1
+        elif ch in ',%)] ':
+            continue
+        else:
+            break
+    return places, True
 
 
 def format_numeric(value, number_format):
-    """Format numeric value according to Excel number_format."""
-    if not isinstance(value, (int, float)):
+    """Format numeric value according to Excel number_format without exposing float noise."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
         return None
 
+    from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+
     fmt = (number_format or 'General').strip()
+    fmt_main = fmt.split(';')[0].strip() if fmt else 'General'
 
-    # Handle General format - just return the number as string
-    if fmt == 'General':
-        return str(value)
+    if fmt_main.lower() == 'general':
+        return excel_general_number(value)
 
-    # Determine decimal places from format
-    decimal_places = 0
-    has_decimal = '.' in fmt
+    is_percent = '%' in fmt_main
+    has_comma = ',' in fmt_main
+    decimal_places, has_decimal = decimal_places_from_format(fmt_main)
+
+    try:
+        dec = Decimal(str(value))
+        if is_percent:
+            dec *= Decimal('100')
+        quant = Decimal('1') if decimal_places == 0 else Decimal('1').scaleb(-decimal_places)
+        dec = dec.quantize(quant, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return excel_general_number(value)
+
     if has_decimal:
-        # Count digits after decimal point in format string (before any trailing zeros removed)
-        parts = fmt.split('.')
-        if len(parts) > 1:
-            # Get the decimal part, stop at first non-digit character (like space, _, etc.)
-            decimal_part = ''
-            for ch in parts[1]:
-                if ch.isdigit():
-                    decimal_part += ch
-                else:
-                    break
-            decimal_places = len(decimal_part) if decimal_part else 0
+        num_text = f"{dec:,.{decimal_places}f}" if has_comma else f"{dec:.{decimal_places}f}"
+    elif has_comma:
+        num_text = f"{dec:,.0f}"
+    elif is_percent:
+        # Percent formats such as 0% are fixed-display formats. Do not strip
+        # trailing zeros from 90 / 100, otherwise Excel values 0.9 / 1 become
+        # 9% / 1%, which is incorrect.
+        num_text = f"{dec:.0f}"
+    else:
+        num_text = format(dec, 'f').rstrip('0').rstrip('.')
+        if num_text in ('', '-0'):
+            num_text = '0'
 
-    # Format with proper decimal places
-    formatted = round_to_decimal_places(value, decimal_places)
+    if is_percent:
+        num_text += '%'
+    return num_text
 
-    # Add thousand separator if format has it
-    if '#,##0' in fmt or (',' in fmt and decimal_places > 0):
-        return f"{formatted:,}"
-    return str(formatted)
+
+def strip_excel_locale_and_section(fmt):
+    """Remove Excel locale/color/condition decorations that are not display text."""
+    fmt = (fmt or '').split(';')[0]
+    # Remove locale tags such as [$-zh-CN] and color/condition brackets.
+    fmt = re.sub(r'\[\$-[^\]]+\]', '', fmt)
+    fmt = re.sub(r'\[[^\]]+\]', '', fmt)
+    return fmt.strip()
 
 
 def format_date(value, number_format):
-    """Format Excel date serial number or datetime object to date string."""
+    """Format Excel date values while preserving month/day style from the cell format.
+
+    In particular, m"月"d"日" / m月d日 must become 2月6日 rather than 02/06.
+    """
     import datetime as dt_module
 
     if isinstance(value, dt_module.datetime):
         dt = value
     elif isinstance(value, dt_module.date):
         dt = dt_module.datetime.combine(value, dt_module.time())
-    elif isinstance(value, (int, float)):
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
         from openpyxl.utils.datetime import from_excel
         try:
             dt = from_excel(value)
         except Exception:
-            return str(value)
+            return excel_general_number(value)
     else:
         return None
 
-    fmt = (number_format or 'yyyy/m/d').strip()
-    if fmt.lower() == 'general':
-        return dt.strftime('%m月%d日')
-    # Remove Excel section separator and everything after it (e.g., ";@" or ";@")
-    if ';' in fmt:
-        fmt = fmt.split(';')[0]
+    fmt = strip_excel_locale_and_section(number_format or 'yyyy/m/d')
+    if not fmt or fmt.lower() == 'general':
+        return f"{dt.month}/{dt.day}"
 
-    # Handle Chinese date format: m"月"d"日" or mm"月"dd"日"
-    # Also handle yyyy"年"m"月"d"日" etc.
-    chinese_date_pattern = re.compile(r'(yyyy|yy|m+|d+|h+|s+)(["""\'\']([^"""\']+)["""\'\'])?', re.IGNORECASE)
+    # Normalize common escaped and quoted Chinese literals before token parsing.
+    fmt = fmt.replace('\\-', '-').replace('\\/', '/').replace('\\.', '.')
+    fmt = fmt.replace('"年"', '年').replace('"月"', '月').replace('"日"', '日')
+    fmt = fmt.replace("'年'", '年').replace("'月'", '月').replace("'日'", '日')
 
-    def replace_token(match):
-        token = match.group(1).lower()
-        literal = match.group(3) or ''
+    out = []
+    i = 0
+    in_quote = None
+    while i < len(fmt):
+        ch = fmt[i]
+        if ch in ('"', "'"):
+            if in_quote == ch:
+                in_quote = None
+            elif in_quote is None:
+                in_quote = ch
+            else:
+                out.append(ch)
+            i += 1
+            continue
+        if in_quote:
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '\\' and i + 1 < len(fmt):
+            out.append(fmt[i + 1])
+            i += 2
+            continue
 
-        # Map Excel format tokens to Python strftime
-        token_map = {
-            'yyyy': '%Y',   # 4-digit year
-            'yy': '%y',     # 2-digit year
-            'mmmm': '%B',   # Full month name (locale)
-            'mmm': '%b',    # Abbreviated month (locale)
-            'mm': '%m',     # Zero-padded month
-            'm': '%m',      # Month without zero-padding
-            'dd': '%d',     # Zero-padded day
-            'd': '%d',      # Day without zero-padding
-            'hh': '%H',     # 24-hour
-            'h': '%H',      # 24-hour without zero-padding
-            'ss': '%S',     # Second
-            's': '%S',      # Second without zero-padding
-        }
+        lower = ch.lower()
+        if lower in ('y', 'm', 'd', 'h', 's'):
+            j = i + 1
+            while j < len(fmt) and fmt[j].lower() == lower:
+                j += 1
+            token = fmt[i:j].lower()
+            if lower == 'y':
+                out.append(f"{dt.year:04d}" if len(token) >= 4 else f"{dt.year % 100:02d}")
+            elif lower == 'm':
+                # In this skill's data, m/mm in date formats represent month.
+                out.append(f"{dt.month:02d}" if len(token) >= 2 else str(dt.month))
+            elif lower == 'd':
+                out.append(f"{dt.day:02d}" if len(token) >= 2 else str(dt.day))
+            elif lower == 'h':
+                out.append(f"{dt.hour:02d}" if len(token) >= 2 else str(dt.hour))
+            elif lower == 's':
+                out.append(f"{dt.second:02d}" if len(token) >= 2 else str(dt.second))
+            i = j
+            continue
 
-        if token in token_map:
-            fmt_token = token_map[token]
-            try:
-                formatted = dt.strftime(fmt_token)
-                # Remove leading zero for non-zero-padded formats
-                if token == 'm' and literal != '月':
-                    formatted = str(int(formatted))
-                elif token == 'd' and literal != '日':
-                    formatted = str(int(formatted))
-                return formatted + literal
-            except Exception:
-                return match.group(0)
-        return match.group(0)
+        # Ignore Excel-only fill/spacing markers; keep normal literals such as 月/日 and /.
+        if ch in ('_', '*'):
+            i += 2 if i + 1 < len(fmt) else 1
+            continue
+        if ch == '@':
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
 
-    # Replace tokens while preserving literals
-    result = chinese_date_pattern.sub(replace_token, fmt)
-
-    # Handle any remaining tokens that weren't in the pattern
-    # e.g., simple formats like "yyyy/m/d"
-    simple_tokens = {
-        'yyyy': '%Y', 'yy': '%y',
-        'mm': '%m', 'm': '%m',
-        'dd': '%d', 'd': '%d',
-    }
-    for token, strftime_token in simple_tokens.items():
-        if token in result.lower():
-            try:
-                result = dt.strftime(result)
-                break
-            except Exception:
-                pass
-
-    try:
-        return dt.strftime(result)
-    except Exception:
-        return str(value)
+    result = ''.join(out).strip()
+    return result if result else f"{dt.month}/{dt.day}"
 
 
 def format_cell_value(value, number_format):
@@ -255,16 +356,88 @@ def format_cell_value(value, number_format):
 
     return clean_text(value)
 
+def is_percent_number_format(number_format):
+    """Return True when an Excel number format displays a value as a percentage."""
+    if not number_format:
+        return False
+    fmt = str(number_format).split(';')[0]
+    return '%' in fmt
+
+
+def apply_percent_column_semantics(ws, headers, rows, compact_info, data_original_rows, merged_value_map, merged_format_map):
+    """Backfill percentage display for inconsistent General cells in percent columns.
+
+    Some customer workbooks mix correctly formatted percent cells (for example 0%)
+    with plain General cells containing the same semantic value in a column whose
+    header is explicitly a percent field, such as “平台下单服务费5%”. The Excel UI may
+    make the column meaning obvious, but openpyxl would otherwise serialize the
+    General cells as bare numbers like "0". If a header contains "%" and at least
+    one data cell in that column uses a percent number format, normalize numeric
+    General cells in the same column to percent text while preserving already
+    formatted percent strings.
+    """
+    if not headers or not rows:
+        return rows
+
+    for col_idx, header in enumerate(headers):
+        if '%' not in str(header or ''):
+            continue
+        old_col = compact_info.get("new_to_old_col", {}).get(col_idx + 1)
+        if not old_col:
+            continue
+
+        percent_format_count = 0
+        general_numeric_rows = []
+        for row_idx, old_row in enumerate(data_original_rows):
+            if not old_row:
+                continue
+            cell = ws.cell(old_row, old_col)
+            raw_value = merged_value_map.get((old_row, old_col), cell.value)
+            fmt = merged_format_map.get((old_row, old_col), cell.number_format)
+            if is_percent_number_format(fmt):
+                percent_format_count += 1
+                continue
+            if str(fmt or '').lower() == 'general' and isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+                general_numeric_rows.append((row_idx, raw_value))
+
+        if percent_format_count <= 0:
+            continue
+
+        for row_idx, raw_value in general_numeric_rows:
+            if row_idx >= len(rows) or col_idx >= len(rows[row_idx]):
+                continue
+            current = rows[row_idx][col_idx]
+            if current is None or '%' in str(current):
+                continue
+            if abs(float(raw_value)) <= 1:
+                rows[row_idx][col_idx] = format_numeric(raw_value, '0%')
+            else:
+                rows[row_idx][col_idx] = f"{excel_general_number(raw_value)}%"
+
+    return rows
+
 
 def expand_merged_cells(ws):
-    """Return a mapping so every coordinate in a merged range receives the top-left value."""
-    merged_map = {}
+    """Return value/format mappings so merged ranges are faithfully split into cells.
+
+    openpyxl exposes the top-left cell value for a merged range, while the other
+    cells are MergedCell objects that usually have no useful value or display
+    format. Downstream PPT rendering needs the merged area as repeated rows/cells,
+    therefore both the value and the top-left number format must be propagated.
+    This prevents cases such as a merged 0% cell becoming first row "0%" and
+    second row "0".
+    """
+    merged_value_map = {}
+    merged_format_map = {}
     for merged_range in ws.merged_cells.ranges:
-        top_left_value = ws.cell(merged_range.min_row, merged_range.min_col).value
+        top_left_cell = ws.cell(merged_range.min_row, merged_range.min_col)
+        top_left_value = top_left_cell.value
+        top_left_format = top_left_cell.number_format
         for row in range(merged_range.min_row, merged_range.max_row + 1):
             for col in range(merged_range.min_col, merged_range.max_col + 1):
-                merged_map[(row, col)] = top_left_value
-    return merged_map
+                merged_value_map[(row, col)] = top_left_value
+                merged_format_map[(row, col)] = top_left_format
+    return merged_value_map, merged_format_map
 
 
 def extract_images(ws, output_dir):
@@ -311,12 +484,13 @@ def extract_images(ws, output_dir):
     return images
 
 
-def build_value_matrix(ws, merged_map):
+def build_value_matrix(ws, merged_value_map, merged_format_map=None):
     """Build a compacted matrix using cell values only, not image anchors.
 
     This is the most important fidelity rule. Image-only columns/rows are deliberately excluded
     from the table matrix so that PPTX does not render fake blank table columns.
     """
+    merged_format_map = merged_format_map or {}
     raw = []
     row_has_value = set()
     col_has_value = set()
@@ -325,10 +499,9 @@ def build_value_matrix(ws, merged_map):
         row_values = []
         for c in range(1, ws.max_column + 1):
             cell = ws.cell(r, c)
-            # For merged cells, use top-left value from merged_map
-            value = merged_map.get((r, c), cell.value)
-            # Get number_format for formatting
-            number_format = cell.number_format
+            # For merged cells, use the top-left value and top-left display format.
+            value = merged_value_map.get((r, c), cell.value)
+            number_format = merged_format_map.get((r, c), cell.number_format)
             row_values.append(format_cell_value(value, number_format))
             if not is_blank(value):
                 row_has_value.add(r)
@@ -361,17 +534,39 @@ def build_value_matrix(ws, merged_map):
 
 
 def detect_header_row(matrix):
-    """Find the most likely header row after blank row/column compaction."""
+    """Find the most likely header row after blank row/column compaction.
+
+    Merged title rows are expanded across many cells, so simply choosing the
+    first row with two non-empty values can mistake a document title or section
+    grouping row for the actual table header. Score early rows by header-like
+    keywords and value diversity instead.
+    """
     if not matrix:
         return 1
 
+    header_keywords = [
+        "序号", "项目名称", "内容方向", "媒体名称", "发布平台", "见刊日期", "见刊平台",
+        "见刊标题", "见刊链接", "阅读量", "转发", "评论", "点赞", "截图", "备注",
+        "对应rfq", "数量", "单位", "单价", "总价", "金额", "描述部分", "结算部分"
+    ]
     search_rows = matrix[: min(12, len(matrix))]
-    # Prefer the first row with at least two non-empty cells. This avoids using a title row.
+    candidates = []
     for idx, row in enumerate(search_rows, start=1):
-        if sum(1 for v in row if not is_blank(v)) >= 2:
-            return idx
+        values = [str(v).strip() for v in row if not is_blank(v)]
+        if not values:
+            continue
+        norm_values = [re.sub(r"\s+", "", v).lower() for v in values]
+        unique_count = len(set(norm_values))
+        keyword_hits = sum(1 for v in norm_values if any(k.lower() in v for k in header_keywords))
+        repeated_title_penalty = 8 if len(values) >= 3 and unique_count == 1 else 0
+        score = keyword_hits * 10 + unique_count * 2 + min(len(values), 20) * 0.2 - repeated_title_penalty
+        if len(values) >= 2 and (unique_count >= 2 or keyword_hits >= 1):
+            candidates.append((score, idx))
 
-    # Fallback: first non-empty row.
+    if candidates:
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        return candidates[0][1]
+
     for idx, row in enumerate(search_rows, start=1):
         if any(not is_blank(v) for v in row):
             return idx
@@ -468,30 +663,32 @@ def find_row_value_by_headers(headers, row_values, keywords):
 
 def infer_voucher_label(column_name):
     text = normalize_match_text(column_name)
-    if "发票" in text:
-        return "发票凭证"
-    if "付款" in text or "支付" in text or "打款" in text or "转账" in text:
-        return "付款凭证"
-    if "数据截图" in text or ("数据" in text and "截图" in text):
-        return "数据截图"
-    if "截图" in text:
-        return "数据截图"
-    if "合同" in text:
-        return "合同凭证"
-    if "凭证" in text:
+    if "鍙戠エ" in text:
+        return "鍙戠エ鍑瘉"
+    if "浠樻" in text or "鏀粯" in text or "鎵撴" in text or "杞处" in text:
+        return "浠樻鍑瘉"
+    if "鏁版嵁鎴浘" in text or ("鏁版嵁" in text and "鎴浘" in text):
+        return "鏁版嵁鎴浘"
+    if "鎴浘" in text:
+        return "鏁版嵁鎴浘"
+    if "鍚堝悓" in text:
+        return "鍚堝悓鍑瘉"
+    if "鍑瘉" in text:
         return column_name
-    return column_name or "图片凭证"
+    return column_name or "鍥剧墖鍑瘉"
 
 
 def build_image_caption(headers, row_values, column_name, data_row_idx):
-    """Build image caption as {发布平台列的内容}-{媒体名称列的内容}-{图片所在列的名字}.
+    """Build image caption as {鍙戝竷骞冲彴鍒楃殑鍐呭}-{濯掍綋鍚嶇О鍒楃殑鍐呭}-{鍥剧墖鎵€鍦ㄥ垪鐨勫悕瀛梷.
 
-    Uses exact column name matching to find 发布平台 and 媒体名称 values,
+    Uses exact column name matching to find 鍙戝竷骞冲彴 and 濯掍綋鍚嶇О values,
     then uses the actual cell values from those columns for the current row.
     The column_name (voucher type) is used as-is without inference.
     """
+    sequence_col_idx = None
     platform_col_idx = None
     media_col_idx = None
+    has_daren_header = False
 
     for idx, header in enumerate(headers or []):
         if idx >= len(row_values):
@@ -499,30 +696,40 @@ def build_image_caption(headers, row_values, column_name, data_row_idx):
         h = normalize_match_text(header)
         if not h:
             continue
+        if sequence_col_idx is None and h == "序号":
+            if row_values[idx] is not None and str(row_values[idx]).strip() != "":
+                sequence_col_idx = idx
         if platform_col_idx is None and "发布平台" in h:
             if row_values[idx] is not None and str(row_values[idx]).strip() != "":
                 platform_col_idx = idx
         if media_col_idx is None:
             media_keywords = ["媒体名称", "媒体名", "达人", "账号名称", "账号", "名称", "kol", "koc"]
+            if "达人" in h:
+                has_daren_header = True
             if any(normalize_match_text(k) in h for k in media_keywords):
                 if row_values[idx] is not None and str(row_values[idx]).strip() != "":
                     media_col_idx = idx
 
+    sequence = row_values[sequence_col_idx] if sequence_col_idx is not None and sequence_col_idx < len(row_values) else None
     platform = row_values[platform_col_idx] if platform_col_idx is not None and platform_col_idx < len(row_values) else None
     media = row_values[media_col_idx] if media_col_idx is not None and media_col_idx < len(row_values) else None
 
-    return "-".join([
+    media_fallback = "未知达人" if has_daren_header else "未知媒体"
+    parts = [
         caption_safe(platform, "未知平台"),
-        caption_safe(media, f"第{data_row_idx + 1}行"),
+        caption_safe(media, media_fallback),
         caption_safe(column_name, "图片凭证"),
-    ])
+    ]
+    if sequence is not None and str(sequence).strip() != "":
+        parts.insert(0, caption_safe(sequence, f"第{data_row_idx + 1}"))
+    return "-".join(parts)
 
 
 def parse_sheet(ws, output_dir):
     """Parse a worksheet into faithful table data plus independent image metadata."""
-    merged_map = expand_merged_cells(ws)
+    merged_value_map, merged_format_map = expand_merged_cells(ws)
     images = extract_images(ws, output_dir)
-    compact_info = build_value_matrix(ws, merged_map)
+    compact_info = build_value_matrix(ws, merged_value_map, merged_format_map)
     matrix = compact_info["matrix"]
 
     if not matrix:
@@ -552,7 +759,8 @@ def parse_sheet(ws, output_dir):
     headers = build_headers(matrix, header_row, header_end)
     width = len(headers)
 
-    required_cols = [i for i, h in enumerate(headers) if h and "必填" in h]
+    optional_cols = [i for i, h in enumerate(headers) if is_non_required_header(h)]
+    required_cols = [i for i in range(len(headers)) if i not in optional_cols]
 
     data_start = header_end + 1
     rows = []
@@ -567,10 +775,17 @@ def parse_sheet(ws, output_dir):
             rows.append(row_values)
             data_original_rows.append(compact_info["new_to_old_row"].get(compact_r))
 
+    rows = apply_percent_column_semantics(
+        ws, headers, rows, compact_info, data_original_rows, merged_value_map, merged_format_map
+    )
+
     image_row_map = {}
     image_col_map = {}
     row_image_counts = {}
     image_cols_original = set()
+
+    filtered_images = []
+    excluded_images = []
 
     for img in images:
         if not img.get("file"):
@@ -580,22 +795,41 @@ def parse_sheet(ws, output_dir):
             continue
 
         col_name, data_col_index = infer_image_column_name(img, headers, compact_info)
+        old_col = img.get("anchor_col_index_original")
+        mapped_col_index = compact_info["old_to_new_col"].get(old_col) - 1 if old_col in compact_info["old_to_new_col"] else None
+        header_for_filter = None
+        if data_col_index is not None and 0 <= data_col_index < len(headers):
+            header_for_filter = headers[data_col_index]
+        elif mapped_col_index is not None and 0 <= mapped_col_index < len(headers):
+            header_for_filter = headers[mapped_col_index]
+        else:
+            header_for_filter = col_name
+
+        # Highest-priority exclusion: any image anchored to or inferred from a
+        # column whose header contains “非必填 / PPT非必填” must have no relation to
+        # the final PPTX, including image pages and captions.
+        if is_non_required_header(header_for_filter) or is_non_required_header(col_name):
+            img["excluded_from_pptx"] = True
+            img["exclude_reason"] = "非必填列"
+            excluded_images.append(img)
+            continue
+
         row_values_for_caption = rows[data_row_idx] if 0 <= data_row_idx < len(rows) else []
         img["data_row_index"] = data_row_idx
         img["data_row_number"] = data_row_idx + 1
         img["data_col_index"] = data_col_index
         img["column_name"] = col_name
         img["caption"] = build_image_caption(headers, row_values_for_caption, col_name, data_row_idx)
-        img["caption_rule"] = "发布平台-媒体名称-凭证类型"
+        img["caption_rule"] = "鍙戝竷骞冲彴-濯掍綋鍚嶇О-鍑瘉绫诲瀷"
         img["belongs_to_table_column"] = data_col_index is not None
         img["anchor_row"] = compact_info["old_to_new_row"].get(img.get("anchor_row_original"))
         img["anchor_col_index"] = compact_info["old_to_new_col"].get(img.get("anchor_col_index_original"))
         img["anchor_col"] = get_column_letter(img["anchor_col_index"]) if img.get("anchor_col_index") else None
 
+        filtered_images.append(img)
         rkey = str(data_row_idx)
         image_row_map.setdefault(rkey, []).append(img)
         row_image_counts[data_row_idx] = row_image_counts.get(data_row_idx, 0) + 1
-        old_col = img.get("anchor_col_index_original")
         if old_col:
             image_cols_original.add(old_col)
             image_col_map.setdefault(str(old_col), []).append(img)
@@ -607,7 +841,8 @@ def parse_sheet(ws, output_dir):
         "headers": headers,
         "required_col_indices": required_cols,
         "data": rows,
-        "images": images,
+        "images": filtered_images,
+        "excluded_images": excluded_images,
         "image_row_map": image_row_map,
         "image_col_map": image_col_map,
         "image_column_count": len(image_cols_original),
@@ -629,9 +864,10 @@ def parse_sheet(ws, output_dir):
 
 
 def detect_summary_sheet(sheets):
-    """Prefer a sheet named 汇总; otherwise do not guess too aggressively."""
+    """Prefer a sheet named 姹囨€? otherwise do not guess too aggressively."""
     for i, sheet in enumerate(sheets):
-        if "汇总" in sheet.get("name", "") or "summary" in sheet.get("name", "").lower():
+        name = str(sheet.get("name", ""))
+        if ("汇总" in name) or ("summary" in name.lower()):
             return i
     return -1
 
@@ -649,7 +885,7 @@ def normalize_match_text(value):
     if value is None:
         return ""
     text = str(value).strip().lower()
-    for token in ["（必填）", "(必填)", "必填"]:
+    for token in ["锛堝繀濉級", "(蹇呭～)", "蹇呭～", "（必填）", "(必填)", "必填", "（非必填）", "(非必填)", "非必填"]:
         text = text.replace(token, "")
     text = re.sub(r"\s+", "", text)
     return text
@@ -694,51 +930,50 @@ def make_summary_context(summary, summary_headers, summary_row, summary_row_inde
 def detail_sheet_summary_rows(summary_headers, summary_rows, detail_name, detail_order):
     """Return summary row indexes that belong to a detail sheet.
 
-    Prefer explicit block/module columns and leading numeric prefixes such as
-    `4-媒体合作-平台下单` ↔ `4-媒体合作-平台单链接`. This handles expanded merged
-    cells where many summary rows belong to one detail sheet.
+    Business rule: the detail sheet should be merged only with the portion of the
+    summary sheet whose FIRST COLUMN corresponds to the detail sheet name. Do not
+    match against other columns such as 发布平台 / 内容形式, because values like
+    “视频号” may appear in unrelated summary rows and would pollute the detail PPT.
     """
     if not summary_rows:
         return []
     if len(summary_rows) == 1:
         return [0]
 
-    detail_num = extract_leading_number(detail_name)
-    group_cols = find_header_indices(summary_headers, ["板块", "版块", "模块", "项目", "分类", "描述方向", "合作类型"])
-    if not group_cols:
-        group_cols = list(range(min(3, len(summary_headers))))
+    def strip_sequence(text):
+        return re.sub(r"^\s*\d+[-_、，.．\s]*", "", str(text or "")).strip()
 
+    detail_text = strip_sequence(detail_name)
+    detail_norm = normalize_match_text(detail_text)
+    if not detail_norm:
+        return []
+
+    # Primary rule: exact normalized match against summary-table first column.
     matched = []
-    if detail_num:
-        prefix = f"{detail_num}-"
-        for ridx, row in enumerate(summary_rows):
-            values = [str(row[i]).strip() for i in group_cols if i < len(row) and row[i] is not None]
-            if any(v.startswith(prefix) for v in values):
-                matched.append(ridx)
-        if matched:
-            return matched
-
-    detail_norm = normalize_match_text(re.sub(r"^\s*\d+[-_、.．]?", "", str(detail_name or "")))
-    token_parts = [p for p in re.split(r"[-_、/\s]+", detail_norm) if p]
     for ridx, row in enumerate(summary_rows):
-        values = [normalize_match_text(row[i]) for i in group_cols if i < len(row) and row[i] is not None]
-        if any(detail_norm and detail_norm in v for v in values):
-            matched.append(ridx)
-        elif token_parts and any(any(p and p in v for p in token_parts) for v in values):
+        first_value = row[0] if row else None
+        first_norm = normalize_match_text(strip_sequence(first_value))
+        if first_norm and first_norm == detail_norm:
             matched.append(ridx)
     if matched:
         return matched
 
-    # Backward-compatible fallback: one summary row per detail sheet by order.
-    fallback_idx = detail_order if detail_order < len(summary_rows) else len(summary_rows) - 1
-    return [fallback_idx]
+    # Do not perform fuzzy / token-based fallback for multi-row summary sheets.
+    # A detail sheet may only inherit rows whose summary-table FIRST COLUMN exactly
+    # corresponds to that detail sheet name after normalized cleanup. Composite sheet
+    # names such as “A+B” are intentionally not expanded to “A” and “B”, because this
+    # can mix unrelated summary blocks into the detail PPT.
+
+    # Avoid order-based fallback for multi-row summary sheets. Returning an empty
+    # list is safer than attaching unrelated summary rows to a detail PPT.
+    return []
 
 
 def build_summary_row_map(detail, summary_contexts):
     """Map detail data row indexes to matched summary row contexts.
 
-    The main use case is settlement files where detail rows have `达人` while
-    summary rows have `媒体名称（必填）`. Header aliases are intentionally broad,
+    The main use case is settlement files where detail rows have `杈句汉` while
+    summary rows have `濯掍綋鍚嶇О锛堝繀濉級`. Header aliases are intentionally broad,
     but values must match exactly after whitespace / required-marker cleanup.
     """
     if not summary_contexts:
@@ -785,7 +1020,7 @@ def attach_summary_associations(sheets, summary_idx):
     Rules:
       - One summary data row: attach the same row to all detail sheets, display on the first page only.
       - Multiple summary rows with block/module prefixes: attach all rows in the matching block to the detail sheet.
-      - If multiple attached summary rows can be matched to detail row values (e.g. detail `达人` ↔ summary `媒体名称`),
+      - If multiple attached summary rows can be matched to detail row values (e.g. detail `杈句汉` 鈫?summary `濯掍綋鍚嶇О`),
         downstream layout should render only the summary rows corresponding to the current page's detail rows.
       - Fallback remains one summary row per detail sheet by order.
     """
@@ -892,3 +1127,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

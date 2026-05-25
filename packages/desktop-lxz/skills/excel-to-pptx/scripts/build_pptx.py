@@ -1,7 +1,7 @@
-"""
-PPTX Builder — excel-to-pptx skill
-根据 Layout Plan JSON 生成 PPTX 文件。
-支持 per-page theme（来自不同 PPTX 模板）、多图片布局和图片下标。
+﻿"""
+PPTX Builder 鈥?excel-to-pptx skill
+鏍规嵁 Layout Plan JSON 鐢熸垚 PPTX 鏂囦欢銆?
+鏀寔 per-page theme锛堟潵鑷笉鍚?PPTX 妯℃澘锛夈€佸鍥剧墖甯冨眬鍜屽浘鐗囦笅鏍囥€?
 
 Usage:
   python build_pptx.py <layout_plan.json> --output <output.pptx> [--theme default.json]
@@ -168,15 +168,63 @@ def get_page_dims(page, default_w, default_h):
     return default_w, default_h
 
 
+def get_blank_layout(prs):
+    """Return the best blank-like layout from the active presentation/template."""
+    layouts = list(prs.slide_layouts)
+    if not layouts:
+        raise RuntimeError("PPTX contains no slide layouts")
+    for layout in layouts:
+        lname = (getattr(layout, "name", "") or "").lower()
+        if "blank" in lname or "空白" in lname:
+            return layout
+    return min(layouts, key=lambda layout: len(layout.placeholders))
+
+
+def remove_generated_placeholders(slide):
+    """Remove editable placeholders cloned from a template layout.
+
+    Some user PPTX templates expose title placeholders such as "点击此处添加标题"
+    even when their visual design is otherwise correct. Generated slides add their
+    own title/table/image shapes, so cloned placeholders should be removed while
+    preserving master/layout background artwork and theme information.
+    """
+    for shp in list(slide.shapes):
+        if getattr(shp, "is_placeholder", False):
+            element = shp._element
+            parent = element.getparent()
+            if parent is not None:
+                parent.remove(element)
+
+
+def add_blank_slide(prs):
+    """Add a generated slide using the current presentation's own layout set."""
+    slide = prs.slides.add_slide(get_blank_layout(prs))
+    remove_generated_placeholders(slide)
+    return slide
+
+
+def clear_template_slides(prs):
+    """Remove sample slides from a template while preserving masters, layouts and theme."""
+    slide_id_list = prs.slides._sldIdLst
+    for slide_id in list(slide_id_list):
+        rel_id = slide_id.rId
+        prs.part.drop_rel(rel_id)
+        slide_id_list.remove(slide_id)
+
+
 def build_cover(prs, page, theme, sw, sh):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide = add_blank_slide(prs)
     tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
     tf_name = theme.get("title_font", "Microsoft YaHei")
 
-    add_text(slide, page["title"], 2, sh * 0.3, sw - 4, 3, tf_name, 36, tc_rgb, True, PP_ALIGN.CENTER)
+    title_h = 2.2
+    title_box = add_text(slide, page["title"], 2, (sh - title_h) / 2, sw - 4, title_h,
+                         tf_name, 36, tc_rgb, True, PP_ALIGN.CENTER)
+    title_box.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
 
     accent = ensure_rgb(theme.get("accent"), RGBColor(0x1B, 0x36, 0x5D))
-    line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, cm(sw * 0.3), cm(sh * 0.52), cm(sw * 0.4), cm(0.08))
+    line_y = (sh - title_h) / 2 + title_h + 0.25
+    line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, cm(sw * 0.3), cm(line_y), cm(sw * 0.4), cm(0.08))
     line.fill.solid()
     line.fill.fore_color.rgb = accent
     line.line.fill.background()
@@ -184,10 +232,10 @@ def build_cover(prs, page, theme, sw, sh):
 
 
 def build_toc(prs, page, theme, sw, sh):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide = add_blank_slide(prs)
     tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
     tf_name = theme.get("title_font", "Microsoft YaHei")
-    add_text(slide, "目录", 1.5, 0.8, 10, 1.2, tf_name, 28, tc_rgb, True)
+    add_text(slide, "鐩綍", 1.5, 0.8, 10, 1.2, tf_name, 28, tc_rgb, True)
 
     y = 3.0
     for item in page.get("sheets", []):
@@ -199,21 +247,24 @@ def build_toc(prs, page, theme, sw, sh):
 
 
 def build_summary(prs, page, theme, sw, sh):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide = add_blank_slide(prs)
     tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
     tf_name = theme.get("title_font", "Microsoft YaHei")
     add_text(slide, page.get("name", "汇总"), 1.5, 0.8, sw - 3, 1.2, tf_name, 24, tc_rgb, True)
 
     headers = page.get("headers", [])
     data = page.get("data", [])
-    if data:
+    col_indices = select_summary_columns(headers, data)
+    if data and col_indices:
         y = 3.0
         for row in data[:10]:
             parts = []
-            for ci, val in enumerate(row):
+            for ci in col_indices:
+                val = row[ci] if ci < len(row) else None
                 if ci < len(headers) and headers[ci] and val is not None:
                     parts.append(f"{headers[ci]}: {str(val)[:30]}")
-            add_text(slide, "  |  ".join(parts[:4]), 2, y, sw - 4, 0.6,
+            text = "  |  ".join(parts)
+            add_text(slide, text, 2, y, sw - 4, 0.6,
                      theme.get("body_font", tf_name), 9, RGBColor(0x33, 0x33, 0x33))
             y += 0.6
     return slide
@@ -248,24 +299,23 @@ def compact_row_numbers(row_numbers):
     return ",".join(str(n) for n in nums)
 
 
-def select_summary_columns(headers, rows, max_cols=10):
-    priority = ["板块", "版块", "描述方向", "媒体名称", "达人", "平台单价", "执行单价", "数量", "单位", "执行总价", "对应RFQ", "备注", "发布平台"]
-    candidates = []
-    for key in priority:
-        for i, h in enumerate(headers or []):
-            if i in candidates:
-                continue
-            if key.lower() in str(h or "").lower().replace("（必填）", ""):
-                candidates.append(i)
-                break
-    for i, h in enumerate(headers or []):
-        if i in candidates:
-            continue
-        if any(i < len(row) and row[i] is not None and str(row[i]).strip() != "" for row in rows):
-            candidates.append(i)
-        if len(candidates) >= max_cols:
-            break
-    return candidates[:max_cols]
+def is_non_required_header(header):
+    """Return True when a column header explicitly marks the column as 非必填/PPT非必填."""
+    if header is None:
+        return False
+    normalized = str(header).replace(" ", "").replace("\n", "").lower()
+    markers = ["非必填", "(非必填)", "（非必填）", "ppt非必填", "非必填列"]
+    return any(marker in normalized for marker in markers)
+
+
+def select_summary_columns(headers, rows=None):
+    """Select summary columns with the same global rule used for tables.
+
+    Do not apply a priority list or max-column cap here. A matched summary block
+    inside a detail PPTX must show the same summary fields as the standalone
+    summary PPTX, except columns explicitly marked as 非必填/PPT非必填.
+    """
+    return [i for i, h in enumerate(headers or []) if not is_non_required_header(h)]
 
 
 def draw_summary_rows_table(slide, summary_context, summary_area, theme, shape):
@@ -285,29 +335,54 @@ def draw_summary_rows_table(slide, summary_context, summary_area, theme, shape):
     row_numbers = summary_context.get("summary_row_numbers") or []
     row_label = compact_row_numbers(row_numbers)
     note = summary_context.get("match_note") or ""
-    prefix = f"{summary_context.get('summary_sheet_name', '汇总')}对应行：{row_label}"
+    prefix = f"{summary_context.get('summary_sheet_name', '汇总')} 对应行: {row_label}"
     if note:
-        prefix = f"{prefix}（{note}）"
-    add_text(slide, prefix, x + 0.18, y + 0.06, w - 0.36, 0.3,
-             title_font, 7, accent, True, PP_ALIGN.LEFT)
+        prefix = f"{prefix} ({note})"
 
     col_indices = select_summary_columns(headers, rows)
     if not col_indices:
         return shape
 
-    table_x = x + 0.18
-    table_y = y + 0.40
     table_w = max(1.0, w - 0.36)
-    table_h = max(0.45, h - 0.48)
+    available_table_h = max(0.45, h - 0.48)
     row_count = len(rows) + 1
     col_count = len(col_indices) + 1
-    table_shape = slide.shapes.add_table(row_count, col_count, cm(table_x), cm(table_y), cm(table_w), cm(table_h))
+    header_h = 0.34
+    data_row_h = 0.28
+    desired_table_h = header_h + max(1, len(rows)) * data_row_h
+    table_h = min(max(0.45, desired_table_h), available_table_h)
+    block_y = y
+    summary_widths = [0.9]
+    for ci in col_indices:
+        header_text = headers[ci] if ci < len(headers) else f"列{ci + 1}"
+        sample_values = [row[ci] if ci < len(row) else "" for row in rows[:3]]
+        max_len = max([len(str(header_text))] + [len(str(v)) for v in sample_values])
+        summary_widths.append(min(4.2, max(1.15, max_len * 0.18 + 0.55)))
+    summary_widths, actual_table_w = fit_col_widths(summary_widths, table_w, col_count)
+    table_x = x + 0.18
+    table_y = block_y + 0.40
+    add_text(slide, prefix, x + 0.18, block_y + 0.06, w - 0.36, 0.3,
+             title_font, 7, accent, True, PP_ALIGN.LEFT)
+    table_shape = slide.shapes.add_table(row_count, col_count, cm(table_x), cm(table_y), cm(actual_table_w), cm(table_h))
     table = table_shape.table
 
-    widths = [0.9] + [max(0.8, (table_w - 0.9) / max(1, len(col_indices)))] * len(col_indices)
-    total = sum(widths)
-    for c, width in enumerate(widths):
-        table.columns[c].width = cm(width / total * table_w)
+    if table_h < desired_table_h:
+        scale = table_h / max(0.01, desired_table_h)
+        actual_header_h = max(0.18, header_h * scale)
+        actual_data_h = max(0.18, data_row_h * scale)
+    else:
+        actual_header_h = header_h
+        actual_data_h = data_row_h
+    for i in range(row_count):
+        table.rows[i].height = cm(actual_header_h if i == 0 else actual_data_h)
+        tr = table.rows[i]._tr
+        trPr = tr.find(f'{{{NS_A}}}trPr')
+        if trPr is None:
+            trPr = etree.SubElement(tr, f'{{{NS_A}}}trPr')
+        trPr.set('hRule', 'exact')
+
+    for c, width in enumerate(summary_widths):
+        table.columns[c].width = cm(width)
 
     font_size = 5
     border_rgb = ensure_rgb(theme.get("border_color"), RGBColor(0x00, 0x00, 0x00))
@@ -347,11 +422,24 @@ def draw_summary_context(slide, summary_context, summary_area, theme):
     return draw_summary_rows_table(slide, single_row_context, summary_area, theme, None)
 
 
-def normalize_col_widths(col_widths, available_w, num_cols):
+def fit_col_widths(col_widths, available_w, num_cols):
+    """Fit column widths to the available page width for dense, full-width tables."""
     total_w = sum(col_widths) if col_widths else 0
     if total_w > 0:
-        return [w / total_w * available_w for w in col_widths]
-    return [available_w / max(num_cols, 1)] * num_cols
+        widths = list(col_widths)
+    else:
+        widths = [1.2] * max(num_cols, 1)
+        total_w = sum(widths)
+
+    if available_w <= 0:
+        return widths, total_w
+
+    if total_w > 0:
+        scale = available_w / total_w
+        widths = [w * scale for w in widths]
+    else:
+        widths = [available_w / max(num_cols, 1)] * max(num_cols, 1)
+    return widths, available_w
 
 
 def draw_table(slide, headers, rows, col_widths, table_area, font_size, theme):
@@ -373,14 +461,16 @@ def draw_table(slide, headers, rows, col_widths, table_area, font_size, theme):
     table_available_w = table_area.get("w_cm", 20)
     table_available_h = table_area.get("h_cm", 10)
 
-    col_widths_norm = normalize_col_widths(col_widths, table_available_w, num_cols)
+    col_widths_norm, actual_table_w = fit_col_widths(col_widths, table_available_w, num_cols)
     row_h = min(0.48, max(0.24, table_available_h / num_rows))
     table_h = min(row_h * num_rows, table_available_h)
+    actual_left = table_left
+    actual_top = table_top
 
     table_shape = slide.shapes.add_table(
         num_rows, num_cols,
-        cm(table_left), cm(table_top),
-        cm(table_available_w), cm(table_h)
+        cm(actual_left), cm(actual_top),
+        cm(actual_table_w), cm(table_h)
     )
     table = table_shape.table
 
@@ -434,9 +524,22 @@ def draw_image_grid(slide, images, image_area, image_grid, theme):
     ia_w = image_area.get("w_cm", 8)
     ia_h = image_area.get("h_cm", 10)
 
-    cell_w = max(0.5, (ia_w - gap * (cols - 1)) / cols)
-    cell_h = max(0.5, (ia_h - gap * (rows - 1)) / rows)
+    target_px = float((image_grid or {}).get("target_max_px", 300))
+    target_cm = (target_px / 96.0) * 2.54 if target_px > 0 else None
+    raw_cell_w = max(0.5, (ia_w - gap * (cols - 1)) / cols)
+    raw_cell_h = max(0.5, (ia_h - gap * (rows - 1)) / rows)
+    if target_cm:
+        cell_w = min(raw_cell_w, target_cm + 0.45)
+        cell_h = min(raw_cell_h, target_cm + caption_h + 0.45)
+    else:
+        cell_w = raw_cell_w
+        cell_h = raw_cell_h
+    grid_w = cell_w * cols + gap * (cols - 1)
+    grid_h = cell_h * rows + gap * (rows - 1)
+    grid_x = ia_x + max(0.0, (ia_w - grid_w) / 2)
+    grid_y = ia_y + max(0.0, (ia_h - grid_h) / 2)
     pic_h_limit = max(0.3, cell_h - caption_h)
+    fill_order = (image_grid or {}).get("fill_order", "column_major")
 
     bf_name = theme.get("body_font", theme.get("title_font", "Microsoft YaHei"))
     caption_color = RGBColor(0x55, 0x55, 0x55)
@@ -445,18 +548,25 @@ def draw_image_grid(slide, images, image_area, image_grid, theme):
         img_file = img_info.get("file")
         if not img_file or not os.path.exists(img_file):
             continue
-        col_j = j % cols
-        row_j = j // cols
-        if row_j >= rows:
+        if fill_order == "column_major":
+            col_j = j // rows
+            row_j = j % rows
+        else:
+            col_j = j % cols
+            row_j = j // cols
+        if row_j >= rows or col_j >= cols:
             break
-        cell_x = ia_x + col_j * (cell_w + gap)
-        cell_y = ia_y + row_j * (cell_h + gap)
+        cell_x = grid_x + col_j * (cell_w + gap)
+        cell_y = grid_y + row_j * (cell_h + gap)
         try:
             pil_img = Image.open(img_file)
             pw_px, ph_px = pil_img.size
             pw_cm = pw_px / 96 * 2.54
             ph_cm = ph_px / 96 * 2.54
-            scale = min((cell_w - 0.05) / max(pw_cm, 0.01), pic_h_limit / max(ph_cm, 0.01), 1.0)
+            scale_limits = [(cell_w - 0.05) / max(pw_cm, 0.01), pic_h_limit / max(ph_cm, 0.01), 1.0]
+            if target_cm:
+                scale_limits.append(target_cm / max(pw_cm, ph_cm, 0.01))
+            scale = min(scale_limits)
             final_w = max(0.1, pw_cm * scale)
             final_h = max(0.1, ph_cm * scale)
             x = cell_x + (cell_w - final_w) / 2
@@ -471,7 +581,7 @@ def draw_image_grid(slide, images, image_area, image_grid, theme):
 
 
 def build_table_page(prs, page, theme, sw, sh):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide = add_blank_slide(prs)
 
     sheet_name = page.get("sheet_name", "")
     page_idx = page.get("page_index", 0)
@@ -486,7 +596,7 @@ def build_table_page(prs, page, theme, sw, sh):
     tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
     tf_name = theme.get("title_font", "Microsoft YaHei")
 
-    # 每页主标题只使用分页表格的 sheet 名；页码作为弱化辅助信息显示。
+    # 姣忛〉涓绘爣棰樺彧浣跨敤鍒嗛〉琛ㄦ牸鐨?sheet 鍚嶏紱椤电爜浣滀负寮卞寲杈呭姪淇℃伅鏄剧ず銆?
     title_text = page.get("title") or sheet_name
     add_text(slide, title_text, 0.8, 0.25, sw - 4.2, 0.8, tf_name, 18, tc_rgb, True)
     if page_total > 1:
@@ -511,8 +621,21 @@ def build_table_page(prs, page, theme, sw, sh):
     return slide
 
 
+def build_summary_context_page(prs, page, theme, sw, sh):
+    slide = add_blank_slide(prs)
+    tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
+    tf_name = theme.get("title_font", "Microsoft YaHei")
+    title_text = page.get("title") or f"{page.get('sheet_name', 'Sheet')} 汇总信息"
+    add_text(slide, title_text, 0.8, 0.25, sw - 4.2, 0.8, tf_name, 18, tc_rgb, True)
+    if page.get("page_total", 1) > 1:
+        add_text(slide, f"{page.get('page_index', 0) + 1}/{page.get('page_total', 1)}", sw - 3.2, 0.35, 2.4, 0.5,
+                 tf_name, 9, RGBColor(0x88, 0x88, 0x88), False, PP_ALIGN.RIGHT)
+    draw_summary_context(slide, page.get("summary_context"), page.get("summary_area"), theme)
+    return slide
+
+
 def build_image_page(prs, page, theme, sw, sh):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide = add_blank_slide(prs)
     tc_rgb = ensure_rgb(theme.get("title_color"), RGBColor(0x1B, 0x36, 0x5D))
     tf_name = theme.get("title_font", "Microsoft YaHei")
     add_text(slide, page.get("sheet_name", "图片"), 0.8, 0.3, sw - 1.6, 0.9, tf_name, 18, tc_rgb, True)
@@ -542,22 +665,30 @@ def build_image_page(prs, page, theme, sw, sh):
     return slide
 
 
-def build_pptx(layout_plan, output_path, theme_path=None):
+def build_pptx(layout_plan, output_path, theme_path=None, template_path=None):
     global_theme = {}
     if theme_path and os.path.exists(theme_path):
         with open(theme_path, encoding="utf-8") as f:
             global_theme = json.load(f)
     global_theme_obj = make_theme(global_theme)
 
-    default_orient = layout_plan.get("orientation", "portrait")
-    if default_orient == "landscape":
-        default_w, default_h = 33.867, 19.05
-    else:
-        default_w, default_h = SLIDE_W_CM, SLIDE_H_CM
+    template_path = template_path or layout_plan.get("template_file_path")
+    template_used = bool(template_path and os.path.exists(template_path))
 
-    prs = Presentation()
-    prs.slide_width = cm(default_w)
-    prs.slide_height = cm(default_h)
+    if template_used:
+        prs = Presentation(template_path)
+        default_w = prs.slide_width / EMU_PER_CM
+        default_h = prs.slide_height / EMU_PER_CM
+        clear_template_slides(prs)
+    else:
+        default_orient = layout_plan.get("orientation", "portrait")
+        if default_orient == "landscape":
+            default_w, default_h = 33.867, 19.05
+        else:
+            default_w, default_h = SLIDE_W_CM, SLIDE_H_CM
+        prs = Presentation()
+        prs.slide_width = cm(default_w)
+        prs.slide_height = cm(default_h)
 
     for page in layout_plan.get("pages", []):
         page_type = page.get("type")
@@ -573,6 +704,8 @@ def build_pptx(layout_plan, output_path, theme_path=None):
             build_toc(prs, page, ptheme, psw, psh)
         elif page_type == "summary":
             build_summary(prs, page, ptheme, psw, psh)
+        elif page_type == "summary_context":
+            build_summary_context_page(prs, page, ptheme, psw, psh)
         elif page_type == "table":
             build_table_page(prs, page, ptheme, psw, psh)
         elif page_type == "images":
@@ -580,7 +713,7 @@ def build_pptx(layout_plan, output_path, theme_path=None):
 
     prs.save(output_path)
     fsize = os.path.getsize(output_path)
-    print(f"✅ PPTX saved: {output_path} ({fsize/1024:.0f}KB, {len(layout_plan.get('pages',[]))} pages)", file=sys.stderr)
+    print(f"鉁?PPTX saved: {output_path} ({fsize/1024:.0f}KB, {len(layout_plan.get('pages',[]))} pages)", file=sys.stderr)
     return output_path
 
 
@@ -589,13 +722,15 @@ def main():
     parser.add_argument("input", help="Layout plan JSON")
     parser.add_argument("--output", "-o", required=True, help="Output .pptx path")
     parser.add_argument("--theme", help="Default theme JSON file")
+    parser.add_argument("--template", help="PPTX template file to use as the actual presentation base")
     args = parser.parse_args()
 
     with open(args.input, encoding="utf-8") as f:
         plan = json.load(f)
 
-    build_pptx(plan, args.output, args.theme)
+    build_pptx(plan, args.output, args.theme, args.template)
 
 
 if __name__ == "__main__":
     main()
+

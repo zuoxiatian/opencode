@@ -1,6 +1,6 @@
 {
-  "schema_name": "settlement_original_input_v1",
-  "description": "Standard schema inferred from 结算原始输入文件-测试002.xlsx for pre-validating Excel before excel-to-pptx conversion.",
+  "schema_name": "settlement_original_input_v5_3",
+  "description": "Standard schema for pre-validating settlement original-input Excel before excel-to-pptx conversion. Version 5.3 treats the first worksheet as the summary sheet, matches the first summary column with subsequent detail sheet names, checks non-optional text fields in the data region, allows image-free worksheets, and enforces row-level completeness only for columns where real embedded images are detected.",
   "strict_sheet_names": [
     "汇总",
     "1-车马费合作-云评",
@@ -10,7 +10,10 @@
     "5-媒体合作-平台多链接",
     "6-差旅"
   ],
-  "summary_sheet_keywords": ["汇总", "summary"],
+  "summary_sheet_keywords": [
+    "汇总",
+    "summary"
+  ],
   "summary_required_headers": [
     "板块（必填）",
     "描述方向（必填）",
@@ -23,41 +26,188 @@
     "对应RFQ（必填）",
     "备注（必填）"
   ],
+  "image_naming_required_fields": [
+    {
+      "canonical": "序号",
+      "aliases": [
+        "序号",
+        "编号",
+        "序列",
+        "行号",
+        "No",
+        "No.",
+        "ID",
+        "id"
+      ]
+    },
+    {
+      "canonical": "发布平台",
+      "aliases": [
+        "发布平台",
+        "平台",
+        "发布渠道",
+        "渠道",
+        "媒体平台",
+        "投放平台"
+      ]
+    },
+    {
+      "canonical": "媒体名称",
+      "aliases": [
+        "媒体名称",
+        "媒体",
+        "媒体名",
+        "账号名称",
+        "账号",
+        "达人",
+        "达人名称",
+        "KOL",
+        "KOL名称",
+        "博主",
+        "作者",
+        "媒体/达人",
+        "媒体或达人",
+        "媒体账号"
+      ]
+    }
+  ],
+  "content_completeness": {
+    "enabled": true,
+    "check_all_detected_columns": true,
+    "check_image_like_headers": false,
+    "blank_rows_blocking": true,
+    "partial_columns_blocking": true,
+    "min_fill_ratio_to_check": 0.0,
+    "min_text_fill_ratio_to_check": 0.0,
+    "optional_headers": [],
+    "optional_header_keywords": [
+      "备注",
+      "说明",
+      "补充",
+      "其他",
+      "可选"
+    ],
+    "excluded_row_keywords": [
+      "合计",
+      "汇总",
+      "小计",
+      "总计",
+      "说明",
+      "备注",
+      "注:",
+      "注："
+    ],
+    "excluded_row_max_non_formula_cells": 2,
+    "enforce_image_columns": false,
+    "enforce_all_detected_image_columns": false,
+    "enforce_detected_image_columns": true,
+    "enforce_required_image_headers": false,
+    "image_headers_optional": true
+  },
   "detail_sheets": {
     "1-车马费合作-云评": {
-      "critical_headers": ["序号（必填）", "类型（必填）", "发布平台（必填）", "媒体名称（必填）", "见刊标题（必填）", "见刊链接（必填）", "见刊截图（必填）", "播放量（必填）", "互动量（必填）"],
+      "critical_headers": [
+        "序号（必填）",
+        "类型（必填）",
+        "发布平台（必填）",
+        "媒体名称（必填）",
+        "见刊标题（必填）",
+        "见刊链接（必填）",
+        "见刊截图（必填）",
+        "播放量（必填）",
+        "互动量（必填）"
+      ],
       "min_required_marker_count": 8,
       "expect_images": false
     },
     "2-车马费合作-通稿": {
-      "critical_headers": ["序号", "发布时间", "属性", "媒体名称", "发布平台", "链接"],
+      "critical_headers": [
+        "序号",
+        "发布时间",
+        "属性",
+        "媒体名称",
+        "发布平台",
+        "链接"
+      ],
       "min_required_marker_count": 0,
       "expect_images": false
     },
     "3-媒体合作-线下合同": {
-      "critical_headers": ["媒体名称", "发布平台", "发布时间", "见刊标题", "见刊链接", "播放量/阅读量", "互动量", "数据截图", "发票凭证", "付款凭证", "合同"],
+      "critical_headers": [
+        "媒体名称",
+        "发布平台",
+        "发布时间",
+        "见刊标题",
+        "见刊链接",
+        "播放量/阅读量",
+        "互动量",
+        "数据截图",
+        "发票凭证",
+        "付款凭证",
+        "合同"
+      ],
       "min_required_marker_count": 0,
-      "expect_images": true
+      "expect_images": false
     },
     "4-媒体合作-平台单链接": {
-      "critical_headers": ["序号", "属性", "达人", "发布平台", "见刊时间", "见刊链接", "播放量", "CPM", "数据凭证", "平台凭证", "下单截图"],
+      "critical_headers": [
+        "序号",
+        "属性",
+        "达人",
+        "发布平台",
+        "见刊时间",
+        "见刊链接",
+        "播放量",
+        "CPM",
+        "数据凭证",
+        "平台凭证",
+        "下单截图"
+      ],
       "min_required_marker_count": 0,
-      "expect_images": true
+      "expect_images": false
     },
     "5-媒体合作-平台多链接": {
-      "critical_headers": ["属性", "达人", "发布平台", "见刊时间", "见刊链接", "播放量", "CPM", "数据凭证", "平台凭证", "下单截图"],
+      "critical_headers": [
+        "属性",
+        "达人",
+        "发布平台",
+        "见刊时间",
+        "见刊链接",
+        "播放量",
+        "CPM",
+        "数据凭证",
+        "平台凭证",
+        "下单截图"
+      ],
       "min_required_marker_count": 0,
-      "expect_images": true
+      "expect_images": false
     },
     "6-差旅": {
-      "critical_headers": ["媒体名称", "发布平台", "发布时间", "见刊标题", "见刊链接", "播放量/阅读量", "互动量", "数据截图", "发票凭证", "付款凭证", "合同"],
+      "critical_headers": [
+        "媒体名称",
+        "发布平台",
+        "发布时间",
+        "见刊标题",
+        "见刊链接",
+        "播放量/阅读量",
+        "互动量",
+        "数据截图",
+        "发票凭证",
+        "付款凭证",
+        "合同"
+      ],
       "min_required_marker_count": 0,
-      "expect_images": true
+      "expect_images": false
     }
   },
   "thresholds": {
     "summary_min_required_marker_count": 8,
     "detail_min_header_match_ratio": 0.8,
     "max_repeated_header_ratio": 0.6
+  },
+  "image_validation": {
+    "images_optional_per_sheet": true,
+    "check_image_naming_fields": false,
+    "warn_when_expected_images_missing": false
   }
 }

@@ -1,7 +1,5 @@
 ---
 name: excel-to-pptx
-metadata:
-  version: "1.0.0"
 description: >
   Convert Excel spreadsheets (with optional PPTX templates) to well-formatted PowerPoint (.pptx).
   Supports multi-sheet Excel files (summary + detail sheets), embedded images, merged cells,
@@ -58,7 +56,7 @@ $PYTHON $SCRIPTS/read_template.py <template2.pptx> -o /tmp/tmpl2.json
 | --- | --- |
 | Empty rows/columns | Build the table matrix from real cell values first, then remove blank spacer rows and blank spacer columns before header detection and JSON export. Image-only anchor columns are extracted as image metadata and must not become empty table columns. |
 | Merged cells | Expand merged ranges by filling every cell in the range with the top-left value before removing blank rows/columns. This is especially important for summary sheets because one merged summary value may apply to multiple detail sheets. |
-| Summary sheet associations | If a summary sheet is detected, expanded summary rows are associated with detail sheets via `detail_sheet_associations`, `summary_association`, and `summary_context`. Prefer block/module prefixes such as `4-...` over pure sequence matching. If one detail sheet corresponds to multiple expanded summary rows, also build `summary_context_rows` and `summary_row_map` so each page can render only the summary rows matching that page's detail rows. If the summary has a single data row, show it only on the first page. |
+| Summary sheet associations | If a summary sheet is detected, expanded summary rows are associated with detail sheets via `detail_sheet_associations`, `summary_association`, and `summary_context`. Prefer block/module prefixes such as `4-...` over pure sequence matching. If one detail sheet corresponds to multiple expanded summary rows, also build `summary_context_rows` and `summary_row_map` for verification and traceability. The layout engine renders the matched summary information as standalone summary page(s) before the detail table pages, not as an embedded block above the detail table. |
 | Embedded images | Extract images separately from the table matrix, normalize anchors after row/column compaction, attach `data_row_index`, `column_name`, and `caption`. Captions use `列名-行序号` so pictures can be traced back to table rows. |
 
 `read_template.py` extracts slide dimensions, theme colors, font names, and table styles. Template metadata can be attached to each sheet before layout.
@@ -78,10 +76,10 @@ Tell user what was found, including merged-cell normalization and image density 
   云评模板.pptx → 自动匹配 "1-车马费合作-云评"
   平台模板.pptx → 自动匹配 "4-媒体合作-平台单链接"
 
-请告诉我：
-1. 要转哪些 Sheet？（如 "全部" / "1,3,4"）
-2. 不要哪些列？（如 "不要对接、审核人" / "只要必填列"）
-3. 图片要不要放进去？
+请告诉我您的需求，下面是目前默认的操作逻辑:
+1.处理全部的sheet，带有“非必填”的列不保存到结果里
+2.sheet中如果存在图片，则保存到结果里
+3.每个生成的sheet PPTX默认增加一页封面，封面标题使用sheet名称，并居中放置；如用户提供PPTX模板则继承该模板，否则使用内置固定样式
 ```
 
 **Key: user replies in natural language.** Parse intent, do not force scripted choices.
@@ -101,7 +99,7 @@ Attach matched template info to each sheet's JSON:
 }
 ```
 
-Unmatched sheets use the default theme.
+Unmatched sheets use the default theme. Matched templates must carry the real `file_path` in `sheet["template"]["file_path"]`; `build_pptx.py` then opens that PPTX with `Presentation(template_path)` and clears only sample slides, so masters, layouts, slide size and theme are preserved in the generated output. Do not treat parsed template JSON as the final presentation base by itself.
 
 ### Column filtering
 
@@ -128,7 +126,7 @@ Parse user language as follows:
 | `不要XX` | Run with `--exclude "XX"` |
 | `只要必填列` | Run with `--include-required` |
 | `保留序号、媒体名称、播放量` | Run with `--include "序号,媒体名称,播放量"` |
-| `全部列` or no filter | Skip filtering, use all columns |
+| `全部列` or no filter | 默认保留全部列，但列名包含 `非必填` / `PPT非必填` / `（非必填）` 的字段仍必须排除 |
 
 **Important: do NOT replace `headers` or `data` in the JSON.** The layout engine reads these directly. Only `selected_col_indices` should be set.
 
@@ -153,9 +151,9 @@ $PYTHON $SCRIPTS/layout_engine.py /tmp/single_sheet.json -o /tmp/layout.json \
 
 ### Summary-row and image layout rules
 
-When `summary_context` exists, the layout engine must reserve a compact summary area between the page title and detail table. The summary row is context for the detail sheet, not a substitute for the detail table. Therefore, it must not consume or replace detail table headers or data rows.
+When `summary_context` exists, the layout engine must create standalone `summary_context` page(s) before the detail table pages. The summary information is context for the detail sheet, not a substitute for the detail table. Therefore, it must not consume or replace detail table headers or data rows.
 
-If a summary block contains multiple expanded rows for the same detail sheet, never repeat the first row on every page and never render the multi-row summary block above detail pages. Multi-row summary data is retained only for row-level association, verification, and traceability. Only a single-row summary context may be rendered above the detail table, and it must be rendered as a compact one-row table rather than as inline text.
+If a summary block contains multiple expanded rows for the same detail sheet, paginate those rows into readable standalone summary information pages, then render the detail table on subsequent pages. Multi-row standalone summary pages must use compact table row heights rather than stretching the table to the full slide height; by default, they follow the same 10-row page cap as detail table pages and automatically continue onto subsequent summary pages when needed. Detail table pages must not duplicate the multi-row summary block above the table. If a summary context has only one row, render that one summary row and the first detail-table page on the same slide: the summary row consumes one row slot, so the first page shows 1 summary row plus up to 9 detail rows. Detail sheets without summary context keep the normal 10 detail rows per page.
 
 Use the parser metadata `image_column_count`, `max_images_per_data_row`, `image_row_map`, and per-image `caption`.
 
@@ -166,7 +164,7 @@ Use the parser metadata `image_column_count`, `max_images_per_data_row`, `image_
 | Image columns `> 3` | `top-table-bottom-images` | Put the table above and images below so screenshots/text remain legible. |
 | Image columns `= 3` or one data row has `>= 4` images | `top-table-bottom-images` | Favor image readability over fitting many table rows on one slide. |
 
-For `top-table-bottom-images`, cap table rows per page aggressively: normally 2 detail rows per page, and 1 row when a single row has very many images. For `left-table-right-images`, also reduce rows when row-level images are present so the table row and its associated images can appear on the same slide. This is intentional; readable screenshots are more important than dense pages. When embedded pictures are already extracted into the image grid, their source image/voucher columns must be removed from the main table to avoid blank duplicated fields; the pictures themselves, captions, and row association metadata remain as the authoritative representation of those fields. Every table page title should be the paginated table's sheet name, with page number only as secondary text.
+For `top-table-bottom-images`, cap table rows per page aggressively: normally 2 detail rows per page, and 1 row when a single row has very many images. For `left-table-right-images`, also reduce rows when row-level images are present so the table row and its associated images can appear on the same slide. This is intentional; readable screenshots are more important than dense pages. When embedded pictures are already extracted into the image grid, their source image/voucher columns must be removed from the main table to avoid blank duplicated fields; the pictures themselves, captions, and row association metadata remain as the authoritative representation of those fields. Every table page title should be the paginated table's sheet name, with page number only as secondary text. Image-only pages should use a compact centered grid with up to 8 images per slide. Each image is rendered in the original order from top to bottom within a column, then left to right across columns; the renderer scales each picture proportionally and stops when the longest edge reaches the 300px-equivalent size, without upscaling smaller images.
 
 ## Step 5 — Generate PPTX
 
@@ -177,7 +175,7 @@ for layout in /tmp/layouts/*.json; do
 done
 ```
 
-Each detail sheet produces a separate `.pptx` file. `build_pptx.py` renders the layout modes above, repeats headers on paginated tables, draws `summary_context` above the table when planned, renders multi-row page-level summary contexts as compact tables, places pictures into the planned image grid, and draws each picture's `caption` below the image.
+Each selected sheet produces a separate `.pptx` file, including the detected summary sheet when `--all` is used with the default `--include-summary` behavior. By default, every generated PPTX starts with a centered cover slide whose title is the sheet name; pass `--no-cover` to `layout_engine.py` only when the user explicitly asks to remove covers. `build_pptx.py` renders the layout modes above, repeats headers on paginated tables, draws standalone `summary_context` page(s) before detail pages when planned, places pictures into the planned image grid, and draws each picture's `caption` below the image. When a layout plan contains `template_file_path`, `build_pptx.py` must use the actual PPTX template as the presentation base; if a direct `--template` argument is supplied, it overrides the plan-level template path. After creating each generated slide from a user template, the renderer must remove cloned title/body placeholders such as “点击此处添加标题” so empty template placeholder text boxes never appear in the output. Generated table shapes should use the planned content width as much as possible instead of being horizontally centered as small blocks. Vertically, tables should keep dense row heights and flow normally from top to bottom; when a page has fewer than 10 rows, do not stretch or vertically center the table to fill the slide.
 
 ## Step 6 — Deliver
 
@@ -199,12 +197,12 @@ Attach all generated PPTX files.
 - **Excel normalization first**: expand merged cells, remove blank rows/columns from the real cell matrix, then detect headers and export JSON. Do not repair merged summary sheets later in the PPT step.
 - **Table fidelity first**: the parser must preserve the original Excel table headers and data values. Image-only columns must be stored as image metadata and must not appear as blank table columns. During layout, if embedded images are rendered beside or below the table, their source image/voucher columns should also be excluded from the main table because the image grid already carries that information.
 - **Column filtering**: use `filter_columns.py` to set `selected_col_indices` only. Never replace `headers` or `data` in the JSON — the layout engine reads these directly.
-- **Summary sheet**: skipped by default as an independent PPT section, but its expanded rows are associated to detail sheets through JSON metadata. Prefer explicit block/module prefixes and row-level business-key matching over pure sequential matching. Multi-row summary blocks must not be rendered above detail pages; they are retained for association, verification, and traceability only.
+- **Summary sheet**: included by default as an independent PPTX when `--all` is used. Its expanded rows are also associated to detail sheets through JSON metadata. Prefer explicit block/module prefixes and row-level business-key matching over pure sequential matching. Matched summary blocks must be rendered as standalone summary information page(s) before the detail table pages, while the detail pages themselves remain focused on the detail sheet table and images.
 - **Font ladder**: 12→10→8→7→6→5pt when columns are too wide or pure-table height would otherwise exceed the slide; auto-reduce per page while preserving readability.
 - **Table pagination**: available height / row height = rows per page; header repeats each page.
 - **Image captions**: every embedded image should display `{发布平台}-{媒体名称}-{凭证类型}` under the picture for traceability.
-- **Image layout**: few image columns use side-by-side table/image layout; many image columns use top-table/bottom-image layout and fewer rows per page.
-- **One PPTX per detail sheet**: each detail sheet generates its own PPTX with cover + table pages.
+- **Image layout**: image-only pages use a centered grid with a hard cap of 8 images per slide. The preferred grid is 4 columns × 2 rows for a full image page. Images are filled top-to-bottom, then left-to-right, and each image is proportionally reduced until its longest edge is no larger than 300px-equivalent display size.
+- **One PPTX per selected sheet**: each detail sheet generates its own PPTX with a centered sheet-name cover first, matched standalone summary information pages next, followed by table/image pages. The detected summary sheet also generates its own standalone PPTX by default.
 - **Per-sheet templates**: each detail sheet can have independent theme/colors/orientation.
 - **Template auto-match**: greedy keyword matching on filename vs sheet name.
 - **Image extraction**: embedded images are saved to a temp dir and associated with rows by normalized anchor position.
@@ -213,7 +211,7 @@ Attach all generated PPTX files.
 
 - All columns selected but too wide → font reduces; suggest landscape if still failing.
 - Empty rows/columns caused by report formatting → removed during parsing.
-- Summary cells merged across multiple rows → expanded so repeated values remain available for association. When multiple expanded summary rows belong to one detail sheet, match summary rows to the current page's detail rows and render all matched rows above the detail table instead of repeating only the first summary row.
+- Summary cells merged across multiple rows → expanded so repeated values remain available for association. When multiple expanded summary rows belong to one detail sheet, render the matched summary rows as standalone summary information page(s) before the detail table pages, rather than repeating or embedding them above the detail table.
 - No images → skip image layout entirely.
 - Image-heavy sheet with unreadable screenshots → use `top-table-bottom-images`, reduce rows per page, or ask user whether to split further.
 - Empty sheet → skip (0 pages).
@@ -228,9 +226,17 @@ Attach all generated PPTX files.
 | 规则 | 要求 |
 | --- | --- |
 | 图片下标命名 | 图片下标必须使用 `{发布平台}-{媒体名称}-{凭证类型}` 格式。凭证类型优先从图片所在列名判断，例如“数据截图”“发票凭证”“付款凭证”“合同凭证”等；缺失字段允许使用“未知平台”“第N行”等兜底值。 |
-| 多行汇总 | 当汇总表因合并单元格展开或业务结构形成多行数据，并与分表存在多行对应关系时，汇总数据只用于行级关联和校验，不再展示在分表页面上方。 |
-| 单行汇总 | 当汇总表只有一行或某分表只关联一条汇总记录时，分表首页上方必须用单行表格展示汇总信息，不得渲染为长文本段落。 |
+| 多行汇总 | 当汇总表因合并单元格展开或业务结构形成多行数据，并与分表存在多行对应关系时，必须先生成独立的汇总信息页；若行数较多，应分页展示汇总信息，然后再展示分表明细页。 |
+| 单行汇总 | 当汇总表只有一行或某分表只关联一条汇总记录时，默认与分表第一页同页展示：汇总占 1 行，分表第一页最多 9 行；无汇总时分表每页固定 10 行。不得让一行汇总信息单独占用整页。 |
 | 多链接单元格 | 若单个单元格粘贴多个显式链接，只保留第一个链接，避免 PPT 表格过宽、过长；单链接或非链接文本保持原意。 |
 | 纯表格压缩 | 对没有图片的纯表格页，应采用高度感知的紧凑排版：在 12→10→8→7→6→5pt 字号梯度内选择能让整表不越界的最大可读字号，优先将中等行数的纯表格压缩到单个数据页内；若确实无法单页容纳，再分页。 |
 | 图片字段外置 | 当图片已抽取并放置在表格旁边或下方时，主表格中对应的图片/截图/凭证/发票/付款/下单等源字段必须移除，避免空列重复占位；图片本体、下标和行关联元数据保留。 |
 | 表格边框 | 所有主表格与汇总表格必须添加清晰黑色边框，确保投影、打印和审阅时表格边界明确。 |
+| 日期展示保真 | Excel 中只展示月份和日期的日期型单元格，必须按单元格显示格式输出，例如 `m"月"d"日"` 或 `m月d日` 应输出 `2月6日`，不得改写为 `02/06`、`2026-02-06` 或其他未在表格中显示的形式。 |
+| 金额精度保真 | 金额、费用、报价等数值必须按 Excel 显示精度输出，禁止暴露 Python/浮点二进制误差，例如 `107921.52` 不得输出为 `107921.52000000002`。读取阶段应先完成数字字符串化，再进入布局与 PPT 生成。 |
+| 百分数保真 | 百分数字段必须按 Excel 显示倍率输出，禁止在去除尾随零时误删整数位，例如 `80%` 不得输出为 `8%`，`90%` 不得输出为 `9%`，`100%` 不得输出为 `1%`。若列表头含 `%` 且同列存在百分比格式单元格，则同列 `General` 格式的数值单元格也应按百分号语义输出，避免 `0%` 被写成裸 `0`。 |
+| 用户模板保真 | 如果用户上传或指定 PPTX 模板，最终输出必须以该 PPTX 文件作为 presentation base 生成，而不是只读取颜色后新建默认空白 PPT。保留模板的母版、版式、尺寸和主题，仅清除模板自带示例页。 |
+| 非必填字段过滤 | 列名只要包含 `非必填`、`PPT非必填`、`（非必填）` 等标记，优先级最高：无论该字段是否在 `selected_col_indices`、默认全列选择、图片源字段、图片锚点列或 fallback 列选择中出现，都不得进入最终 PPTX 主表格、匹配到分表的汇总信息块、独立汇总页、图片页、图片下标或任何行关联元数据。若所有列名都不含这些标记，则默认保留全部列，不再按固定优先级或 10 列上限裁剪汇总信息。 |
+| 汇总表精确合并 | 分表 PPTX 只允许合并“汇总表第一列值与当前分表 sheet 名完全一致”的汇总行；不得把第一列属于其他分表、上级分类或相邻板块的汇总行混入当前分表。多行汇总应先生成独立汇总页再展示分表明细；单行汇总应与分表第一页同页展示，汇总占 1 行、分表最多 9 行，剩余分表数据按普通表格分页递归。 |
+| 汇总表独立输出 | 使用 `--all` 批量生成时，检测到的汇总表默认也要单独生成一个 PPTX，其表格内容和图片外置规则与其他 sheet 保持一致；只有用户明确要求不输出汇总表时才使用 `--no-summary`。 |
+

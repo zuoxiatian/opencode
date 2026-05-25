@@ -76,8 +76,13 @@ def parse_slide_theme(slide, prs):
                     colors.setdefault('title_size', int(run.font.size.pt))
                 if run.font.name:
                     colors.setdefault('font_name', run.font.name)
-                if run.font.color and run.font.color.rgb:
-                    hex_c = rgb_to_hex(run.font.color.rgb)
+                try:
+                    color = run.font.color
+                    rgb = color.rgb if color is not None else None
+                except AttributeError:
+                    rgb = None
+                if rgb:
+                    hex_c = rgb_to_hex(rgb)
                     if hex_c:
                         colors.setdefault('text_color', hex_c)
         # Shape fill

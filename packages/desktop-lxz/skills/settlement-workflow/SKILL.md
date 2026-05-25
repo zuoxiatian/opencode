@@ -1,7 +1,5 @@
 ---
 name: settlement-workflow
-metadata:
-  version: "1.0.0"
 description: >
   结算文件完整处理工作流：先使用 settlement-excel-validator 检查 Excel 文件是否合格，
   如果合格则使用 excel-to-pptx 转换为 PPTX，最后询问是否使用 pptx-merge 合并所有 PPTX。
