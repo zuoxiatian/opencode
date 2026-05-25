@@ -1,5 +1,7 @@
 ---
 name: excel-to-pptx
+metadata:
+  version: "1.0.0"
 description: >
   Convert Excel spreadsheets (with optional PPTX templates) to well-formatted PowerPoint (.pptx).
   Supports multi-sheet Excel files (summary + detail sheets), embedded images, merged cells,
@@ -239,4 +241,3 @@ Attach all generated PPTX files.
 | 非必填字段过滤 | 列名只要包含 `非必填`、`PPT非必填`、`（非必填）` 等标记，优先级最高：无论该字段是否在 `selected_col_indices`、默认全列选择、图片源字段、图片锚点列或 fallback 列选择中出现，都不得进入最终 PPTX 主表格、匹配到分表的汇总信息块、独立汇总页、图片页、图片下标或任何行关联元数据。若所有列名都不含这些标记，则默认保留全部列，不再按固定优先级或 10 列上限裁剪汇总信息。 |
 | 汇总表精确合并 | 分表 PPTX 只允许合并“汇总表第一列值与当前分表 sheet 名完全一致”的汇总行；不得把第一列属于其他分表、上级分类或相邻板块的汇总行混入当前分表。多行汇总应先生成独立汇总页再展示分表明细；单行汇总应与分表第一页同页展示，汇总占 1 行、分表最多 9 行，剩余分表数据按普通表格分页递归。 |
 | 汇总表独立输出 | 使用 `--all` 批量生成时，检测到的汇总表默认也要单独生成一个 PPTX，其表格内容和图片外置规则与其他 sheet 保持一致；只有用户明确要求不输出汇总表时才使用 `--no-summary`。 |
-

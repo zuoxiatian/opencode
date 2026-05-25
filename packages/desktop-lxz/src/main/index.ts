@@ -4,7 +4,7 @@ import { existsSync, watch, type FSWatcher } from "fs"
 import { basename, delimiter, join } from "path"
 import { spawn, spawnSync, type ChildProcess } from "child_process"
 import { fileURLToPath } from "url"
-import { cp, mkdir, readFile, readdir, writeFile } from "fs/promises"
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "fs/promises"
 import { homedir } from "os"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
@@ -12,6 +12,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const APP_ID = "ai.opencode.desktop"
 const APP_NAME = "LongwiseTechAgent"
 const APP_VERSION = "1.0.0"
+const DEPRECATED_BUNDLED_SKILLS = ["travel-expense-pptx"]
 
 let mainWindow: BrowserWindowType | null = null
 let serverProcess: ChildProcess | null = null
@@ -468,11 +469,14 @@ async function shouldInstallBundledSkill(source: string, destination: string) {
 }
 
 async function ensureBundledSkills() {
-    const source = bundledSkillsDir()
-    if (!existsSync(source)) return
-
     const target = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "skills")
     await mkdir(target, { recursive: true })
+    await Promise.all(
+        DEPRECATED_BUNDLED_SKILLS.map((skill) => rm(join(target, skill), { recursive: true, force: true })),
+    )
+
+    const source = bundledSkillsDir()
+    if (!existsSync(source)) return
 
     const skills = await readdir(source, { withFileTypes: true })
     await Promise.all(
