@@ -12,5 +12,8 @@
     "plugin:import/electron",
     "plugin:import/typescript"
   ],
+  "rules": {
+    "import/no-unresolved": ["error", { "ignore": ["^@tailwindcss/vite$"] }]
+  },
   "parser": "@typescript-eslint/parser"
 }

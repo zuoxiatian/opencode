@@ -1,0 +1,13 @@
+{
+  "background": "#FFFFFF",
+  "title_color": "#1B365D",
+  "title_font": "Microsoft YaHei",
+  "header_bg": "#1B365D",
+  "header_fg": "#FFFFFF",
+  "header_font": "Microsoft YaHei",
+  "row_even": "#F5F5F0",
+  "row_odd": "#FFFFFF",
+  "body_font": "Microsoft YaHei",
+  "border_color": "#000000",
+  "accent": "#1B365D"
+}

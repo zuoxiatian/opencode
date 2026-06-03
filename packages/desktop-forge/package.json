@@ -1,8 +1,8 @@
 {
   "name": "desktop-forge",
-  "productName": "desktop-forge",
+  "productName": "LongwiseTechAgent",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "LongwiseTechAgent desktop client",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
@@ -29,6 +29,7 @@
     "@electron-forge/plugin-fuses": "^7.11.2",
     "@electron-forge/plugin-vite": "^7.11.2",
     "@electron/fuses": "^1.8.0",
+    "@tailwindcss/vite": "^4.0.0",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
@@ -40,7 +41,11 @@
     "vite-plugin-solid": "^2.11.12"
   },
   "dependencies": {
+    "@opencode-ai/sdk": "workspace:*",
+    "@opencode-ai/ui": "workspace:*",
     "electron-squirrel-startup": "^1.0.1",
+    "lucide-solid": "1.14.0",
+    "pdfjs-dist": "5.4.530",
     "solid-js": "^1.9.13"
   }
 }

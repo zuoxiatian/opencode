@@ -1,56 +1,79 @@
-import { app, BrowserWindow } from 'electron';
-import path from 'node:path';
-import started from 'electron-squirrel-startup';
+import { app, dialog } from "electron"
+import started from "electron-squirrel-startup"
+import { APP_ID, APP_NAME } from "./electron/constants"
+import { createMainState } from "./electron/app/state"
+import { registerIpcHandlers } from "./electron/ipc"
+import { createMainWindow } from "./electron/window/create-window"
+import { startServer, stopServer } from "./electron/server/opencode-server"
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+const state = createMainState()
+
 if (started) {
-  app.quit();
+    app.quit()
+} else {
+    void bootstrap()
 }
 
-const createWindow = () => {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
+async function bootstrap() {
+    if (!app.requestSingleInstanceLock()) {
+        app.exit(0)
+        process.exit(0)
+    }
 
-  // and load the index.html of the app.
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
-  }
+    app.setName(APP_NAME)
+    app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
+    if (process.platform === "win32") app.setAppUserModelId(APP_ID)
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
-};
+    registerIpcHandlers(state)
+    registerAppLifecycle()
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.on('ready', createWindow);
+    await app.whenReady()
+    await openWindowAndServer()
+}
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+function registerAppLifecycle() {
+    app.on("activate", async () => {
+        if (state.window && !state.window.isDestroyed()) return
+        await openWindowAndServer()
+    })
 
-app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
+    app.on("second-instance", () => {
+        if (!state.window || state.window.isDestroyed()) return
+        if (state.window.isMinimized()) state.window.restore()
+        state.window.show()
+        state.window.focus()
+    })
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+    app.on("window-all-closed", () => {
+        state.closeDirectoryWatchers()
+        stopServer(state)
+        if (process.platform !== "darwin") app.quit()
+    })
+
+    app.on("before-quit", () => {
+        state.closeDirectoryWatchers()
+        stopServer(state)
+    })
+}
+
+async function openWindowAndServer() {
+    state.window = await createMainWindow(state)
+    await ensureServerReady()
+}
+
+async function ensureServerReady() {
+    if (state.serverInfo) {
+        state.window?.webContents.send("server-ready", state.serverInfo)
+        return
+    }
+
+    await startServer(state)
+        .then((info) => {
+            state.serverInfo = info
+            state.window?.webContents.send("server-ready", info)
+        })
+        .catch((error: unknown) => {
+            console.error("Failed to start server:", error)
+            dialog.showErrorBox("Startup failed", `Unable to start ${APP_NAME} server: ${String(error)}`)
+        })
+}

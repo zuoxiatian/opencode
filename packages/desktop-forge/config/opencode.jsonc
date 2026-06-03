@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "newapi/kimi-k2.6",
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "newapi": {
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "http://116.62.224.41:17600/v1",
+        "apiKey": "sk-R3XhwY7mSghIOyEYOloiWu2tgxU6ag2J3BSKCFmTFM6jH00E"
+      },
+      "models": {
+        "kimi-k2.6": {
+          "name": "LongwiseTechLLM"
+        }
+      }
+    }
+  }
+}

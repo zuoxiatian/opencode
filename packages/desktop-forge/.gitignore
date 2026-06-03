@@ -90,3 +90,8 @@ typings/
 
 # Electron-Forge
 out/
+release/
+
+# Generated desktop backend payloads
+bin/
+runtimes/
