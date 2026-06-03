@@ -386,6 +386,19 @@
         "typescript": "catalog:",
       },
     },
+    "packages/lxz-official": {
+      "name": "@opencode-ai/lxz-official",
+      "version": "1.0.0",
+      "dependencies": {
+        "solid-js": "catalog:",
+      },
+      "devDependencies": {
+        "@typescript/native-preview": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vite-plugin-solid": "catalog:",
+      },
+    },
     "packages/opencode": {
       "name": "opencode",
       "version": "1.14.29",
@@ -1641,6 +1654,8 @@
     "@opencode-ai/enterprise": ["@opencode-ai/enterprise@workspace:packages/enterprise"],
 
     "@opencode-ai/function": ["@opencode-ai/function@workspace:packages/function"],
+
+    "@opencode-ai/lxz-official": ["@opencode-ai/lxz-official@workspace:packages/lxz-official"],
 
     "@opencode-ai/plugin": ["@opencode-ai/plugin@workspace:packages/plugin"],
 

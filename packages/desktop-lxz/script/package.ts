@@ -3,11 +3,13 @@ import { existsSync } from "node:fs"
 import { chmod, copyFile, mkdir } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { signingEnv } from "./local-env.ts"
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(packageDir, "../..")
 const opencodeDir = path.join(repoRoot, "packages", "opencode")
 const bun = process.env.BUN_PATH ?? "bun"
+const localEnv = await signingEnv(packageDir)
 const args = process.argv.slice(2)
 const command = args.find((arg) => !arg.startsWith("--")) ?? "all"
 const options = {
@@ -110,10 +112,7 @@ if (!options.skipDesktopBuild) {
 
 if (!options.skipClientPackage) {
     for (const targetArgs of clientTargetGroups[command]) {
-        await run([bun, "run", "electron-builder", ...targetArgs], packageDir, {
-            ...desktopToolEnv(),
-            CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY ?? "false",
-        })
+        await run([bun, "run", "electron-builder", ...targetArgs], packageDir, desktopToolEnv())
     }
 }
 
@@ -144,12 +143,12 @@ function desktopToolEnv() {
     const runtimeDir = path.join(packageDir, "runtimes", `${process.platform}-${process.arch}`)
 
     return {
-        ...process.env,
+        ...localEnv,
         PATH: [
             path.join(runtimeDir, "bin"),
             path.join(runtimeDir, "node", "bin"),
             path.join(runtimeDir, "node"),
-            process.env.PATH ?? "",
+            localEnv.PATH ?? "",
         ].join(path.delimiter),
     }
 }

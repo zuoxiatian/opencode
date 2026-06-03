@@ -1,0 +1,29 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="720" fill="#EEF2F7"/>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <g opacity="0.42">
+    <path d="M0 120H1280M0 240H1280M0 360H1280M0 480H1280M0 600H1280" stroke="#07111F" stroke-opacity="0.08"/>
+    <path d="M160 0V720M320 0V720M480 0V720M640 0V720M800 0V720M960 0V720M1120 0V720" stroke="#07111F" stroke-opacity="0.08"/>
+  </g>
+  <rect x="300" y="132" width="680" height="420" rx="34" fill="white" fill-opacity="0.62" stroke="white" stroke-width="2"/>
+  <rect x="336" y="172" width="608" height="70" rx="18" fill="#07111F" fill-opacity="0.08"/>
+  <circle cx="372" cy="207" r="8" fill="#5D6DFF"/>
+  <circle cx="400" cy="207" r="8" fill="#0EA5A4"/>
+  <circle cx="428" cy="207" r="8" fill="#B6E84D"/>
+  <rect x="336" y="280" width="242" height="26" rx="13" fill="#07111F" fill-opacity="0.14"/>
+  <rect x="336" y="328" width="474" height="18" rx="9" fill="#07111F" fill-opacity="0.1"/>
+  <rect x="336" y="366" width="402" height="18" rx="9" fill="#07111F" fill-opacity="0.08"/>
+  <rect x="336" y="432" width="180" height="50" rx="25" fill="url(#button)"/>
+  <text x="640" y="606" text-anchor="middle" fill="#07111F" fill-opacity="0.72" font-family="Inter, Arial, sans-serif" font-size="32" font-weight="700">macOS 客户端安装教程</text>
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(200 130) rotate(34.9492) scale(921.479 630.603)">
+      <stop stop-color="#5D6DFF" stop-opacity="0.45"/>
+      <stop offset="0.52" stop-color="#6EE7FF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0EA5A4" stop-opacity="0.24"/>
+    </radialGradient>
+    <linearGradient id="button" x1="336" y1="432" x2="516" y2="482" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5D6DFF"/>
+      <stop offset="1" stop-color="#0EA5A4"/>
+    </linearGradient>
+  </defs>
+</svg>

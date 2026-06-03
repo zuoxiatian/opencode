@@ -22,6 +22,9 @@ a.out
 target
 .scripts
 .direnv/
+packages/desktop-lxz/signing.local.env
+packages/desktop-lxz/*.p12
+packages/desktop-lxz/*.pfx
 
 # Local dev files
 opencode-dev

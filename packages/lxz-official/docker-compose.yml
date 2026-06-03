@@ -1,0 +1,10 @@
+services:
+  lxz-official:
+    image: nginx:1.27-alpine
+    container_name: lxz-official
+    restart: unless-stopped
+    ports:
+      - "5000:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

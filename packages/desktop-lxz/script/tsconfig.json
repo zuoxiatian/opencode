@@ -5,6 +5,7 @@
         "moduleResolution": "NodeNext",
         "strict": true,
         "esModuleInterop": true,
+        "allowImportingTsExtensions": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true,
@@ -14,7 +15,9 @@
         ]
     },
     "include": [
+        "electron-builder.ts",
         "install-runtimes.ts",
+        "local-env.ts",
         "package.ts"
     ]
 }

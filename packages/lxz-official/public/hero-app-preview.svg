@@ -1,0 +1,41 @@
+<svg width="960" height="620" viewBox="0 0 960 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g filter="url(#shadow)">
+    <rect x="116" y="92" width="728" height="436" rx="34" fill="url(#window)" stroke="white" stroke-width="2"/>
+    <rect x="146" y="122" width="176" height="376" rx="24" fill="#F8FBFF" fill-opacity="0.82"/>
+    <rect x="346" y="122" width="468" height="376" rx="24" fill="#F9FCFF" fill-opacity="0.64"/>
+
+    <circle cx="176" cy="152" r="7" fill="#FF6B61"/>
+    <circle cx="200" cy="152" r="7" fill="#FFCC58"/>
+    <circle cx="224" cy="152" r="7" fill="#5AD16F"/>
+
+    <rect x="176" y="184" width="116" height="34" rx="14" fill="#07111F" fill-opacity="0.07"/>
+    <rect x="176" y="252" width="108" height="11" rx="5.5" fill="#07111F" fill-opacity="0.12"/>
+    <rect x="176" y="288" width="92" height="10" rx="5" fill="#07111F" fill-opacity="0.09"/>
+    <rect x="176" y="326" width="118" height="10" rx="5" fill="#07111F" fill-opacity="0.1"/>
+    <rect x="176" y="364" width="96" height="10" rx="5" fill="#07111F" fill-opacity="0.08"/>
+    <rect x="176" y="442" width="72" height="10" rx="5" fill="#07111F" fill-opacity="0.08"/>
+
+    <rect x="390" y="156" width="132" height="12" rx="6" fill="#07111F" fill-opacity="0.13"/>
+    <rect x="390" y="184" width="88" height="9" rx="4.5" fill="#07111F" fill-opacity="0.07"/>
+
+    <rect x="390" y="254" width="286" height="18" rx="9" fill="#AEBBCD" fill-opacity="0.5"/>
+    <rect x="390" y="294" width="214" height="16" rx="8" fill="#D9E2EC"/>
+    <rect x="438" y="336" width="260" height="18" rx="9" fill="#AEBBCD" fill-opacity="0.42"/>
+
+    <rect x="390" y="430" width="368" height="52" rx="22" fill="url(#composer)" stroke="white" stroke-width="2"/>
+  </g>
+
+  <defs>
+    <linearGradient id="window" x1="116" y1="92" x2="844" y2="528" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.74"/>
+      <stop offset="1" stop-color="#E8F8F7" stop-opacity="0.7"/>
+    </linearGradient>
+    <linearGradient id="composer" x1="390" y1="430" x2="758" y2="482" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#EEF8FF" stop-opacity="0.9"/>
+    </linearGradient>
+    <filter id="shadow" x="72" y="58" width="816" height="544" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#2D406C" flood-opacity="0.14"/>
+    </filter>
+  </defs>
+</svg>

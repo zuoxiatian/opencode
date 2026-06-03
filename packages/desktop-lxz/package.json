@@ -15,17 +15,17 @@
     "scripts": {
         "dev": "bun run script/dev.ts",
         "runtime:install": "bun run script/install-runtimes.ts",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "tsc --noEmit && tsc -p script/tsconfig.json --noEmit",
         "build": "bun run runtime:install && electron-vite build",
         "preview": "electron-vite preview",
-        "pack": "electron-builder --dir",
-        "pack:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
-        "dist": "electron-builder",
-        "dist:win": "electron-builder --win",
-        "dist:win:zip": "electron-builder --win zip --x64",
-        "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
-        "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64",
-        "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64"
+        "pack": "bun run script/electron-builder.ts -- --dir",
+        "pack:mac": "bun run script/electron-builder.ts -- --mac --dir",
+        "dist": "bun run script/electron-builder.ts",
+        "dist:win": "bun run script/electron-builder.ts -- --win",
+        "dist:win:zip": "bun run script/electron-builder.ts -- --win zip --x64",
+        "dist:mac": "bun run script/electron-builder.ts -- --mac",
+        "dist:mac:x64": "bun run script/electron-builder.ts -- --mac --x64",
+        "dist:mac:arm64": "bun run script/electron-builder.ts -- --mac --arm64"
     },
     "dependencies": {
         "@opencode-ai/sdk": "workspace:*",
