@@ -10,7 +10,7 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses"
 import type { NotaryToolCredentials } from "@electron/notarize/lib/types"
 import { execFile } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
-import { chmod, cp, mkdir } from "node:fs/promises"
+import { chmod, cp, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 
@@ -250,11 +250,26 @@ async function copyPlatformRuntime(buildPath: string, platform: string, arch: st
   const source = path.resolve(packageDir, "runtimes", `${platform}-${arch}`)
   if (!existsSync(source)) return
 
-  await cp(source, path.join(resourcesPath(buildPath, platform), "runtimes", `${platform}-${arch}`), {
+  const destination = path.join(resourcesPath(buildPath, platform), "runtimes", `${platform}-${arch}`)
+  await cp(source, destination, {
     force: true,
     recursive: true,
     verbatimSymlinks: true,
   })
+  await prunePackagedNodePackageManager(destination, platform)
+}
+
+async function prunePackagedNodePackageManager(runtimePath: string, platform: string) {
+  if (platform !== "win32") return
+
+  await Promise.all(
+    [
+      path.join(runtimePath, "node", "node_modules"),
+      ...["corepack", "corepack.cmd", "npm", "npm.cmd", "npm.ps1", "npx", "npx.cmd", "npx.ps1"].map((name) =>
+        path.join(runtimePath, "node", name),
+      ),
+    ].map((item) => rm(item, { force: true, recursive: true })),
+  )
 }
 
 async function copyOpencodeBinary(buildPath: string, platform: string, arch: string) {
