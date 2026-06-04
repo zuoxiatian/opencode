@@ -12,6 +12,21 @@
     "plugin:import/electron",
     "plugin:import/typescript"
   ],
+  "settings": {
+    "import/parsers": {
+      "@typescript-eslint/parser": [".ts", ".tsx", ".mts", ".cts"]
+    },
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true,
+        "noWarnOnMultipleProjects": true,
+        "project": ["./tsconfig.json", "./script/tsconfig.json"]
+      },
+      "node": {
+        "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".json"]
+      }
+    }
+  },
   "rules": {
     "import/no-unresolved": ["error", { "ignore": ["^@tailwindcss/vite$"] }]
   },

@@ -7,6 +7,7 @@ export default {
     solid(),
   ],
   resolve: {
+    dedupe: ["solid-js"],
     preserveSymlinks: false,
   },
 }

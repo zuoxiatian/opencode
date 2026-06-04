@@ -11,6 +11,7 @@ import type {
     Provider,
     QuestionAnswer,
     QuestionRequest,
+    Session,
     SessionStatus,
     TextPartInput,
 } from "@opencode-ai/sdk/v2/client"
@@ -1618,7 +1619,7 @@ export function ChatPanel(props: ChatPanelProps) {
                 "message",
                 sessionId,
                 reconcile(
-                    mode === "prepend" ? mergeMessages(parsed.messages, sdk.store.message[sessionId] ?? []) : parsed.messages,
+                    mergeMessages(parsed.messages, sdk.store.message[sessionId] ?? []),
                     { key: "id" },
                 ),
             )
@@ -1736,15 +1737,15 @@ export function ChatPanel(props: ChatPanelProps) {
             })
 
             if (response.ok) {
-                const data = await response.json()
-                loadedSessions.add(data.id)
+                const data = await response.json() as Session
                 if (newSessionPermissionMode() !== "default") setSessionPermissionMode(data.id, newSessionPermissionMode())
                 sdk.setSelectedSession(data)
                 sdk.refreshSessionList()
                 console.log(`为文件夹 ${sdk.directory()} 创建新会话: ${data.id}`)
                 return data.id as string
             }
-            console.error("创建会话失败:", await response.text())
+            const body = await response.text()
+            console.error("创建会话失败:", body)
         } catch (error) {
             console.error("创建会话失败:", error)
         }
@@ -1798,22 +1799,18 @@ export function ChatPanel(props: ChatPanelProps) {
     }
 
     const submitPrompt = async (prompt: QueuedPrompt) => {
-        const { serverInfo } = sdk
-        const response = await fetch(`${serverInfo.url}/session/${prompt.sessionID}/prompt_async`, {
-            method: "POST",
-            headers: getHeaders(),
-            body: JSON.stringify({
+        try {
+            await sdk.client.session.promptAsync({
+                directory: sdk.directory() || undefined,
+                sessionID: prompt.sessionID,
                 messageID: prompt.id,
                 agent: prompt.agent,
                 model: prompt.model,
                 parts: prompt.parts,
-            }),
-        })
-
-        if (!response.ok) {
-            const errorData = await response.text()
-            console.error("发送异步消息错误:", errorData)
-            throw new Error(`发送失败: ${response.status}`)
+            }, { throwOnError: true })
+        } catch (error) {
+            console.error("发送异步消息错误:", error)
+            throw error
         }
     }
 
@@ -1916,17 +1913,16 @@ export function ChatPanel(props: ChatPanelProps) {
 
         let optimisticPrompt: QueuedPrompt | undefined
         try {
-            const { serverInfo } = sdk
             const model = currentModel()
             if (!model) throw new Error("请选择模型后再发送")
-            let sid = currentSessionId()
+            const existingSessionId = currentSessionId()
+            let sid = existingSessionId
             if (!sid) {
                 sid = await createNewSessionForFolder(createInitialSessionTitle(text))
             }
             if (!sid) throw new Error("创建会话失败")
 
             await ensureInitialSessionTitle(sid, text)
-            console.log("发送异步消息到:", `${serverInfo.url}/session/${sid}/prompt_async`)
 
             const prompt: QueuedPrompt = {
                 id: createAscendingID("msg"),
@@ -1947,8 +1943,6 @@ export function ChatPanel(props: ChatPanelProps) {
             addOptimisticPrompt(prompt)
             optimisticPrompt = prompt
             await submitPrompt(prompt)
-
-            console.log("消息已提交，等待 SSE 事件...")
         } catch (error) {
             if (optimisticPrompt) removeOptimisticPrompt(optimisticPrompt)
             console.error("发送消息失败:", error)
