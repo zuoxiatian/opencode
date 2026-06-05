@@ -7,6 +7,7 @@ import type {
     SkillMarketOperationOptions,
     SkillOperationResult,
 } from "./shared/skill-market"
+import type { ClientAppInfo, ClientUpdatePrompt } from "./shared/client-update"
 
 export interface DirectoryChangeEvent {
     path: string
@@ -28,6 +29,8 @@ export interface ElectronAPI {
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
     saveFile: (options?: { defaultPath?: string }) => Promise<string | null>
     openExternal: (url: string) => Promise<void>
+    getAppInfo: () => Promise<ClientAppInfo>
+    promptClientUpdate: (update: ClientUpdatePrompt) => Promise<{ action: "cancel" | "open" }>
     openPath: (path: string) => Promise<{ success: boolean; error?: string }>
     restart: () => Promise<void>
     readDirectory: (path: string) => Promise<Array<{ name: string; path: string; isDirectory: boolean }>>
@@ -62,6 +65,10 @@ const electronAPI: ElectronAPI = {
     saveFile: (options) => ipcRenderer.invoke("save-file", options),
 
     openExternal: (url) => ipcRenderer.invoke("open-external", url),
+
+    getAppInfo: () => ipcRenderer.invoke("get-app-info"),
+
+    promptClientUpdate: (update) => ipcRenderer.invoke("client-update:prompt", update),
 
     openPath: (path) => ipcRenderer.invoke("open-path", path),
 

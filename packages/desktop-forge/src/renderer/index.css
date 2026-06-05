@@ -321,6 +321,86 @@
     --syntax-diff-delete: #c24138;
 }
 
+[data-component="toast-region"] {
+    top: 56px;
+    right: 18px;
+    bottom: auto;
+    z-index: 2147483647;
+    width: min(380px, calc(100vw - 36px));
+    max-width: min(380px, calc(100vw - 36px));
+    max-height: calc(100dvh - 36px);
+    -webkit-app-region: no-drag;
+}
+
+[data-component="toast-region"] [data-slot="toast-list"] {
+    align-items: flex-end;
+    -webkit-app-region: no-drag;
+}
+
+[data-component="toast"] {
+    width: 100%;
+    min-height: 0;
+    gap: 10px;
+    padding: 12px 42px 12px 14px;
+    border-color: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(24, 24, 24, 0.96);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.34);
+    -webkit-app-region: no-drag;
+}
+
+[data-component="toast"] * {
+    -webkit-app-region: no-drag;
+}
+
+[data-component="toast"] [data-slot="toast-content"] {
+    gap: 3px;
+}
+
+[data-component="toast"] [data-slot="toast-title"] {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 18px;
+}
+
+[data-component="toast"] [data-slot="toast-description"] {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    line-height: 17px;
+}
+
+[data-component="toast"] [data-slot="toast-close-button"] {
+    position: absolute;
+    top: 9px;
+    right: 9px;
+    width: 24px;
+    height: 24px;
+    pointer-events: auto;
+}
+
+@keyframes toastPopIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes toastPopOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -1002,6 +1082,84 @@ body {
 
 .settings-current-value {
     margin-top: 10px;
+}
+
+.settings-about-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 12px;
+}
+
+.settings-about-row {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border-default);
+}
+
+.settings-about-row:first-child {
+    padding-top: 0;
+}
+
+.settings-about-row:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.settings-about-label,
+.settings-about-value {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 17px;
+}
+
+.settings-about-label {
+    color: var(--text-tertiary);
+}
+
+.settings-about-value {
+    color: var(--text-primary);
+    font-weight: 580;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.settings-update-button {
+    height: 38px;
+    min-width: 112px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 14px;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: var(--surface-base);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 560;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-update-button:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-base-hover);
+    color: var(--text-primary);
+}
+
+.settings-update-button:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
+.settings-update-spinner {
+    animation: spin 0.8s linear infinite;
 }
 
 .settings-option-list {

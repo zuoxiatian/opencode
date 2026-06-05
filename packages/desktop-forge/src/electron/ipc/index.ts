@@ -1,4 +1,4 @@
-import type { TitleBarOverlayOptions } from "electron"
+import type { MessageBoxOptions, TitleBarOverlayOptions } from "electron"
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron"
 import { existsSync, watch } from "node:fs"
 import { readFile, readdir, unlink } from "node:fs/promises"
@@ -7,6 +7,7 @@ import { applyWindowTheme, isThemeMode, writeStoredThemeMode } from "../window/t
 import type { DirectoryWatchOptions, MainState, ThemeMode } from "../app/state"
 import { startServer, stopServer } from "../server/opencode-server"
 import { deleteInstalledSkill, installSkillPackage, listInstalledSkills, skillDirFor } from "../server/skill-market"
+import type { ClientAppInfo, ClientUpdatePrompt } from "../../shared/client-update"
 import type {
     SkillDeleteResult,
     SkillInstallRequest,
@@ -41,6 +42,20 @@ export function registerIpcHandlers(state: MainState) {
 
     ipcMain.handle("open-external", async (_, url: string) => {
         await shell.openExternal(url)
+    })
+
+    ipcMain.handle("get-app-info", () => ({
+        arch: clientReleaseArch(),
+        platform: clientReleasePlatform(),
+        version: app.getVersion(),
+    } satisfies ClientAppInfo))
+
+    ipcMain.handle("client-update:prompt", async (event, update: ClientUpdatePrompt) => {
+        const result = await showClientUpdateDialog(event.sender, update)
+        if (result.response !== clientUpdateActionButtonIndex(update)) return { action: "cancel" }
+
+        await shell.openExternal(update.officialUrl)
+        return { action: "open" }
     })
 
     ipcMain.handle("open-path", async (_, targetPath: string) => {
@@ -197,6 +212,42 @@ function broadcastSkillOperations(state: MainState) {
 
 function installOperationType(skillKey: string): SkillMarketOperationType {
     return existsSync(join(skillDirFor(skillKey), "SKILL.md")) ? "update" : "install"
+}
+
+function showClientUpdateDialog(sender: Electron.WebContents, update: ClientUpdatePrompt) {
+    const options: MessageBoxOptions = {
+        buttons: update.forceUpdate ? ["去更新"] : ["取消", "去更新"],
+        cancelId: 0,
+        defaultId: clientUpdateActionButtonIndex(update),
+        detail: [
+            `当前版本：${update.currentVersion}`,
+            update.title,
+            update.changelog,
+            update.minVersion ? `最低可升级版本：${update.minVersion}` : "",
+        ].filter(Boolean).join("\n\n"),
+        message: `${update.forceUpdate ? "发现必需更新" : "发现新版本"} ${update.version}`,
+        noLink: true,
+        title: "新版本更新",
+        type: "info",
+    }
+    const window = BrowserWindow.fromWebContents(sender)
+    return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options)
+}
+
+function clientUpdateActionButtonIndex(update: ClientUpdatePrompt) {
+    return update.forceUpdate ? 0 : 1
+}
+
+function clientReleasePlatform(): ClientAppInfo["platform"] {
+    if (process.platform === "darwin") return "mac"
+    if (process.platform === "win32") return "win"
+    return null
+}
+
+function clientReleaseArch(): ClientAppInfo["arch"] {
+    if (process.arch === "x64") return "x64"
+    if (process.arch === "arm64") return "arm64"
+    return null
 }
 
 async function watchDirectory(state: MainState, sender: Electron.WebContents, options: DirectoryWatchOptions) {

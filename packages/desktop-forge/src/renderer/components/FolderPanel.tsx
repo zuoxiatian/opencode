@@ -1,6 +1,7 @@
 import { batch, createEffect, createSignal, For, Index, onCleanup, onMount, Show, untrack } from "solid-js"
 import { Dynamic, Portal } from "solid-js/web"
 import type { Project, Session } from "@opencode-ai/sdk/v2/client"
+import { showToast } from "@opencode-ai/ui/toast"
 import { useSDK } from "../context/sdk"
 import type { LucideIcon } from "lucide-solid"
 import ChartColumn from "lucide-solid/icons/chart-column"
@@ -18,7 +19,9 @@ import FileVideo from "lucide-solid/icons/file-video"
 import Folder from "lucide-solid/icons/folder"
 import FolderOpen from "lucide-solid/icons/folder-open"
 import Image from "lucide-solid/icons/image"
+import Info from "lucide-solid/icons/info"
 import Brain from "lucide-solid/icons/brain"
+import LoaderCircle from "lucide-solid/icons/loader-circle"
 import LogOut from "lucide-solid/icons/log-out"
 import MessageCircle from "lucide-solid/icons/message-circle"
 import Monitor from "lucide-solid/icons/monitor"
@@ -28,6 +31,7 @@ import Palette from "lucide-solid/icons/palette"
 import PanelLeft from "lucide-solid/icons/panel-left"
 import PencilLine from "lucide-solid/icons/pencil-line"
 import Presentation from "lucide-solid/icons/presentation"
+import RefreshCw from "lucide-solid/icons/refresh-cw"
 import Settings from "lucide-solid/icons/settings"
 import SquareTerminal from "lucide-solid/icons/square-terminal"
 import SquarePen from "lucide-solid/icons/square-pen"
@@ -38,6 +42,9 @@ import X from "lucide-solid/icons/x"
 import type { ThemeMode } from "../theme"
 import type { ClientAuthSession } from "../auth"
 import type { ChatVisibilitySettings } from "../settings"
+import type { ClientAppInfo } from "../../shared/client-update"
+import { CLIENT_UPDATE_CHANNEL } from "../config"
+import { checkClientUpdate } from "../services/client-update"
 import { SkillMarketDialog } from "./SkillMarketDialog"
 import appIcon from "../../../build/128x128.png"
 
@@ -56,7 +63,7 @@ type SidebarDialog =
     | { kind: "delete-project"; project: Project }
     | { kind: "delete-session"; folder: string; session: Session }
 
-type SettingsSection = "appearance" | "chat"
+type SettingsSection = "appearance" | "chat" | "about"
 
 interface FolderPanelProps {
     onCollapse: () => void
@@ -79,6 +86,7 @@ const THEME_MODE_OPTIONS = [
 const SETTINGS_SECTION_OPTIONS = [
     { section: "appearance", label: "外观", description: "主题与界面", icon: Palette },
     { section: "chat", label: "聊天", description: "消息显示", icon: MessageCircle },
+    { section: "about", label: "关于", description: "版本更新", icon: Info },
 ] as const
 
 function isDefaultSessionTitle(title?: string) {
@@ -131,6 +139,8 @@ export function FolderPanel(props: FolderPanelProps) {
     const [settingsOpen, setSettingsOpen] = createSignal(false)
     const [skillMarketOpen, setSkillMarketOpen] = createSignal(false)
     const [settingsSection, setSettingsSection] = createSignal<SettingsSection>("appearance")
+    const [appInfo, setAppInfo] = createSignal<ClientAppInfo | null>(null)
+    const [isManualUpdateChecking, setIsManualUpdateChecking] = createSignal(false)
     const sessionLoadFolders = new Set<string>()
     let fileLoadRequest = 0
     let fileRefreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -696,6 +706,44 @@ export function FolderPanel(props: FolderPanelProps) {
         }
         return props.clientAuthSession.user.role
     }
+    const appPlatformText = () => {
+        if (appInfo()?.platform === "mac") return "macOS"
+        if (appInfo()?.platform === "win") return "Windows"
+        return "当前平台"
+    }
+
+    createEffect(() => {
+        if (!settingsOpen() || settingsSection() !== "about" || appInfo()) return
+        void window.electronAPI.getAppInfo().then(setAppInfo)
+    })
+
+    const checkForClientUpdateManually = async () => {
+        if (isManualUpdateChecking()) return
+
+        setIsManualUpdateChecking(true)
+        const update = await checkClientUpdate().catch((error: unknown) => {
+            console.error("手动检查客户端更新失败:", error)
+            showToast({
+                description: error instanceof Error ? error.message : String(error),
+                title: "检查更新失败",
+                variant: "error",
+            })
+            return undefined
+        })
+        setIsManualUpdateChecking(false)
+        if (update === undefined) return
+
+        if (!update) {
+            showToast({
+                description: `当前版本 ${appInfo()?.version ?? ""}`,
+                title: "当前已是最新版本",
+                variant: "success",
+            })
+            return
+        }
+
+        await window.electronAPI.promptClientUpdate(update)
+    }
 
     const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
         ...session,
@@ -1128,47 +1176,7 @@ export function FolderPanel(props: FolderPanelProps) {
                                         <p>{currentSettingsSection().description}</p>
                                     </div>
                                 </div>
-                                <Show
-                                    when={settingsSection() === "appearance"}
-                                    fallback={
-                                        <section class="settings-section">
-                                            <div class="settings-section-heading">
-                                                <h4>消息显示</h4>
-                                                <p>控制聊天记录中辅助信息的展示方式。</p>
-                                            </div>
-                                            <div class="settings-option-list">
-                                                <SettingsSwitchRow
-                                                    icon={CircleQuestionMark}
-                                                    title="显示问答"
-                                                    description="展示历史问题与用户回答。"
-                                                    checked={props.chatVisibility.questionAnswers}
-                                                    onChange={(questionAnswers) => updateChatVisibility({ questionAnswers })}
-                                                />
-                                                <SettingsSwitchRow
-                                                    icon={Brain}
-                                                    title="显示思考"
-                                                    description="展示模型的思考过程。默认关闭。"
-                                                    checked={props.chatVisibility.reasoning}
-                                                    onChange={(reasoning) => updateChatVisibility({ reasoning })}
-                                                />
-                                                <SettingsSwitchRow
-                                                    icon={SquareTerminal}
-                                                    title="显示 Shell 调用"
-                                                    description="展示 bash、shell 等终端命令调用。默认关闭。"
-                                                    checked={props.chatVisibility.shellCalls}
-                                                    onChange={(shellCalls) => updateChatVisibility({ shellCalls })}
-                                                />
-                                                <SettingsSwitchRow
-                                                    icon={Wrench}
-                                                    title="显示工具调用"
-                                                    description="展示文件、搜索、任务等非 Shell 工具调用。默认关闭。"
-                                                    checked={props.chatVisibility.toolCalls}
-                                                    onChange={(toolCalls) => updateChatVisibility({ toolCalls })}
-                                                />
-                                            </div>
-                                        </section>
-                                    }
-                                >
+                                <Show when={settingsSection() === "appearance"}>
                                     <section class="settings-section">
                                         <div class="settings-section-heading">
                                             <h4>主题</h4>
@@ -1193,6 +1201,80 @@ export function FolderPanel(props: FolderPanelProps) {
                                         <div class="settings-current-value">
                                             当前：{currentThemeModeOption().label}
                                         </div>
+                                    </section>
+                                </Show>
+                                <Show when={settingsSection() === "chat"}>
+                                    <section class="settings-section">
+                                        <div class="settings-section-heading">
+                                            <h4>消息显示</h4>
+                                            <p>控制聊天记录中辅助信息的展示方式。</p>
+                                        </div>
+                                        <div class="settings-option-list">
+                                            <SettingsSwitchRow
+                                                icon={CircleQuestionMark}
+                                                title="显示问答"
+                                                description="展示历史问题与用户回答。"
+                                                checked={props.chatVisibility.questionAnswers}
+                                                onChange={(questionAnswers) => updateChatVisibility({ questionAnswers })}
+                                            />
+                                            <SettingsSwitchRow
+                                                icon={Brain}
+                                                title="显示思考"
+                                                description="展示模型的思考过程。默认关闭。"
+                                                checked={props.chatVisibility.reasoning}
+                                                onChange={(reasoning) => updateChatVisibility({ reasoning })}
+                                            />
+                                            <SettingsSwitchRow
+                                                icon={SquareTerminal}
+                                                title="显示 Shell 调用"
+                                                description="展示 bash、shell 等终端命令调用。默认关闭。"
+                                                checked={props.chatVisibility.shellCalls}
+                                                onChange={(shellCalls) => updateChatVisibility({ shellCalls })}
+                                            />
+                                            <SettingsSwitchRow
+                                                icon={Wrench}
+                                                title="显示工具调用"
+                                                description="展示文件、搜索、任务等非 Shell 工具调用。默认关闭。"
+                                                checked={props.chatVisibility.toolCalls}
+                                                onChange={(toolCalls) => updateChatVisibility({ toolCalls })}
+                                            />
+                                        </div>
+                                    </section>
+                                </Show>
+                                <Show when={settingsSection() === "about"}>
+                                    <section class="settings-section">
+                                        <div class="settings-section-heading">
+                                            <h4>应用信息</h4>
+                                            <p>LongwiseTechAgent</p>
+                                        </div>
+                                        <div class="settings-about-list">
+                                            <div class="settings-about-row">
+                                                <span class="settings-about-label">当前版本</span>
+                                                <span class="settings-about-value">{appInfo()?.version ?? "..."}</span>
+                                            </div>
+                                            <div class="settings-about-row">
+                                                <span class="settings-about-label">平台架构</span>
+                                                <span class="settings-about-value">{appPlatformText()} {appInfo()?.arch ?? ""}</span>
+                                            </div>
+                                            <div class="settings-about-row">
+                                                <span class="settings-about-label">更新通道</span>
+                                                <span class="settings-about-value">{CLIENT_UPDATE_CHANNEL}</span>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            class="settings-update-button"
+                                            disabled={isManualUpdateChecking()}
+                                            onClick={() => void checkForClientUpdateManually()}
+                                        >
+                                            <Show
+                                                when={isManualUpdateChecking()}
+                                                fallback={<RefreshCw class="sidebar-lucide-icon" size={16} strokeWidth={1.85} />}
+                                            >
+                                                <LoaderCircle class="sidebar-lucide-icon settings-update-spinner" size={16} strokeWidth={1.9} />
+                                            </Show>
+                                            <span>{isManualUpdateChecking() ? "检查中" : "检查更新"}</span>
+                                        </button>
                                     </section>
                                 </Show>
                             </main>

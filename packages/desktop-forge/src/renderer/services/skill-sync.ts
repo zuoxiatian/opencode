@@ -5,11 +5,10 @@ export interface SkillSyncSummary {
     archivedDeleted: number
     requiredInstalled: number
     requiredUpdated: number
-    skippedLocal: number
     errors: string[]
 }
 
-type RequiredSkillAction = "install" | "update" | "skip_local" | "none"
+type RequiredSkillAction = "install" | "update" | "none"
 
 export async function syncRequiredClientSkills() {
     const [catalog, installed] = await Promise.all([
@@ -52,13 +51,12 @@ export async function syncRequiredClientSkills() {
         ],
         requiredInstalled: installResults.filter((item) => item.action === "install" && item.result.success).length,
         requiredUpdated: installResults.filter((item) => item.action === "update" && item.result.success).length,
-        skippedLocal: requiredPlan.filter((item) => item.action === "skip_local").length,
     } satisfies SkillSyncSummary
 }
 
 function requiredSkillAction(skill: ClientSkill, installed: InstalledSkill | undefined): RequiredSkillAction {
     if (!installed) return "install"
-    if (!installed.managed) return "skip_local"
+    if (!installed.managed) return "update"
     if (compareVersions(skill.version, installed.version) > 0) return "update"
     return "none"
 }

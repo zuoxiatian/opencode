@@ -10,6 +10,8 @@ declare module "*.png" {
 
 interface ImportMetaEnv {
     readonly VITE_CLIENT_API_BASE_URL?: string
+    readonly VITE_CLIENT_OFFICIAL_URL?: string
+    readonly VITE_CLIENT_UPDATE_CHANNEL?: string
 }
 
 interface ImportMeta {

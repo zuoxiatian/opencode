@@ -7,6 +7,7 @@ import { App } from "./components/App"
 import { LoginPage } from "./components/LoginPage"
 import { clearClientAuthSession, isClientAuthSessionExpired, readStoredClientAuthSession, subscribeClientAuthSession, type ClientAuthSession } from "./auth"
 import { getClientModelConfig } from "./api/model-config"
+import { checkClientUpdate } from "./services/client-update"
 import { syncRequiredClientSkills, type SkillSyncSummary } from "./services/skill-sync"
 import { getSystemTheme, readStoredThemeMode, resolveThemeMode, THEME_STORAGE_KEY } from "./theme"
 import welcomeIcon from "../../build/128x128.png"
@@ -24,6 +25,8 @@ function Root() {
     const [isModelConfigLoading, setIsModelConfigLoading] = createSignal(false)
     const [isSkillSyncing, setIsSkillSyncing] = createSignal(false)
     const [skillSyncUserID, setSkillSyncUserID] = createSignal<number | null>(null)
+    const [isUpdateChecking, setIsUpdateChecking] = createSignal(false)
+    const [updateCheckUserID, setUpdateCheckUserID] = createSignal<number | null>(null)
     const [clientAuthSession, setClientAuthSession] = createSignal<ClientAuthSession | null>(readStoredClientAuthSession())
     const [themeMode, setThemeMode] = createSignal(readStoredThemeMode())
     const [systemTheme, setSystemTheme] = createSignal(getSystemTheme())
@@ -48,6 +51,8 @@ function Root() {
         setIsModelConfigLoading(false)
         setIsSkillSyncing(false)
         setSkillSyncUserID(null)
+        setIsUpdateChecking(false)
+        setUpdateCheckUserID(null)
         void window.electronAPI.stopServer()
     }
     const clearSessionAndStopServer = () => {
@@ -164,6 +169,31 @@ function Root() {
         setIsSkillSyncing(false)
     }
 
+    const checkUpdateForSession = async (session: ClientAuthSession) => {
+        if (isUpdateChecking() || updateCheckUserID() === session.user.id) return
+        setIsUpdateChecking(true)
+        const update = await checkClientUpdate().catch((error: unknown) => {
+            console.error("检查客户端更新失败:", error)
+            return null
+        })
+        setUpdateCheckUserID(session.user.id)
+        setIsUpdateChecking(false)
+        if (!update || clientAuthSession()?.user.id !== session.user.id) return
+        await window.electronAPI.promptClientUpdate(update)
+    }
+
+    createEffect(() => {
+        const session = clientAuthSession()
+        const info = serverInfo()
+        if (!session) return
+        if (!info) return
+        if (updateCheckUserID() === session.user.id || isUpdateChecking()) return
+        requestAnimationFrame(() => {
+            if (!clientAuthSession() || !serverInfo()) return
+            void checkUpdateForSession(session)
+        })
+    })
+
     createEffect(() => {
         const session = clientAuthSession()
         if (!session) return
@@ -235,14 +265,6 @@ function notifySkillSyncSummary(summary: SkillSyncSummary) {
         showToast({
             description: summary.errors[0],
             title: "部分技能同步失败",
-            variant: "error",
-        })
-        return
-    }
-    if (summary.skippedLocal > 0) {
-        showToast({
-            description: `${summary.skippedLocal} 个必装技能已存在本地手动版本，未自动覆盖`,
-            title: "技能同步跳过",
             variant: "error",
         })
         return
