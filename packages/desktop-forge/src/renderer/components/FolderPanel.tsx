@@ -7,6 +7,7 @@ import ChartColumn from "lucide-solid/icons/chart-column"
 import Check from "lucide-solid/icons/check"
 import CircleMinus from "lucide-solid/icons/circle-minus"
 import CircleQuestionMark from "lucide-solid/icons/circle-question-mark"
+import CircleUser from "lucide-solid/icons/circle-user"
 import FileCode from "lucide-solid/icons/file-code"
 import FileIcon from "lucide-solid/icons/file"
 import FileAudio from "lucide-solid/icons/file-audio"
@@ -18,9 +19,11 @@ import Folder from "lucide-solid/icons/folder"
 import FolderOpen from "lucide-solid/icons/folder-open"
 import Image from "lucide-solid/icons/image"
 import Brain from "lucide-solid/icons/brain"
+import LogOut from "lucide-solid/icons/log-out"
 import MessageCircle from "lucide-solid/icons/message-circle"
 import Monitor from "lucide-solid/icons/monitor"
 import Moon from "lucide-solid/icons/moon"
+import Package from "lucide-solid/icons/package"
 import Palette from "lucide-solid/icons/palette"
 import PanelLeft from "lucide-solid/icons/panel-left"
 import PencilLine from "lucide-solid/icons/pencil-line"
@@ -33,7 +36,9 @@ import Trash2 from "lucide-solid/icons/trash-2"
 import Wrench from "lucide-solid/icons/wrench"
 import X from "lucide-solid/icons/x"
 import type { ThemeMode } from "../theme"
+import type { ClientAuthSession } from "../auth"
 import type { ChatVisibilitySettings } from "../settings"
+import { SkillMarketDialog } from "./SkillMarketDialog"
 import appIcon from "../../../build/128x128.png"
 
 interface FileItem {
@@ -55,8 +60,10 @@ type SettingsSection = "appearance" | "chat"
 
 interface FolderPanelProps {
     onCollapse: () => void
+    clientAuthSession: ClientAuthSession
     themeMode: ThemeMode
     onThemeModeChange: (mode: ThemeMode) => void
+    onLogout: () => void
     chatVisibility: ChatVisibilitySettings
     onChatVisibilityChange: (settings: ChatVisibilitySettings) => void
 }
@@ -120,7 +127,9 @@ export function FolderPanel(props: FolderPanelProps) {
     const [unreadSessions, setUnreadSessions] = createSignal<Set<string>>(new Set())
     const [sidebarMenu, setSidebarMenu] = createSignal<SidebarMenu | null>(null)
     const [sidebarDialog, setSidebarDialog] = createSignal<SidebarDialog | null>(null)
+    const [accountMenuPosition, setAccountMenuPosition] = createSignal<{ x: number; bottom: number } | null>(null)
     const [settingsOpen, setSettingsOpen] = createSignal(false)
+    const [skillMarketOpen, setSkillMarketOpen] = createSignal(false)
     const [settingsSection, setSettingsSection] = createSignal<SettingsSection>("appearance")
     const sessionLoadFolders = new Set<string>()
     let fileLoadRequest = 0
@@ -133,10 +142,25 @@ export function FolderPanel(props: FolderPanelProps) {
     })
 
     const closeSidebarMenu = () => setSidebarMenu(null)
+    const closeAccountMenu = () => setAccountMenuPosition(null)
+    const closeMenus = () => {
+        closeSidebarMenu()
+        closeAccountMenu()
+    }
+    const closeMenusFromDocument = (event: MouseEvent) => {
+        const target = event.target instanceof Element ? event.target : null
+        if (target?.closest(".settings-entry-button, .account-menu")) return
+        closeMenus()
+    }
 
     const openSettings = () => {
-        closeSidebarMenu()
+        closeMenus()
         setSettingsOpen(true)
+    }
+
+    const openSkillMarket = () => {
+        closeMenus()
+        setSkillMarketOpen(true)
     }
 
     const updateChatVisibility = (changes: Partial<ChatVisibilitySettings>) => {
@@ -159,13 +183,26 @@ export function FolderPanel(props: FolderPanelProps) {
     const openProjectMenu = (project: Project, event: MouseEvent) => {
         event.preventDefault()
         event.stopPropagation()
+        closeAccountMenu()
         setSidebarMenu({ kind: "project", project, ...menuPosition(event, 86) })
     }
 
     const openSessionMenu = (folder: string, session: Session, event: MouseEvent) => {
         event.preventDefault()
         event.stopPropagation()
+        closeAccountMenu()
         setSidebarMenu({ kind: "session", folder, session, ...menuPosition(event, 86) })
+    }
+
+    const openAccountMenu = (event: MouseEvent) => {
+        event.stopPropagation()
+        closeSidebarMenu()
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+        const statusRect = (event.currentTarget as HTMLElement).closest(".folder-panel-status")?.getBoundingClientRect()
+        setAccountMenuPosition({
+            bottom: Math.max(8, window.innerHeight - (statusRect?.top ?? rect.top)),
+            x: Math.max(8, Math.min(rect.left, window.innerWidth - 232)),
+        })
     }
 
     const openRenameSessionDialog = (folder: string, session: Session) => {
@@ -299,8 +336,8 @@ export function FolderPanel(props: FolderPanelProps) {
 
     onMount(() => {
         window.addEventListener(PROJECT_ADDED_EVENT, handleProjectAdded)
-        document.addEventListener("click", closeSidebarMenu)
-        document.addEventListener("scroll", closeSidebarMenu, true)
+        document.addEventListener("click", closeMenusFromDocument)
+        document.addEventListener("scroll", closeMenus, true)
         unsubscribe = sdk.subscribeToEvents((event) => {
             if (event.type === "session.created" || event.type === "session.updated") {
                 applySessionUpdate(event.properties.sessionID, event.properties.info as Partial<Session>)
@@ -335,9 +372,11 @@ export function FolderPanel(props: FolderPanelProps) {
     })
 
     createEffect(() => {
-        if (!settingsOpen()) return
+        if (!settingsOpen() && !accountMenuPosition()) return
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setSettingsOpen(false)
+            if (event.key !== "Escape") return
+            setSettingsOpen(false)
+            closeMenus()
         }
         document.addEventListener("keydown", handleKeyDown)
         onCleanup(() => document.removeEventListener("keydown", handleKeyDown))
@@ -345,8 +384,8 @@ export function FolderPanel(props: FolderPanelProps) {
 
     onCleanup(() => {
         window.removeEventListener(PROJECT_ADDED_EVENT, handleProjectAdded)
-        document.removeEventListener("click", closeSidebarMenu)
-        document.removeEventListener("scroll", closeSidebarMenu, true)
+        document.removeEventListener("click", closeMenusFromDocument)
+        document.removeEventListener("scroll", closeMenus, true)
         if (fileRefreshTimer) {
             clearTimeout(fileRefreshTimer)
             fileRefreshTimer = undefined
@@ -356,13 +395,12 @@ export function FolderPanel(props: FolderPanelProps) {
 
     createEffect(() => {
         const folder = sdk.directory()
-        let stopWatching: (() => void) | undefined
         if (!folder) {
             setFiles([])
             return
         }
         void loadFiles(folder)
-        stopWatching = window.electronAPI.watchDirectory(folder, () => {
+        const stopWatching = window.electronAPI.watchDirectory(folder, () => {
             if (fileRefreshTimer) clearTimeout(fileRefreshTimer)
             fileRefreshTimer = setTimeout(() => {
                 fileRefreshTimer = undefined
@@ -650,6 +688,14 @@ export function FolderPanel(props: FolderPanelProps) {
     const isSessionUnread = (sessionID: string) => sdk.selectedSession()?.id !== sessionID && unreadSessions().has(sessionID)
     const currentThemeModeOption = () => THEME_MODE_OPTIONS.find((item) => item.mode === props.themeMode) ?? SYSTEM_THEME_MODE_OPTION
     const currentSettingsSection = () => SETTINGS_SECTION_OPTIONS.find((item) => item.section === settingsSection()) ?? SETTINGS_SECTION_OPTIONS[0]
+    const accountName = () => props.clientAuthSession.user.name ?? props.clientAuthSession.user.username
+    const accountMeta = () => {
+        if (props.clientAuthSession.user.department) return props.clientAuthSession.user.department
+        if (props.clientAuthSession.user.quotaLimit !== null) {
+            return `配额 ${props.clientAuthSession.user.quotaUsed}/${props.clientAuthSession.user.quotaLimit}`
+        }
+        return props.clientAuthSession.user.role
+    }
 
     const mergeSessionInfo = (session: Session, info: Partial<Session>): Session => ({
         ...session,
@@ -952,9 +998,12 @@ export function FolderPanel(props: FolderPanelProps) {
                 <button
                     type="button"
                     class="settings-entry-button"
-                    onClick={openSettings}
-                    title="打开设置"
-                    aria-label="打开设置"
+                    classList={{ active: Boolean(accountMenuPosition()) }}
+                    onClick={openAccountMenu}
+                    title="打开菜单"
+                    aria-label="打开菜单"
+                    aria-haspopup="menu"
+                    aria-expanded={accountMenuPosition() ? "true" : "false"}
                 >
                     <Settings class="sidebar-lucide-icon" size={14} strokeWidth={1.8} />
                     <span>设置</span>
@@ -964,6 +1013,61 @@ export function FolderPanel(props: FolderPanelProps) {
                     <span>服务在线</span>
                 </div>
             </div>
+
+            <Show when={accountMenuPosition()}>
+                {(position) => (
+                    <Portal>
+                        <div
+                            class="account-menu"
+                            role="menu"
+                            style={{ bottom: `${position().bottom}px`, left: `${position().x}px` }}
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <div class="account-menu-profile" aria-label="用户信息">
+                                <span class="account-menu-avatar" aria-hidden="true">
+                                    <CircleUser class="sidebar-lucide-icon" size={14} strokeWidth={1.8} />
+                                </span>
+                                <span class="account-menu-info">{accountName()} · {accountMeta()}</span>
+                            </div>
+                            <span class="account-menu-separator" aria-hidden="true" />
+                            <button
+                                type="button"
+                                class="sidebar-context-menu-item"
+                                role="menuitem"
+                                onClick={openSkillMarket}
+                            >
+                                <Package class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                <span>技能市场</span>
+                            </button>
+                            <button
+                                type="button"
+                                class="sidebar-context-menu-item"
+                                role="menuitem"
+                                onClick={openSettings}
+                            >
+                                <Settings class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                <span>设置</span>
+                            </button>
+                            <button
+                                type="button"
+                                class="sidebar-context-menu-item danger"
+                                role="menuitem"
+                                onClick={() => {
+                                    closeMenus()
+                                    props.onLogout()
+                                }}
+                            >
+                                <LogOut class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                <span>退出登录</span>
+                            </button>
+                        </div>
+                    </Portal>
+                )}
+            </Show>
+
+            <Show when={skillMarketOpen()}>
+                <SkillMarketDialog onClose={() => setSkillMarketOpen(false)} />
+            </Show>
 
             <Show when={settingsOpen()}>
                 <Portal>

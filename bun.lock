@@ -308,6 +308,7 @@
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
         "electron-squirrel-startup": "^1.0.1",
+        "extract-zip": "^2.0.1",
         "lucide-solid": "1.14.0",
         "pdfjs-dist": "5.4.530",
         "solid-js": "^1.9.13",

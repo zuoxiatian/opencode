@@ -1,10 +1,10 @@
-import { app, dialog } from "electron"
+import { app } from "electron"
 import started from "electron-squirrel-startup"
 import { APP_ID, APP_NAME } from "./electron/constants"
 import { createMainState } from "./electron/app/state"
 import { registerIpcHandlers } from "./electron/ipc"
 import { createMainWindow } from "./electron/window/create-window"
-import { startServer, stopServer } from "./electron/server/opencode-server"
+import { stopServer } from "./electron/server/opencode-server"
 
 const state = createMainState()
 
@@ -28,13 +28,13 @@ async function bootstrap() {
     registerAppLifecycle()
 
     await app.whenReady()
-    await openWindowAndServer()
+    await openWindow()
 }
 
 function registerAppLifecycle() {
     app.on("activate", async () => {
         if (state.window && !state.window.isDestroyed()) return
-        await openWindowAndServer()
+        await openWindow()
     })
 
     app.on("second-instance", () => {
@@ -56,24 +56,7 @@ function registerAppLifecycle() {
     })
 }
 
-async function openWindowAndServer() {
+async function openWindow() {
     state.window = await createMainWindow(state)
-    await ensureServerReady()
-}
-
-async function ensureServerReady() {
-    if (state.serverInfo) {
-        state.window?.webContents.send("server-ready", state.serverInfo)
-        return
-    }
-
-    await startServer(state)
-        .then((info) => {
-            state.serverInfo = info
-            state.window?.webContents.send("server-ready", info)
-        })
-        .catch((error: unknown) => {
-            console.error("Failed to start server:", error)
-            dialog.showErrorBox("Startup failed", `Unable to start ${APP_NAME} server: ${String(error)}`)
-        })
+    if (state.serverInfo) state.window.webContents.send("server-ready", state.serverInfo)
 }

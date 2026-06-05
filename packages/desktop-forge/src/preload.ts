@@ -1,4 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron"
+import type {
+    InstalledSkill,
+    SkillDeleteResult,
+    SkillInstallRequest,
+    SkillMarketOperation,
+    SkillMarketOperationOptions,
+    SkillOperationResult,
+} from "./shared/skill-market"
 
 export interface DirectoryChangeEvent {
     path: string
@@ -14,6 +22,8 @@ interface DirectoryWatchResult {
 export interface ElectronAPI {
     onServerReady: (callback: (data: { url: string; password: string | null }) => void) => void
     getServerInfo: () => Promise<{ url: string; password: string | null } | null>
+    startServer: () => Promise<{ url: string; password: string | null }>
+    stopServer: () => Promise<{ success: boolean }>
     pickDirectory: () => Promise<string | null>
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
     saveFile: (options?: { defaultPath?: string }) => Promise<string | null>
@@ -24,6 +34,11 @@ export interface ElectronAPI {
     readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
     readFileBase64: (path: string) => Promise<{ success: boolean; base64?: string; error?: string }>
     deleteFile: (path: string) => Promise<{ success: boolean; error?: string }>
+    listInstalledSkills: () => Promise<InstalledSkill[]>
+    listSkillOperations: () => Promise<SkillMarketOperation[]>
+    onSkillOperationsChanged: (callback: (operations: SkillMarketOperation[]) => void) => () => void
+    installSkill: (input: SkillInstallRequest, options?: SkillMarketOperationOptions) => Promise<SkillOperationResult>
+    deleteSkill: (skillKey: string, options?: SkillMarketOperationOptions) => Promise<SkillDeleteResult>
     setTitleBarOverlay: (options: { color: string; symbolColor: string }) => Promise<void>
     setThemeMode: (mode: "system" | "light" | "dark") => Promise<void>
     watchDirectory: (path: string, callback: (event: DirectoryChangeEvent) => void) => () => void
@@ -35,6 +50,10 @@ const electronAPI: ElectronAPI = {
     },
 
     getServerInfo: () => ipcRenderer.invoke("get-server-info"),
+
+    startServer: () => ipcRenderer.invoke("start-server"),
+
+    stopServer: () => ipcRenderer.invoke("stop-server"),
 
     pickDirectory: () => ipcRenderer.invoke("pick-directory"),
 
@@ -55,6 +74,20 @@ const electronAPI: ElectronAPI = {
     readFileBase64: (path) => ipcRenderer.invoke("read-file-base64", path),
 
     deleteFile: (path) => ipcRenderer.invoke("delete-file", path),
+
+    listInstalledSkills: () => ipcRenderer.invoke("skill-market:list-installed"),
+
+    listSkillOperations: () => ipcRenderer.invoke("skill-market:list-operations"),
+
+    onSkillOperationsChanged: (callback) => {
+        const handler = (_: unknown, operations: SkillMarketOperation[]) => callback(operations)
+        ipcRenderer.on("skill-market:operations-changed", handler)
+        return () => ipcRenderer.removeListener("skill-market:operations-changed", handler)
+    },
+
+    installSkill: (input, options) => ipcRenderer.invoke("skill-market:install", input, options),
+
+    deleteSkill: (skillKey, options) => ipcRenderer.invoke("skill-market:delete", skillKey, options),
 
     setTitleBarOverlay: (options) => ipcRenderer.invoke("set-title-bar-overlay", options),
 

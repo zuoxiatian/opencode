@@ -4,6 +4,7 @@ import { ChatPanel } from "./ChatPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import type { ThemeMode } from "../theme"
+import type { ClientAuthSession } from "../auth"
 import { readChatVisibility, writeChatVisibility, type ChatVisibilitySettings } from "../settings"
 
 // 服务器信息类型
@@ -14,8 +15,10 @@ interface ServerInfo {
 
 interface AppProps {
     serverInfo: ServerInfo
+    clientAuthSession: ClientAuthSession
     themeMode: ThemeMode
     onThemeModeChange: (mode: ThemeMode) => void
+    onLogout: () => void
 }
 
 export function App(props: AppProps) {
@@ -97,8 +100,10 @@ export function App(props: AppProps) {
                     >
                         <FolderPanel
                             onCollapse={() => setFolderCollapsed(true)}
+                            clientAuthSession={props.clientAuthSession}
                             themeMode={props.themeMode}
                             onThemeModeChange={props.onThemeModeChange}
+                            onLogout={props.onLogout}
                             chatVisibility={chatVisibility()}
                             onChatVisibilityChange={handleChatVisibilityChange}
                         />

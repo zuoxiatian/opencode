@@ -8,6 +8,14 @@ declare module "*.png" {
     export default src
 }
 
+interface ImportMetaEnv {
+    readonly VITE_CLIENT_API_BASE_URL?: string
+}
+
+interface ImportMeta {
+    readonly env: ImportMetaEnv
+}
+
 declare module "@opencode-ai/app" {
     export interface Platform {
         platform: "desktop"
