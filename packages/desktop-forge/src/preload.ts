@@ -22,7 +22,7 @@ interface DirectoryWatchResult {
 export interface ElectronAPI {
     onServerReady: (callback: (data: { url: string; password: string | null }) => void) => void
     getServerInfo: () => Promise<{ url: string; password: string | null } | null>
-    startServer: () => Promise<{ url: string; password: string | null }>
+    startServer: (options: { opencodeConfig: unknown }) => Promise<{ url: string; password: string | null }>
     stopServer: () => Promise<{ success: boolean }>
     pickDirectory: () => Promise<string | null>
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
@@ -51,7 +51,7 @@ const electronAPI: ElectronAPI = {
 
     getServerInfo: () => ipcRenderer.invoke("get-server-info"),
 
-    startServer: () => ipcRenderer.invoke("start-server"),
+    startServer: (options) => ipcRenderer.invoke("start-server", options),
 
     stopServer: () => ipcRenderer.invoke("stop-server"),
 

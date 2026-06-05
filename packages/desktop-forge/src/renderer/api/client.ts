@@ -50,31 +50,45 @@ export async function refreshClientAuth() {
 }
 
 export async function clientFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-    const session = await ensureClientAccessToken()
-    const response = await fetch(resolveClientApiInput(input), withClientAuthHeaders(input, init, session.accessToken))
+    const session = await ensureClientLoginToken()
+    const response = await fetch(resolveClientApiInput(input), withClientAuthHeaders(input, init, session.loginToken))
     if (response.status !== 401) return response
+    if (!session.refreshToken || !session.refreshTokenExpire) return response
 
     const refreshed = await refreshClientAuth()
-    return fetch(resolveClientApiInput(input), withClientAuthHeaders(input, init, refreshed.accessToken))
+    return fetch(resolveClientApiInput(input), withClientAuthHeaders(input, init, refreshed.loginToken))
 }
 
 function clientApiFetch(pathname: string, init: RequestInit) {
     return fetch(new URL(pathname, CLIENT_API_BASE_URL), init).catch(() => undefined)
 }
 
-async function ensureClientAccessToken() {
+async function ensureClientLoginToken() {
     const session = readStoredClientAuthSession()
     if (!session) {
         clearClientAuthSession()
         throw clientAuthError("missing")
     }
-    if (!isClientAuthExpiringSoon(session.accessTokenExpire)) return session
+    if (Date.parse(session.loginTokenExpire) <= Date.now()) {
+        if (session.refreshToken && session.refreshTokenExpire && Date.parse(session.refreshTokenExpire) > Date.now()) {
+            return refreshClientAuth()
+        }
+
+        clearClientAuthSession()
+        throw clientAuthError("expired")
+    }
+    if (!isClientAuthExpiringSoon(session.loginTokenExpire)) return session
+    if (!session.refreshToken || !session.refreshTokenExpire) return session
     return refreshClientAuth()
 }
 
 async function refreshClientAuthOnce() {
     const session = readStoredClientAuthSession()
     if (!session) {
+        clearClientAuthSession()
+        throw clientAuthError("missing")
+    }
+    if (!session.refreshToken || !session.refreshTokenExpire) {
         clearClientAuthSession()
         throw clientAuthError("missing")
     }
@@ -105,10 +119,10 @@ async function refreshClientAuthOnce() {
     return nextSession
 }
 
-function withClientAuthHeaders(input: RequestInfo | URL, init: RequestInit, accessToken: string) {
+function withClientAuthHeaders(input: RequestInfo | URL, init: RequestInit, loginToken: string) {
     const headers = new Headers(input instanceof Request ? input.headers : undefined)
     new Headers(init.headers).forEach((value, key) => headers.set(key, value))
-    headers.set("Authorization", `Bearer ${accessToken}`)
+    headers.set("Authorization", `Bearer ${loginToken}`)
     return { ...init, headers }
 }
 

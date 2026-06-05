@@ -33,7 +33,7 @@ const config: ForgeConfig = {
       CFBundleDisplayName: APP_NAME,
       CFBundleName: APP_NAME,
     },
-    extraResource: optionalResources(["build", "config"]),
+    extraResource: optionalResources(["build"]),
     icon: path.resolve(packageDir, "build", "icon"),
     name: APP_NAME,
     osxNotarize: macNotarizeOptions(),

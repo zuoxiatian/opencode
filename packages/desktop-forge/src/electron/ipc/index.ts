@@ -55,9 +55,9 @@ export function registerIpcHandlers(state: MainState) {
 
     ipcMain.handle("get-server-info", () => state.serverInfo)
 
-    ipcMain.handle("start-server", async () => {
+    ipcMain.handle("start-server", async (_, options?: { opencodeConfig?: unknown }) => {
         if (state.serverInfo) return state.serverInfo
-        const info = await startServer(state)
+        const info = await startServer(state, options?.opencodeConfig)
         state.serverInfo = info
         state.window?.webContents.send("server-ready", info)
         return info

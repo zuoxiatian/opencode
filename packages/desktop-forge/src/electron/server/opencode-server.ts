@@ -1,14 +1,14 @@
 import { app } from "electron"
 import { spawn } from "node:child_process"
 import { join } from "node:path"
-import { ensureDefaultOpencodeConfig } from "./default-opencode-config"
+import { writeSyncedOpencodeConfig } from "./opencode-config"
 import { getBunCommand, inheritUserShellEnv } from "./shell-env"
 import { packagedOpencodeBin, repoRoot } from "../resources/paths"
 import { runtimeEnv } from "./runtime"
 import type { MainState, ServerInfo } from "../app/state"
 
-export async function startServer(state: MainState): Promise<ServerInfo> {
-    await ensureDefaultOpencodeConfig()
+export async function startServer(state: MainState, opencodeConfig: unknown): Promise<ServerInfo> {
+    await writeSyncedOpencodeConfig(opencodeConfig)
 
     return new Promise((resolve, reject) => {
         const password = Math.random().toString(36).substring(2, 15)

@@ -1,18 +1,11 @@
 import { spawnSync } from "node:child_process"
-import { existsSync } from "node:fs"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { defaultOpencodeConfigPath } from "../resources/paths"
 
-export async function ensureDefaultOpencodeConfig() {
-    const configDir = join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "config")
-    const source = defaultOpencodeConfigPath()
-
-    if (!existsSync(source)) return
-
-    await mkdir(configDir, { recursive: true })
-    await writeFileForce(join(configDir, "opencode.jsonc"), await readFile(source, "utf8"))
+export async function writeSyncedOpencodeConfig(config: unknown) {
+    if (!isRecord(config)) throw new Error("模型配置不是 JSON 对象")
+    await writeOpencodeConfigContent(`${JSON.stringify(config, null, 2)}\n`)
 }
 
 function permissionError(error: unknown) {
@@ -26,6 +19,19 @@ async function writeFileForce(file: string, content: string) {
         clearWindowsReadonlyAttribute(file)
         return writeFile(file, content)
     })
+}
+
+async function writeOpencodeConfigContent(content: string) {
+    await mkdir(opencodeConfigDir(), { recursive: true })
+    await writeFileForce(join(opencodeConfigDir(), "opencode.jsonc"), content)
+}
+
+function opencodeConfigDir() {
+    return join(process.env.OPENCODE_TEST_HOME ?? homedir(), ".lxz", "config")
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input)
 }
 
 function clearWindowsReadonlyAttribute(file: string) {

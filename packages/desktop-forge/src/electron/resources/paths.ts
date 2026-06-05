@@ -28,10 +28,6 @@ export function appIconPath() {
     return undefined
 }
 
-export function defaultOpencodeConfigPath() {
-    return packageResourcePath("config", "opencode.jsonc")
-}
-
 export function bundledRuntimeDir() {
     return packageResourcePath("runtimes", `${process.platform}-${process.arch}`)
 }

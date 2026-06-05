@@ -5,7 +5,8 @@ import { showToast, Toast } from "@opencode-ai/ui/toast"
 import "./index.css"
 import { App } from "./components/App"
 import { LoginPage } from "./components/LoginPage"
-import { clearClientAuthSession, readStoredClientAuthSession, subscribeClientAuthSession, type ClientAuthSession } from "./auth"
+import { clearClientAuthSession, isClientAuthSessionExpired, readStoredClientAuthSession, subscribeClientAuthSession, type ClientAuthSession } from "./auth"
+import { getClientModelConfig } from "./api/model-config"
 import { syncRequiredClientSkills, type SkillSyncSummary } from "./services/skill-sync"
 import { getSystemTheme, readStoredThemeMode, resolveThemeMode, THEME_STORAGE_KEY } from "./theme"
 import welcomeIcon from "../../build/128x128.png"
@@ -20,6 +21,7 @@ function Root() {
     const [serverInfo, setServerInfo] = createSignal<ServerInfo | null>(null)
     const [isServerStarting, setIsServerStarting] = createSignal(false)
     const [serverStartError, setServerStartError] = createSignal("")
+    const [isModelConfigLoading, setIsModelConfigLoading] = createSignal(false)
     const [isSkillSyncing, setIsSkillSyncing] = createSignal(false)
     const [skillSyncUserID, setSkillSyncUserID] = createSignal<number | null>(null)
     const [clientAuthSession, setClientAuthSession] = createSignal<ClientAuthSession | null>(readStoredClientAuthSession())
@@ -43,6 +45,7 @@ function Root() {
         setServerInfo(null)
         setIsServerStarting(false)
         setServerStartError("")
+        setIsModelConfigLoading(false)
         setIsSkillSyncing(false)
         setSkillSyncUserID(null)
         void window.electronAPI.stopServer()
@@ -90,10 +93,10 @@ function Root() {
         const session = clientAuthSession()
         if (!session) return
         const checkExpiration = () => {
-            if (Date.parse(session.refreshTokenExpire) > Date.now()) return
+            if (!isClientAuthSessionExpired(session)) return
             clearSessionAndStopServer()
         }
-        if (Date.parse(session.refreshTokenExpire) <= Date.now()) {
+        if (isClientAuthSessionExpired(session)) {
             clearSessionAndStopServer()
             return
         }
@@ -105,13 +108,35 @@ function Root() {
         if (serverInfo() || isServerStarting()) return
         setIsServerStarting(true)
         setServerStartError("")
-        const info = await window.electronAPI.startServer().catch((error: unknown) => {
+        setIsModelConfigLoading(true)
+        const modelConfig = await getClientModelConfig().catch((error: unknown) => {
+            const message = errorMessage(error, "读取模型配置失败")
+            console.error("读取模型配置失败:", error)
+            showToast({
+                description: message,
+                title: "模型配置同步失败",
+                variant: "error",
+            })
+            clearSessionAndStopServer()
+            return null
+        })
+        setIsModelConfigLoading(false)
+        if (!modelConfig) {
+            setIsServerStarting(false)
+            return
+        }
+        if (!clientAuthSession()) {
+            setIsServerStarting(false)
+            return
+        }
+
+        const info = await window.electronAPI.startServer({ opencodeConfig: modelConfig.config }).catch((error: unknown) => {
             console.error("启动后端服务失败:", error)
+            setServerStartError(errorMessage(error, "无法启动后端服务"))
             return null
         })
         if (!info) {
             setIsServerStarting(false)
-            setServerStartError("无法启动后端服务")
             return
         }
         if (!clientAuthSession()) {
@@ -151,6 +176,7 @@ function Root() {
         if (!session) return
         if (isSkillSyncing() || skillSyncUserID() !== session.user.id) return
         if (serverInfo() || isServerStarting()) return
+        if (serverStartError()) return
         void startOpencodeServer()
     })
 
@@ -171,7 +197,7 @@ function Root() {
                             <div class="welcome-screen">
                                 <img class="welcome-icon" src={welcomeIcon} alt="" />
                                 <div class="welcome-title welcome-brand-title">LongwiseTechAgent</div>
-                                <div class="welcome-subtitle">{serverStartError() || (isSkillSyncing() ? "正在同步技能..." : "正在启动后端服务...")}</div>
+                                <div class="welcome-subtitle">{serverStartError() || (isSkillSyncing() ? "正在同步技能..." : isModelConfigLoading() ? "正在加载模型配置..." : "正在启动后端服务...")}</div>
                                 <Show when={!serverStartError()} fallback={
                                     <button class="btn btn-primary" onClick={() => void startOpencodeServer()}>
                                         重新启动服务
@@ -180,7 +206,7 @@ function Root() {
                                     <div class="welcome-progress"></div>
                                     <div class="status-indicator">
                                         <span class="status-dot connecting"></span>
-                                        <span>{isSkillSyncing() ? "同步中" : isServerStarting() ? "启动中" : "准备启动"}</span>
+                                        <span>{isSkillSyncing() ? "同步中" : isModelConfigLoading() ? "配置中" : isServerStarting() ? "启动中" : "准备启动"}</span>
                                     </div>
                                 </Show>
                             </div>
@@ -231,6 +257,10 @@ function notifySkillSyncSummary(summary: SkillSyncSummary) {
         title: "技能同步完成",
         variant: "success",
     })
+}
+
+function errorMessage(error: unknown, fallback: string) {
+    return error instanceof Error && error.message ? error.message : fallback
 }
 
 const rootElement = document.getElementById("root")

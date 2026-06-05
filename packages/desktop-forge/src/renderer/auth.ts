@@ -12,18 +12,19 @@ export type ClientUser = {
 }
 
 export type ClientAuthSession = {
-    accessToken: string
-    accessTokenExpire: string
-    refreshToken: string
-    refreshTokenExpire: string
+    loginToken: string
+    loginTokenExpire: string
+    refreshToken: string | null
+    refreshTokenExpire: string | null
     user: ClientUser
 }
 
-export type ClientAuthResponse = ClientAuthSession & {
+export type ClientAuthResponse = Record<string, unknown> & {
     ok: true
+    user: ClientUser
 }
 
-export type ClientTokenRefreshResponse = Omit<ClientAuthSession, "user"> & {
+export type ClientTokenRefreshResponse = Record<string, unknown> & {
     ok: true
     user?: unknown
 }
@@ -32,15 +33,16 @@ export function readStoredClientAuthSession() {
     const raw = localStorage.getItem(CLIENT_AUTH_STORAGE_KEY)
     if (!raw) return null
     const parsed = parseStoredSession(raw)
-    if (!isClientAuthSession(parsed)) {
+    const session = clientAuthSessionFromStored(parsed)
+    if (!session) {
         clearClientAuthSession()
         return null
     }
-    if (Date.parse(parsed.refreshTokenExpire) <= Date.now()) {
+    if (isClientAuthSessionExpired(session)) {
         clearClientAuthSession()
         return null
     }
-    return parsed
+    return session
 }
 
 export function writeClientAuthSession(session: ClientAuthSession) {
@@ -63,30 +65,33 @@ export function subscribeClientAuthSession(callback: (session: ClientAuthSession
 
 export function isClientAuthResponse(input: unknown): input is ClientAuthResponse {
     if (!isRecord(input)) return false
-    return input.ok === true && isClientAuthSession(input)
+    return input.ok === true && isClientUser(input.user) && authTokensFromRecord(input) !== null
 }
 
 export function isClientTokenRefreshResponse(input: unknown): input is ClientTokenRefreshResponse {
     if (!isRecord(input)) return false
-    return input.ok === true && hasValidClientTokens(input)
+    return input.ok === true && authTokensFromRecord(input) !== null
 }
 
 export function clientAuthSessionFromResponse(response: ClientAuthResponse): ClientAuthSession {
+    const tokens = authTokensFromRecord(response)
+    if (!tokens) throw new Error("登录响应缺少 token")
+
     return {
-        accessToken: response.accessToken,
-        accessTokenExpire: response.accessTokenExpire,
-        refreshToken: response.refreshToken,
-        refreshTokenExpire: response.refreshTokenExpire,
+        ...tokens,
         user: response.user,
     }
 }
 
 export function clientAuthSessionFromRefreshResponse(response: ClientTokenRefreshResponse, current: ClientAuthSession): ClientAuthSession {
+    const tokens = authTokensFromRecord(response)
+    if (!tokens) throw new Error("刷新登录态响应缺少 token")
+
     return {
-        accessToken: response.accessToken,
-        accessTokenExpire: response.accessTokenExpire,
-        refreshToken: response.refreshToken,
-        refreshTokenExpire: response.refreshTokenExpire,
+        loginToken: tokens.loginToken,
+        loginTokenExpire: tokens.loginTokenExpire,
+        refreshToken: tokens.refreshToken ?? current.refreshToken,
+        refreshTokenExpire: tokens.refreshTokenExpire ?? current.refreshTokenExpire,
         user: isClientUser(response.user) ? response.user : current.user,
     }
 }
@@ -95,9 +100,20 @@ export function isClientAuthExpiringSoon(expireAt: string) {
     return Date.parse(expireAt) - Date.now() < 60_000
 }
 
-function isClientAuthSession(input: unknown): input is ClientAuthSession {
-    if (!isRecord(input)) return false
-    return hasValidClientTokens(input) && isClientUser(input.user)
+export function isClientAuthSessionExpired(session: ClientAuthSession) {
+    if (Date.parse(session.loginTokenExpire) > Date.now()) return false
+    if (!session.refreshTokenExpire) return true
+    return Date.parse(session.refreshTokenExpire) <= Date.now()
+}
+
+function clientAuthSessionFromStored(input: unknown): ClientAuthSession | null {
+    if (!isRecord(input)) return null
+    const tokens = authTokensFromRecord(input)
+    if (!tokens || !isClientUser(input.user)) return null
+    return {
+        ...tokens,
+        user: input.user,
+    }
 }
 
 function isClientUser(input: unknown): input is ClientUser {
@@ -117,17 +133,36 @@ function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null
 }
 
-function hasValidClientTokens(input: Record<string, unknown>) {
-    return (
-        typeof input.accessToken === "string"
-        && input.accessToken.length > 0
-        && typeof input.accessTokenExpire === "string"
-        && Number.isFinite(Date.parse(input.accessTokenExpire))
-        && typeof input.refreshToken === "string"
-        && input.refreshToken.length > 0
-        && typeof input.refreshTokenExpire === "string"
-        && Number.isFinite(Date.parse(input.refreshTokenExpire))
-    )
+function authTokensFromRecord(input: Record<string, unknown>) {
+    if (typeof input.loginToken === "string" && input.loginToken.length > 0
+        && typeof input.loginTokenExpire === "string" && Number.isFinite(Date.parse(input.loginTokenExpire))) {
+        return {
+            loginToken: input.loginToken,
+            loginTokenExpire: input.loginTokenExpire,
+            refreshToken: nullableToken(input.refreshToken),
+            refreshTokenExpire: nullableDate(input.refreshTokenExpire),
+        }
+    }
+
+    if (typeof input.accessToken === "string" && input.accessToken.length > 0
+        && typeof input.accessTokenExpire === "string" && Number.isFinite(Date.parse(input.accessTokenExpire))) {
+        return {
+            loginToken: input.accessToken,
+            loginTokenExpire: input.accessTokenExpire,
+            refreshToken: nullableToken(input.refreshToken),
+            refreshTokenExpire: nullableDate(input.refreshTokenExpire),
+        }
+    }
+
+    return null
+}
+
+function nullableToken(input: unknown) {
+    return typeof input === "string" && input.length > 0 ? input : null
+}
+
+function nullableDate(input: unknown) {
+    return typeof input === "string" && Number.isFinite(Date.parse(input)) ? input : null
 }
 
 function parseStoredSession(raw: string) {
