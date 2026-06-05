@@ -4,7 +4,6 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import path, { join } from "node:path"
-import { bundledSkillsDir } from "../resources/paths"
 import { readSkillMetadata } from "./skill-metadata"
 import type { InstalledSkill, SkillInstallRequest, SkillSource } from "../../shared/skill-market"
 
@@ -25,7 +24,6 @@ interface SkillStateRecord {
     installedAt?: string
     updatedAt?: string
     deletedAt?: string
-    suppressed?: boolean
     skillID?: number
 }
 
@@ -35,12 +33,11 @@ export async function listInstalledSkills(): Promise<InstalledSkill[]> {
     await mkdir(skillsRootDir(), { recursive: true })
 
     const state = await readSkillMarketState()
-    const bundled = await bundledSkillKeys()
     const entries = await readdir(skillsRootDir(), { withFileTypes: true }).catch(() => [])
     const skills = await Promise.all(
         entries
             .filter((entry) => entry.isDirectory() && existsSync(join(skillsRootDir(), entry.name, "SKILL.md")))
-            .map((entry) => installedSkillFromDirectory(entry.name, state, bundled)),
+            .map((entry) => installedSkillFromDirectory(entry.name, state)),
     )
 
     return skills.toSorted((a, b) => a.name.localeCompare(b.name))
@@ -74,9 +71,7 @@ export async function deleteInstalledSkill(skillKey: string) {
     if (!existsSync(join(location, "SKILL.md"))) throw new Error("技能不存在")
 
     const state = await readSkillMarketState()
-    const bundled = await bundledSkillKeys()
     const record = state.skills[skillKey]
-    const source = record?.source ?? (bundled.has(skillKey) ? "bundled" : "local")
 
     await rm(location, { recursive: true, force: true })
     state.skills[skillKey] = {
@@ -84,17 +79,11 @@ export async function deleteInstalledSkill(skillKey: string) {
         deletedAt: new Date().toISOString(),
         enabled: false,
         skillKey,
-        source,
-        suppressed: bundled.has(skillKey),
+        source: skillSource(record?.source),
     }
     await writeSkillMarketState(state)
 
     return skillKey
-}
-
-export async function isBundledSkillSuppressed(skillKey: string) {
-    validateSkillKey(skillKey)
-    return (await readSkillMarketState()).skills[skillKey]?.suppressed === true
 }
 
 export function skillDirFor(skillKey: string) {
@@ -123,12 +112,11 @@ async function installedSkillByKey(skillKey: string) {
         ?? (() => { throw new Error("技能安装后未找到") })()
 }
 
-async function installedSkillFromDirectory(skillKey: string, state: SkillMarketState, bundled: Set<string>): Promise<InstalledSkill> {
+async function installedSkillFromDirectory(skillKey: string, state: SkillMarketState): Promise<InstalledSkill> {
     const location = skillDirFor(skillKey)
     const metadata = await readSkillMetadata(location)
     const record = state.skills[skillKey]
-    const source = record?.source ?? (bundled.has(skillKey) ? "bundled" : "local")
-    const managed = source !== "local" || bundled.has(skillKey)
+    const source = skillSource(record?.source)
 
     return {
         canDelete: true,
@@ -140,7 +128,7 @@ async function installedSkillFromDirectory(skillKey: string, state: SkillMarketS
         fileSize: record?.fileSize,
         installedAt: record?.installedAt,
         location,
-        managed,
+        managed: source !== "local",
         name: metadata.name ?? skillKey,
         sha256: record?.sha256,
         skillID: record?.skillID,
@@ -226,22 +214,10 @@ async function writeInstalledState(input: SkillInstallRequest) {
         skillID: input.skillID,
         skillKey: input.skillKey,
         source: "market",
-        suppressed: false,
         updatedAt: now,
         version: input.version,
     }
     await writeSkillMarketState(state)
-}
-
-async function bundledSkillKeys() {
-    if (!existsSync(bundledSkillsDir())) return new Set<string>()
-
-    const entries = await readdir(bundledSkillsDir(), { withFileTypes: true }).catch(() => [])
-    return new Set(
-        entries
-            .filter((entry) => entry.isDirectory() && existsSync(join(bundledSkillsDir(), entry.name, "SKILL.md")))
-            .map((entry) => entry.name),
-    )
 }
 
 async function readSkillMarketState(): Promise<SkillMarketState> {
@@ -278,6 +254,10 @@ function validateSkillInstallRequest(input: SkillInstallRequest) {
 
 function validateSkillKey(skillKey: string) {
     if (!safeSkillKeyPattern.test(skillKey)) throw new Error(`非法技能标识：${skillKey}`)
+}
+
+function skillSource(source: string | undefined): SkillSource {
+    return source && source !== "local" ? "market" : "local"
 }
 
 function parseJson(raw: string) {

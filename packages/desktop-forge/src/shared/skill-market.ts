@@ -1,4 +1,4 @@
-export type SkillSource = "market" | "bundled" | "local"
+export type SkillSource = "market" | "local"
 export type SkillMarketOperationSource = "manual" | "auto-sync"
 export type SkillMarketOperationType = "install" | "update" | "delete" | "archive-delete"
 

@@ -15,26 +15,12 @@ export async function readSkillMetadata(skillDir: string) {
     return parseSkillMarkdown(await readFile(file, "utf8"))
 }
 
-export async function skillVersion(skillDir: string) {
-    return (await readSkillMetadata(skillDir)).version
-}
-
 export function parseSkillMarkdown(markdown: string): SkillMarkdownMetadata {
     return {
         description: frontmatterValue(markdown, "description"),
         name: frontmatterValue(markdown, "name"),
         version: metadataValue(markdown, "version") ?? frontmatterValue(markdown, "version"),
     }
-}
-
-export function compareSkillVersions(next: string | undefined, current: string | undefined) {
-    const nextParts = versionParts(next)
-    const currentParts = versionParts(current)
-    const length = Math.max(nextParts.length, currentParts.length)
-
-    return Array.from({ length })
-        .map((_, index) => (nextParts[index] ?? 0) - (currentParts[index] ?? 0))
-        .find((diff) => diff !== 0) ?? 0
 }
 
 function metadataValue(markdown: string, key: string) {
@@ -85,13 +71,4 @@ function frontmatterLines(markdown: string) {
 
 function cleanFrontmatterValue(value: string) {
     return value.trim().replace(/^["']|["']$/g, "")
-}
-
-function versionParts(version: string | undefined) {
-    return (version ?? "0")
-        .trim()
-        .replace(/^v/i, "")
-        .split(/[^0-9]+/)
-        .filter(Boolean)
-        .map((part) => Number(part))
 }

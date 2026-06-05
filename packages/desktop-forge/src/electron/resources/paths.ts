@@ -32,10 +32,6 @@ export function defaultOpencodeConfigPath() {
     return packageResourcePath("config", "opencode.jsonc")
 }
 
-export function bundledSkillsDir() {
-    return packageResourcePath("skills")
-}
-
 export function bundledRuntimeDir() {
     return packageResourcePath("runtimes", `${process.platform}-${process.arch}`)
 }

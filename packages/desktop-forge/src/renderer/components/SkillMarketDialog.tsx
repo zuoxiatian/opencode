@@ -221,7 +221,6 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
 
     const sourceLabel = (source: InstalledSkill["source"]) => {
         if (source === "market") return "市场"
-        if (source === "bundled") return "内置"
         return "本地"
     }
 
