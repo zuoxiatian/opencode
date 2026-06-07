@@ -26,11 +26,11 @@ import LogOut from "lucide-solid/icons/log-out"
 import MessageCircle from "lucide-solid/icons/message-circle"
 import Monitor from "lucide-solid/icons/monitor"
 import Moon from "lucide-solid/icons/moon"
-import Package from "lucide-solid/icons/package"
 import Palette from "lucide-solid/icons/palette"
 import PanelLeft from "lucide-solid/icons/panel-left"
 import PencilLine from "lucide-solid/icons/pencil-line"
 import Presentation from "lucide-solid/icons/presentation"
+import Puzzle from "lucide-solid/icons/puzzle"
 import RefreshCw from "lucide-solid/icons/refresh-cw"
 import Settings from "lucide-solid/icons/settings"
 import SquareTerminal from "lucide-solid/icons/square-terminal"
@@ -1084,7 +1084,7 @@ export function FolderPanel(props: FolderPanelProps) {
                                 role="menuitem"
                                 onClick={openSkillMarket}
                             >
-                                <Package class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                <Puzzle class="sidebar-action-icon" size={14} strokeWidth={1.8} />
                                 <span>技能市场</span>
                             </button>
                             <button

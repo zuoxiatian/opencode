@@ -59,7 +59,7 @@ export function ContentPanel() {
                             <div class="content-placeholder-text">
                                 选择一个文件查看内容
                             </div>
-                            <div style={{ "margin-top": "16px", color: "var(--text-tertiary)", "font-size": "12px" }}>
+                            <div style={{ "margin-top": "16px", color: "var(--text-secondary)", "font-size": "12px" }}>
                                 支持预览: PDF, Word, Markdown, TXT, JSON, JS, TS, CSS, HTML 等
                             </div>
                         </div>
@@ -72,7 +72,7 @@ export function ContentPanel() {
                             <div class="content-placeholder-text">
                                 不支持预览此类型的文件
                             </div>
-                            <div style={{ "margin-top": "8px", color: "var(--text-tertiary)", "font-size": "12px" }}>
+                            <div style={{ "margin-top": "8px", color: "var(--text-secondary)", "font-size": "12px" }}>
                                 {currentFileName()}
                             </div>
                         </div>
