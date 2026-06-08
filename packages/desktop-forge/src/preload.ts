@@ -7,6 +7,7 @@ import type {
     SkillMarketOperationOptions,
     SkillOperationResult,
 } from "./shared/skill-market"
+import type { ClientApiRequest, ClientApiResponse } from "./shared/client-api"
 import type { ClientAppInfo, ClientUpdatePrompt } from "./shared/client-update"
 
 export interface DirectoryChangeEvent {
@@ -29,6 +30,7 @@ export interface ElectronAPI {
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
     saveFile: (options?: { defaultPath?: string }) => Promise<string | null>
     openExternal: (url: string) => Promise<void>
+    clientApiRequest: (input: ClientApiRequest) => Promise<ClientApiResponse>
     getAppInfo: () => Promise<ClientAppInfo>
     promptClientUpdate: (update: ClientUpdatePrompt) => Promise<{ action: "cancel" | "open" }>
     openPath: (path: string) => Promise<{ success: boolean; error?: string }>
@@ -65,6 +67,8 @@ const electronAPI: ElectronAPI = {
     saveFile: (options) => ipcRenderer.invoke("save-file", options),
 
     openExternal: (url) => ipcRenderer.invoke("open-external", url),
+
+    clientApiRequest: (input) => ipcRenderer.invoke("client-api:request", input),
 
     getAppInfo: () => ipcRenderer.invoke("get-app-info"),
 

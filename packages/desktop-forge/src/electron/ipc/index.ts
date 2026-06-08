@@ -7,6 +7,7 @@ import { applyWindowTheme, isThemeMode, writeStoredThemeMode } from "../window/t
 import type { DirectoryWatchOptions, MainState, ThemeMode } from "../app/state"
 import { startServer, stopServer } from "../server/opencode-server"
 import { deleteInstalledSkill, installSkillPackage, listInstalledSkills, skillDirFor } from "../server/skill-market"
+import type { ClientApiRequest, ClientApiResponse } from "../../shared/client-api"
 import type { ClientAppInfo, ClientUpdatePrompt } from "../../shared/client-update"
 import type {
     SkillDeleteResult,
@@ -43,6 +44,8 @@ export function registerIpcHandlers(state: MainState) {
     ipcMain.handle("open-external", async (_, url: string) => {
         await shell.openExternal(url)
     })
+
+    ipcMain.handle("client-api:request", (_, input: ClientApiRequest) => requestClientApi(input))
 
     ipcMain.handle("get-app-info", () => ({
         arch: clientReleaseArch(),
@@ -174,6 +177,28 @@ export function registerIpcHandlers(state: MainState) {
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error)
+}
+
+async function requestClientApi(input: ClientApiRequest): Promise<ClientApiResponse> {
+    const url = new URL(input.url)
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error(`Unsupported client API protocol: ${url.protocol}`)
+    }
+
+    const response = await fetch(url, {
+        body: input.body,
+        headers: new Headers(input.headers),
+        method: input.method,
+        signal: AbortSignal.timeout(30_000),
+    })
+
+    return {
+        body: response.status === 204 || response.status === 304 ? null : await response.text(),
+        headers: [...response.headers.entries()],
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+    }
 }
 
 function listSkillOperations() {

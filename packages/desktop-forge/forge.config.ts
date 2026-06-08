@@ -9,7 +9,7 @@ import { FusesPlugin } from "@electron-forge/plugin-fuses"
 import { FuseV1Options, FuseVersion } from "@electron/fuses"
 import type { NotaryToolCredentials } from "@electron/notarize/lib/types"
 import { execFile } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs"
 import { chmod, cp, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
@@ -22,6 +22,8 @@ const packageDir = path.resolve(__dirname)
 const execFileAsync = promisify(execFile)
 const macEntitlements = path.resolve(packageDir, "build", "entitlements.mac.plist")
 const macEntitlementsInherit = path.resolve(packageDir, "build", "entitlements.mac.inherit.plist")
+const macSignRealPaths = new Set<string>()
+const macSignCodeExtensions = new Set([".app", ".framework", ".dylib", ".jnilib", ".node", ".so"])
 
 loadLocalSigningEnv()
 
@@ -36,7 +38,7 @@ const config: ForgeConfig = {
       CFBundleDisplayName: APP_NAME,
       CFBundleName: APP_NAME,
     },
-    extraResource: optionalResources(["build"]),
+    extraResource: optionalResources(["build/icon.png", "build/icon.ico"]),
     icon: path.resolve(packageDir, "build", "icon"),
     name: APP_NAME,
     osxNotarize: macNotarizeOptions(),
@@ -139,8 +141,32 @@ function macSignOptions() {
     ...(identity ? { identity } : {}),
     ...(keychain ? { keychain } : {}),
     continueOnError: false,
+    ignore: macSignIgnoreFile,
     optionsForFile: macSignOptionsForFile,
   }
+}
+
+function macSignIgnoreFile(filePath: string) {
+  if (lstatSync(filePath).isSymbolicLink()) return true
+  if (!isMacCodeSignTarget(filePath)) return true
+
+  const realPath = realpathSync(filePath)
+  if (macSignRealPaths.has(realPath)) return true
+
+  macSignRealPaths.add(realPath)
+  return false
+}
+
+function isMacCodeSignTarget(filePath: string) {
+  if (macSignCodeExtensions.has(path.extname(filePath))) return true
+
+  const resourcePath = filePath.split(path.sep).join("/")
+  if (resourcePath.includes(".app/Contents/MacOS/")) return true
+  if (resourcePath.includes(".app/Contents/Frameworks/")) return path.extname(filePath) === ""
+  if (resourcePath.includes(".app/Contents/Resources/bin/")) return path.extname(filePath) === ""
+  if (!resourcePath.includes(".app/Contents/Resources/runtimes/")) return false
+
+  return resourcePath.includes("/bin/")
 }
 
 function macSignOptionsForFile(filePath: string) {

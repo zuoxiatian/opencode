@@ -1,4 +1,5 @@
 import { CLIENT_API_BASE_URL } from "../config"
+import type { ClientApiRequest, ClientApiResponse } from "../../shared/client-api"
 import {
     clearClientAuthSession,
     clientAuthSessionFromRefreshResponse,
@@ -51,16 +52,21 @@ export async function refreshClientAuth() {
 
 export async function clientFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     const session = await ensureClientLoginToken()
-    const response = await fetch(resolveClientApiInput(input), withClientAuthHeaders(input, init, session.loginToken))
+    const response = await clientApiFetch(input, withClientAuthHeaders(input, init, session.loginToken))
+    if (!response) throw clientAuthError("network")
     if (response.status !== 401) return response
     if (!session.refreshToken || !session.refreshTokenExpire) return response
 
     const refreshed = await refreshClientAuth()
-    return fetch(resolveClientApiInput(input), withClientAuthHeaders(input, init, refreshed.loginToken))
+    const retryResponse = await clientApiFetch(input, withClientAuthHeaders(input, init, refreshed.loginToken))
+    if (!retryResponse) throw clientAuthError("network")
+    return retryResponse
 }
 
-function clientApiFetch(pathname: string, init: RequestInit) {
-    return fetch(new URL(pathname, CLIENT_API_BASE_URL), init).catch(() => undefined)
+function clientApiFetch(input: RequestInfo | URL, init: RequestInit) {
+    return window.electronAPI.clientApiRequest(clientApiRequest(input, init))
+        .then(clientApiResponse)
+        .catch(() => undefined)
 }
 
 async function ensureClientLoginToken() {
@@ -129,6 +135,37 @@ function withClientAuthHeaders(input: RequestInfo | URL, init: RequestInit, logi
 function resolveClientApiInput(input: RequestInfo | URL) {
     if (typeof input === "string") return new URL(input, CLIENT_API_BASE_URL)
     return input
+}
+
+function clientApiRequest(input: RequestInfo | URL, init: RequestInit): ClientApiRequest {
+    return {
+        body: clientApiRequestBody(init.body),
+        headers: [...new Headers(init.headers).entries()],
+        method: init.method,
+        url: clientApiUrl(input),
+    }
+}
+
+function clientApiUrl(input: RequestInfo | URL) {
+    const resolved = resolveClientApiInput(input)
+    if (resolved instanceof URL) return resolved.toString()
+    if (resolved instanceof Request) return resolved.url
+    return resolved
+}
+
+function clientApiRequestBody(body: BodyInit | null | undefined) {
+    if (body === undefined || body === null) return undefined
+    if (typeof body === "string") return body
+    if (body instanceof URLSearchParams) return body.toString()
+    throw new Error("Unsupported client API request body")
+}
+
+function clientApiResponse(input: ClientApiResponse) {
+    return new Response(input.body, {
+        headers: input.headers,
+        status: input.status,
+        statusText: input.statusText,
+    })
 }
 
 function clientAuthError(reason: ClientRefreshFailureReason, message?: string) {
