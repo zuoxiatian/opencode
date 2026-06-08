@@ -61,7 +61,6 @@ export function createPlatform(password: Accessor<string | null>): Platform {
 
             const notification = new Notification(title, {
                 body: description ?? "",
-                icon: "https://opencode.ai/favicon-96x96.png",
             })
 
             notification.onclick = () => {

@@ -14,8 +14,10 @@ import { chmod, cp, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 
-const APP_ID = "ai.opencode.desktop"
+const APP_ID = "com.longwisepr.agent"
 const APP_NAME = "LongwiseTechAgent"
+const APP_COMPANY = "Longwise"
+const APP_COPYRIGHT = `Copyright (C) 2026 ${APP_COMPANY}. All rights reserved.`
 const packageDir = path.resolve(__dirname)
 const execFileAsync = promisify(execFile)
 const macEntitlements = path.resolve(packageDir, "build", "entitlements.mac.plist")
@@ -28,6 +30,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     appBundleId: APP_ID,
     appCategoryType: "public.app-category.productivity",
+    appCopyright: APP_COPYRIGHT,
     executableName: APP_NAME,
     extendInfo: {
       CFBundleDisplayName: APP_NAME,
@@ -41,7 +44,7 @@ const config: ForgeConfig = {
     asar: true,
     afterCopyExtraResources: [copyPlatformResources],
     win32metadata: {
-      CompanyName: "Longwise",
+      CompanyName: APP_COMPANY,
       FileDescription: `${APP_NAME} desktop client`,
       InternalName: APP_NAME,
       OriginalFilename: `${APP_NAME}.exe`,
@@ -52,6 +55,8 @@ const config: ForgeConfig = {
   makers: [
     new MakerSquirrel({
       name: APP_NAME,
+      authors: APP_COMPANY,
+      copyright: APP_COPYRIGHT,
       setupIcon: path.resolve(packageDir, "build", "icon.ico"),
     }),
     new MakerDMG({

@@ -7,7 +7,7 @@
 :root {
     color-scheme: dark;
 
-    /* OpenCode UI token overrides for desktop-lxz */
+    /* LongwiseTechAgent UI token overrides */
     --lxz-bg-left: #242424;
     --lxz-bg-right: #181818;
     --lxz-bg-right-deep: #151515;
@@ -164,7 +164,7 @@
     --shadow-glow: 0 0 20px rgba(157, 190, 254, 0.25);
     --shadow-glow-strong: 0 0 40px rgba(157, 190, 254, 0.35);
 
-    /* OpenCode UI markdown token bridge */
+    /* LongwiseTechAgent markdown token bridge */
     --font-family-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     --font-size-base: 14px;
