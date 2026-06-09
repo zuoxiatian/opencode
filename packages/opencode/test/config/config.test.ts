@@ -25,6 +25,7 @@ import path from "path"
 import fs from "fs/promises"
 import { pathToFileURL } from "url"
 import { Global } from "@opencode-ai/core/global"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { ProjectID } from "../../src/project/schema"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigPlugin } from "@/config/plugin"
@@ -2304,6 +2305,60 @@ describe("OPENCODE_DISABLE_PROJECT_CONFIG", () => {
       } else {
         process.env["OPENCODE_CONFIG_DIR"] = originalConfigDir
       }
+    }
+  })
+})
+
+describe("OPENCODE_DISABLE_GLOBAL_CONFIG", () => {
+  test("skips global config files while keeping OPENCODE_CONFIG_CONTENT", async () => {
+    const originalDisable = process.env["OPENCODE_DISABLE_GLOBAL_CONFIG"]
+    const originalContent = process.env["OPENCODE_CONFIG_CONTENT"]
+    const prev = Global.Path.config
+
+    try {
+      await using globalTmp = await tmpdir({
+        init: async (dir) => {
+          await writeConfig(dir, {
+            $schema: "https://opencode.ai/config.json",
+            model: "global/model",
+            username: "global-user",
+          })
+        },
+      })
+      await using projectTmp = await tmpdir()
+
+      ;(Global.Path as { config: string }).config = globalTmp.path
+      process.env["OPENCODE_DISABLE_GLOBAL_CONFIG"] = "true"
+      process.env["OPENCODE_CONFIG_CONTENT"] = JSON.stringify({
+        $schema: "https://opencode.ai/config.json",
+        model: "content/model",
+        username: "content-user",
+      })
+
+      await Instance.provide({
+        directory: projectTmp.path,
+        fn: async () => {
+          const config = await load()
+          expect(config.model).toBe("content/model")
+          expect(config.username).toBe("content-user")
+          expect(process.env["OPENCODE_CONFIG_CONTENT"]).toBeUndefined()
+          expect(Flag.OPENCODE_CONFIG_CONTENT).toBeUndefined()
+        },
+      })
+    } finally {
+      if (originalDisable === undefined) {
+        delete process.env["OPENCODE_DISABLE_GLOBAL_CONFIG"]
+      } else {
+        process.env["OPENCODE_DISABLE_GLOBAL_CONFIG"] = originalDisable
+      }
+      if (originalContent === undefined) {
+        delete process.env["OPENCODE_CONFIG_CONTENT"]
+      } else {
+        process.env["OPENCODE_CONFIG_CONTENT"] = originalContent
+      }
+      ;(Global.Path as { config: string }).config = prev
+      await Instance.disposeAll()
+      await clear(true)
     }
   })
 })

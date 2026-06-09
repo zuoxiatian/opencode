@@ -345,6 +345,8 @@ export const layer = Layer.effect(
     const accountSvc = yield* Account.Service
     const env = yield* Env.Service
     const npmSvc = yield* Npm.Service
+    const opencodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT
+    if (opencodeConfigContent) delete process.env.OPENCODE_CONFIG_CONTENT
 
     const readConfigFile = Effect.fnUntraced(function* (filepath: string) {
       return yield* fs.readFileString(filepath).pipe(
@@ -447,6 +449,7 @@ export const layer = Layer.effect(
 
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
+        if (opencodeConfigContent) yield* env.remove("OPENCODE_CONFIG_CONTENT")
         const auth = yield* authSvc.all().pipe(Effect.orDie)
 
         let result: Info = {}
@@ -508,7 +511,7 @@ export const layer = Layer.effect(
           }
         }
 
-        const global = yield* getGlobal()
+        const global = Flag.OPENCODE_DISABLE_GLOBAL_CONFIG ? {} : yield* getGlobal()
         yield* merge(Global.Path.config, global, "global")
 
         if (Flag.OPENCODE_CONFIG) {
@@ -580,9 +583,9 @@ export const layer = Layer.effect(
           yield* mergePluginOrigins(dir, list)
         }
 
-        if (process.env.OPENCODE_CONFIG_CONTENT) {
+        if (opencodeConfigContent) {
           const source = "OPENCODE_CONFIG_CONTENT"
-          const next = yield* loadConfig(process.env.OPENCODE_CONFIG_CONTENT, {
+          const next = yield* loadConfig(opencodeConfigContent, {
             dir: ctx.directory,
             source,
           })

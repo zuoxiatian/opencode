@@ -16,6 +16,10 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
     - `Global.Path.log`: `~/.lxz/data/log`
   - `OPENCODE_TEST_HOME` still overrides the home directory used to build `~/.lxz`.
 
+- `packages/core/src/flag/flag.ts`
+  - Added `OPENCODE_DISABLE_GLOBAL_CONFIG`.
+  - `OPENCODE_DISABLE_GLOBAL_CONFIG` and `OPENCODE_CONFIG_CONTENT` are evaluated at access time so tests and desktop startup code can set or clear them before loading config.
+
 - `packages/core/test/fixture/effect-flock-worker.ts`
   - Added the new `root` field to the test `Global.Service` fixture.
 
@@ -28,6 +32,17 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
   - External skills now scan only `~/.lxz/skills/**/SKILL.md`.
   - Restored project-local agent skill compatibility for `.agent/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md`.
   - This project-local compatibility is implemented only in the skill service, so `.opencode` config discovery remains unchanged.
+
+- `packages/opencode/src/config/config.ts`
+  - Added support for `OPENCODE_DISABLE_GLOBAL_CONFIG`.
+  - When the flag is true, global config files under `Global.Path.config` are skipped.
+  - `OPENCODE_CONFIG_CONTENT` is captured into the config service at startup and then removed from `process.env` and the internal Env state.
+  - `Flag.OPENCODE_CONFIG_CONTENT` is dynamic, so clearing `process.env.OPENCODE_CONFIG_CONTENT` does not leave a stale cached copy in the flag object.
+  - This keeps in-memory config loading available while preventing later shell, terminal, and tool child processes from inheriting the full config content.
+
+- `packages/opencode/test/config/config.test.ts`
+  - Added coverage for skipping global config files while still applying `OPENCODE_CONFIG_CONTENT`.
+  - Verifies `OPENCODE_CONFIG_CONTENT` is removed from `process.env` after the config service captures it.
 
 - `packages/opencode/src/server/routes/instance/middleware.ts`
   - Added a default project directory for instance requests that do not include `directory` or `x-opencode-directory`.
@@ -68,9 +83,14 @@ This fork mounts opencode's persistent local files under `~/.lxz` and limits ext
 
 ## Where to configure models and skills
 
-- Active model config file:
+- Active model config file for normal opencode CLI usage:
   - `~/.lxz/config/opencode.jsonc`
   - Also supported by the existing loader: `~/.lxz/config/opencode.json` and `~/.lxz/config/config.json`.
+
+- Desktop-forge startup can bypass the local model config file:
+  - The desktop client passes API-synced config through `OPENCODE_CONFIG_CONTENT`.
+  - It also sets `OPENCODE_DISABLE_GLOBAL_CONFIG=true`, so `~/.lxz/config/opencode.jsonc` does not participate in that desktop-launched opencode process.
+  - The config content is removed from `process.env` after opencode captures it, limiting child-process environment leakage.
 
 - External skill directory:
   - `~/.lxz/skills`
