@@ -21,10 +21,16 @@ interface DirectoryWatchResult {
     error?: string
 }
 
+interface ServerInfo {
+    url: string
+    password: string | null
+    defaultDirectory: string
+}
+
 export interface ElectronAPI {
-    onServerReady: (callback: (data: { url: string; password: string | null }) => void) => void
-    getServerInfo: () => Promise<{ url: string; password: string | null } | null>
-    startServer: (options: { opencodeConfig: unknown }) => Promise<{ url: string; password: string | null }>
+    onServerReady: (callback: (data: ServerInfo) => void) => void
+    getServerInfo: () => Promise<ServerInfo | null>
+    startServer: (options: { opencodeConfig: unknown }) => Promise<ServerInfo>
     stopServer: () => Promise<{ success: boolean }>
     pickDirectory: () => Promise<string | null>
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>

@@ -5,6 +5,7 @@ import type { ChildProcess } from "node:child_process"
 export interface ServerInfo {
     url: string
     password: string | null
+    defaultDirectory: string
 }
 
 export interface DirectoryWatchOptions {

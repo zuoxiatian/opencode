@@ -1462,7 +1462,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const loadProjectOptions = async () => {
         try {
-            const result = await sdk.client.project.list(undefined, { throwOnError: true })
+            const result = await sdk.client.project.list({ directory: sdk.directory() }, { throwOnError: true })
             setProjectOptions((result.data ?? [])
                 .filter((project) => Boolean(project.worktree))
                 .sort((a, b) => b.time.updated - a.time.updated))
@@ -1529,8 +1529,8 @@ export function ChatPanel(props: ChatPanelProps) {
     const loadChatOptions = async () => {
         try {
             const [providersResult, agentsResult] = await Promise.all([
-                sdk.client.config.providers(undefined, { throwOnError: true }),
-                sdk.client.app.agents(undefined, { throwOnError: true }),
+                sdk.client.config.providers({ directory: sdk.directory() }, { throwOnError: true }),
+                sdk.client.app.agents({ directory: sdk.directory() }, { throwOnError: true }),
             ])
             const defaults = providersResult.data.default
             const nextAgents = agentsResult.data

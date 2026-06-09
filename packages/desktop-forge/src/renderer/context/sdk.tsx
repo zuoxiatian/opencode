@@ -8,6 +8,7 @@ import { createInitialSessionState, type SessionState } from "../store/types"
 interface ServerInfo {
     url: string
     password: string | null
+    defaultDirectory: string
 }
 
 // 选中的文件信息
@@ -75,7 +76,7 @@ interface SDKProviderProps extends ParentProps {
 }
 
 export function SDKProvider(props: SDKProviderProps) {
-    const [directory, setDirectory] = createSignal("")
+    const [directory, setDirectory] = createSignal(props.serverInfo.defaultDirectory)
     const [selectedFile, setSelectedFile] = createSignal<SelectedFile | null>(null)
     const [selectedFiles, setSelectedFiles] = createSignal<SelectedFile[]>([])
     const [selectedSession, setSelectedSession] = createSignal<Session | null>(null)

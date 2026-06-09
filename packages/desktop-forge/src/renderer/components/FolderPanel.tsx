@@ -315,7 +315,7 @@ export function FolderPanel(props: FolderPanelProps) {
 
     const loadProjects = async () => {
         try {
-            const result = await sdk.client.project.list(undefined, { throwOnError: true })
+            const result = await sdk.client.project.list({ directory: sdk.directory() }, { throwOnError: true })
             const listed = (result.data ?? [])
                 .filter((project) => Boolean(project.worktree))
                 .sort((a, b) => b.time.updated - a.time.updated)

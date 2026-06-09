@@ -7,9 +7,11 @@ import { getBunCommand, inheritUserShellEnv } from "./shell-env"
 import { packagedOpencodeBin, repoRoot } from "../resources/paths"
 import { runtimeEnv } from "./runtime"
 import type { MainState, ServerInfo } from "../app/state"
+import { ensureDefaultDirectory } from "./default-directory"
 
 export async function startServer(state: MainState, opencodeConfig: unknown): Promise<ServerInfo> {
     if (!isRecord(opencodeConfig)) throw new Error("模型配置不是 JSON 对象")
+    const defaultDirectory = await ensureDefaultDirectory()
     await removeLegacySyncedOpencodeConfig()
 
     return new Promise((resolve, reject) => {
@@ -53,7 +55,7 @@ export async function startServer(state: MainState, opencodeConfig: unknown): Pr
         void waitForServer(() => serverUrl)
             .then(() => {
                 if (!serverUrl) throw new Error("Server URL missing")
-                resolve({ password, url: serverUrl })
+                resolve({ defaultDirectory, password, url: serverUrl })
             })
             .catch(reject)
     })

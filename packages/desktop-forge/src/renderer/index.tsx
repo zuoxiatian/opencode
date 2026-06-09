@@ -18,6 +18,7 @@ import welcomeIcon from "../../build/128x128.png"
 interface ServerInfo {
     url: string
     password: string | null
+    defaultDirectory: string
 }
 
 const CLIENT_STATUS_CHECK_INTERVAL_MS = 30_000

@@ -11,6 +11,7 @@ import { readChatVisibility, writeChatVisibility, type ChatVisibilitySettings } 
 interface ServerInfo {
     url: string
     password: string | null
+    defaultDirectory: string
 }
 
 interface AppProps {
