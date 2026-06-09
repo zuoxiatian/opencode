@@ -6,6 +6,7 @@ if (!clientApiBaseUrl) {
 }
 
 export const CLIENT_API_BASE_URL = clientApiBaseUrl
+export const CLIENT_DEBUG_LOGS_ENABLED = import.meta.env.DEV
 export const CLIENT_OFFICIAL_URL = clientOfficialUrlValue(clientOfficialUrl)
 export const CLIENT_UPDATE_CHANNEL = clientUpdateChannelValue(importMetaValue(import.meta.env.VITE_CLIENT_UPDATE_CHANNEL))
 

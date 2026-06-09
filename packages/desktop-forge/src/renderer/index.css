@@ -3097,7 +3097,7 @@ body {
     font-family: inherit;
     outline: none;
     resize: none;
-    min-height: 40px;
+    min-height: 62px;
     max-height: 120px;
 }
 
@@ -5752,8 +5752,9 @@ body {
 
 .chat-input {
     width: 100%;
+    height: auto;
     min-height: 62px;
-    max-height: 180px;
+    max-height: min(280px, 42dvh);
     padding: 15px 14px 3px;
     background: transparent;
     border: 0;
@@ -5763,6 +5764,9 @@ body {
     font-family: inherit;
     outline: none;
     resize: none;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    field-sizing: content;
 }
 
 .chat-input::placeholder {

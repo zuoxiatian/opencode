@@ -1,4 +1,4 @@
-import { CLIENT_API_BASE_URL } from "../config"
+import { CLIENT_API_BASE_URL, CLIENT_DEBUG_LOGS_ENABLED } from "../config"
 import type { ClientApiRequest, ClientApiResponse } from "../../shared/client-api"
 import {
     clearClientAuthSession,
@@ -50,6 +50,43 @@ export async function refreshClientAuth() {
     }
 }
 
+export async function checkClientStatus() {
+    const response = await clientFetch("/api/client/status").catch((error: unknown) => ({
+        error,
+        ok: false,
+        reason: readStoredClientAuthSession() ? "network" : "invalid",
+    }) as const)
+
+    if (!(response instanceof Response)) {
+        return {
+            message: errorMessage(response.error),
+            ok: false,
+            reason: response.reason,
+        } as const
+    }
+
+    const data = await response.json().catch(() => undefined) as unknown
+    if (CLIENT_DEBUG_LOGS_ENABLED) console.log("[client-status] response", {
+        body: data,
+        ok: response.ok,
+        status: response.status,
+    })
+    if (response.ok && isOkResponse(data)) return { ok: true } as const
+    if (response.status === 401) {
+        return {
+            message: responseMessage(data),
+            ok: false,
+            reason: "invalid",
+        } as const
+    }
+
+    return {
+        message: responseMessage(data),
+        ok: false,
+        reason: "network",
+    } as const
+}
+
 export async function clientFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     const session = await ensureClientLoginToken()
     const response = await clientApiFetch(input, withClientAuthHeaders(input, init, session.loginToken))
@@ -64,9 +101,30 @@ export async function clientFetch(input: RequestInfo | URL, init: RequestInit = 
 }
 
 function clientApiFetch(input: RequestInfo | URL, init: RequestInit) {
-    return window.electronAPI.clientApiRequest(clientApiRequest(input, init))
-        .then(clientApiResponse)
-        .catch(() => undefined)
+    const request = clientApiRequest(input, init)
+    if (CLIENT_DEBUG_LOGS_ENABLED) console.log("[client-api] request", {
+        method: request.method ?? "GET",
+        url: request.url,
+    })
+    return window.electronAPI.clientApiRequest(request)
+        .then((response) => {
+            if (CLIENT_DEBUG_LOGS_ENABLED) console.log("[client-api] response", {
+                body: safeClientApiLogBody(response.body),
+                method: request.method ?? "GET",
+                ok: response.ok,
+                status: response.status,
+                url: request.url,
+            })
+            return clientApiResponse(response)
+        })
+        .catch((error: unknown) => {
+            if (CLIENT_DEBUG_LOGS_ENABLED) console.warn("[client-api] request failed", {
+                error: errorMessage(error),
+                method: request.method ?? "GET",
+                url: request.url,
+            })
+            return undefined
+        })
 }
 
 async function ensureClientLoginToken() {
@@ -110,14 +168,16 @@ async function refreshClientAuthOnce() {
     })
 
     if (!response) {
-        clearClientAuthSession()
         throw clientAuthError("network")
     }
 
     const data = await response.json().catch(() => undefined) as unknown
-    if (!response.ok || !isClientTokenRefreshResponse(data)) {
+    if (response.status === 401) {
         clearClientAuthSession()
         throw clientAuthError("invalid", responseMessage(data))
+    }
+    if (!response.ok || !isClientTokenRefreshResponse(data)) {
+        throw clientAuthError("network", responseMessage(data))
     }
 
     const nextSession = clientAuthSessionFromRefreshResponse(data, session)
@@ -168,6 +228,45 @@ function clientApiResponse(input: ClientApiResponse) {
     })
 }
 
+function safeClientApiLogBody(body: string | null): unknown {
+    if (body === null) return null
+    const parsed = parseJsonBody(body)
+    if (parsed === undefined) return truncateLogString(body)
+    return redactClientApiLogValue(parsed)
+}
+
+function parseJsonBody(body: string) {
+    try {
+        return JSON.parse(body) as unknown
+    } catch {
+        return undefined
+    }
+}
+
+function redactClientApiLogValue(input: unknown): unknown {
+    if (Array.isArray(input)) return input.map(redactClientApiLogValue)
+    if (!isRecord(input)) return typeof input === "string" ? truncateLogString(input) : input
+
+    return Object.fromEntries(
+        Object.entries(input).map(([key, value]) => [
+            key,
+            isSensitiveClientApiLogKey(key) ? "[redacted]" : redactClientApiLogValue(value),
+        ]),
+    )
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null
+}
+
+function isSensitiveClientApiLogKey(key: string) {
+    return /token|password|authorization|secret|api[_-]?key|apikey|key/i.test(key)
+}
+
+function truncateLogString(input: string) {
+    return input.length > 500 ? `${input.slice(0, 500)}...` : input
+}
+
 function clientAuthError(reason: ClientRefreshFailureReason, message?: string) {
     return new Error(message ?? (
         reason === "missing"
@@ -178,6 +277,16 @@ function clientAuthError(reason: ClientRefreshFailureReason, message?: string) {
                     ? "无法连接登录服务"
                     : "登录已失效"
     ))
+}
+
+function isOkResponse(input: unknown) {
+    return typeof input === "object" && input !== null && (input as { ok?: unknown }).ok === true
+}
+
+function errorMessage(input: unknown) {
+    if (input instanceof Error && input.message.trim()) return input.message
+    const message = String(input)
+    return message && message !== "[object Object]" ? message : undefined
 }
 
 function responseMessage(input: unknown) {

@@ -6,6 +6,8 @@ import "./index.css"
 import { App } from "./components/App"
 import { LoginPage } from "./components/LoginPage"
 import { clearClientAuthSession, isClientAuthSessionExpired, readStoredClientAuthSession, subscribeClientAuthSession, type ClientAuthSession } from "./auth"
+import { checkClientStatus } from "./api/client"
+import { CLIENT_DEBUG_LOGS_ENABLED } from "./config"
 import { getClientModelConfig } from "./api/model-config"
 import { checkClientUpdate } from "./services/client-update"
 import { syncRequiredClientSkills, type SkillSyncSummary } from "./services/skill-sync"
@@ -17,6 +19,8 @@ interface ServerInfo {
     url: string
     password: string | null
 }
+
+const CLIENT_STATUS_CHECK_INTERVAL_MS = 30_000
 
 function Root() {
     const [serverInfo, setServerInfo] = createSignal<ServerInfo | null>(null)
@@ -58,6 +62,27 @@ function Root() {
     const clearSessionAndStopServer = () => {
         clearClientAuthSession()
         stopServerForLoggedOutSession()
+    }
+    const checkClientStatusForSession = async (session: ClientAuthSession) => {
+        if (clientAuthSession()?.loginToken !== session.loginToken) return
+
+        if (CLIENT_DEBUG_LOGS_ENABLED) console.log("[client-status] checking", new Date().toISOString())
+        const result = await checkClientStatus()
+        if (CLIENT_DEBUG_LOGS_ENABLED) console.log("[client-status] result", result)
+        const currentSession = clientAuthSession()
+        if (currentSession && currentSession.loginToken !== session.loginToken) return
+        if (result.ok) return
+        if (result.reason === "network") {
+            if (CLIENT_DEBUG_LOGS_ENABLED && result.message) console.warn("客户端登录状态检查失败:", result.message)
+            return
+        }
+
+        showToast({
+            description: result.message ?? "账号已在其他设备登录，请重新登录",
+            title: "登录已失效",
+            variant: "error",
+        })
+        if (clientAuthSession()) clearSessionAndStopServer()
     }
 
     onMount(() => {
@@ -107,6 +132,38 @@ function Root() {
         }
         const timer = setInterval(checkExpiration, 60_000)
         onCleanup(() => clearInterval(timer))
+    })
+
+    createEffect(() => {
+        const session = clientAuthSession()
+        if (!session) return
+
+        let checking = false
+        const runCheck = () => {
+            if (checking || clientAuthSession()?.loginToken !== session.loginToken) return
+            checking = true
+            void checkClientStatusForSession(session)
+                .catch((error: unknown) => {
+                    if (CLIENT_DEBUG_LOGS_ENABLED) console.error("客户端登录状态检查异常:", error)
+                })
+                .finally(() => {
+                    checking = false
+                })
+        }
+        const runCheckWhenVisible = () => {
+            if (document.visibilityState !== "visible") return
+            runCheck()
+        }
+
+        runCheck()
+        const timer = setInterval(runCheck, CLIENT_STATUS_CHECK_INTERVAL_MS)
+        window.addEventListener("focus", runCheck)
+        document.addEventListener("visibilitychange", runCheckWhenVisible)
+        onCleanup(() => {
+            clearInterval(timer)
+            window.removeEventListener("focus", runCheck)
+            document.removeEventListener("visibilitychange", runCheckWhenVisible)
+        })
     })
 
     const startOpencodeServer = async () => {

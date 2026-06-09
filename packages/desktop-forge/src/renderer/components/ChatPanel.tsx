@@ -914,6 +914,15 @@ export function ChatPanel(props: ChatPanelProps) {
     let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
     let chatInputElement: HTMLTextAreaElement | undefined
 
+    const resizeChatInput = (element = chatInputElement) => {
+        if (!element) return
+        element.style.height = "0px"
+        const maxHeight = Number.parseFloat(getComputedStyle(element).maxHeight)
+        const height = Math.min(element.scrollHeight, Number.isFinite(maxHeight) ? maxHeight : element.scrollHeight)
+        element.style.height = `${height}px`
+        element.style.overflowY = element.scrollHeight > height ? "auto" : "hidden"
+    }
+
     // 当前选中的会话 ID 派生自 SDK 的 selectedSession
     const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
 
@@ -1558,6 +1567,11 @@ export function ChatPanel(props: ChatPanelProps) {
     onMount(() => {
         void loadChatOptions()
         void loadSkillOptions()
+    })
+
+    createEffect(() => {
+        inputText()
+        queueMicrotask(() => resizeChatInput())
     })
 
     createEffect(() => {
@@ -2254,11 +2268,15 @@ export function ChatPanel(props: ChatPanelProps) {
                     <textarea
                         ref={(element) => {
                             chatInputElement = element
+                            resizeChatInput(element)
                         }}
                         class="chat-input"
                         placeholder={hasPendingRequest() ? "请先处理上方询问或权限请求" : sdk.directory() ? "输入消息..." : "请先选择一个文件夹"}
                         value={inputText()}
-                        onInput={(e) => setInputText(e.currentTarget.value)}
+                        onInput={(event) => {
+                            setInputText(event.currentTarget.value)
+                            resizeChatInput(event.currentTarget)
+                        }}
                         onKeyDown={handleKeyDown}
                         onCompositionStart={handleChatInputCompositionStart}
                         onCompositionEnd={handleChatInputCompositionEnd}
