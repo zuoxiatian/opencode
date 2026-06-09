@@ -55,11 +55,13 @@ export const layer = Layer.effect(
             `<env>`,
             `  Working directory: ${Instance.directory}`,
             `  Workspace root folder: ${Instance.worktree}`,
+            `  Default agent workspace directory: ${path.join(Instance.worktree, ".workspace")}`,
             `  Default project skill install directory: ${path.join(Instance.worktree, ".agents", "skills")}`,
             `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
+            `For temporary helper scripts, one-off utilities, generated scratch files, intermediate outputs, or files created only to assist your work, use the default agent workspace directory. Do not place agent-only helper files directly in the project root.`,
             `When asked to install or create a skill for the current project, place it under the default project skill install directory unless the user specifies another target.`,
           ].join("\n"),
         ]
