@@ -1,4 +1,5 @@
 import { Context, Effect, Layer } from "effect"
+import path from "path"
 
 import { Instance } from "../project/instance"
 
@@ -54,10 +55,12 @@ export const layer = Layer.effect(
             `<env>`,
             `  Working directory: ${Instance.directory}`,
             `  Workspace root folder: ${Instance.worktree}`,
+            `  Default project skill install directory: ${path.join(Instance.worktree, ".agents", "skills")}`,
             `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
+            `When asked to install or create a skill for the current project, place it under the default project skill install directory unless the user specifies another target.`,
           ].join("\n"),
         ]
       },
