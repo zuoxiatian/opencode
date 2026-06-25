@@ -5,7 +5,14 @@ import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import type { ThemeMode } from "../theme"
 import type { ClientAuthSession } from "../auth"
-import { readChatVisibility, writeChatVisibility, type ChatVisibilitySettings } from "../settings"
+import {
+    readChatVisibility,
+    readLinkOpenMode,
+    writeChatVisibility,
+    writeLinkOpenMode,
+    type ChatVisibilitySettings,
+    type LinkOpenMode,
+} from "../settings"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -27,6 +34,7 @@ export function App(props: AppProps) {
     const [folderCollapsed, setFolderCollapsed] = createSignal(false)
     const [isDragging, setIsDragging] = createSignal<"folder" | null>(null)
     const [chatVisibility, setChatVisibility] = createSignal(readChatVisibility())
+    const [linkOpenMode, setLinkOpenMode] = createSignal(readLinkOpenMode())
     const platform = navigator.platform.toLowerCase()
     const isMac = platform.includes("mac")
     const isWindows = platform.includes("win")
@@ -34,6 +42,10 @@ export function App(props: AppProps) {
     const handleChatVisibilityChange = (settings: ChatVisibilitySettings) => {
         writeChatVisibility(settings)
         setChatVisibility(settings)
+    }
+    const handleLinkOpenModeChange = (mode: LinkOpenMode) => {
+        writeLinkOpenMode(mode)
+        setLinkOpenMode(mode)
     }
 
     // 拖拽处理
@@ -107,6 +119,8 @@ export function App(props: AppProps) {
                             onLogout={props.onLogout}
                             chatVisibility={chatVisibility()}
                             onChatVisibilityChange={handleChatVisibilityChange}
+                            linkOpenMode={linkOpenMode()}
+                            onLinkOpenModeChange={handleLinkOpenModeChange}
                         />
                     </Show>
                 </div>
@@ -125,6 +139,7 @@ export function App(props: AppProps) {
                         sidebarCollapsed={folderCollapsed()}
                         onOpenSidebar={() => setFolderCollapsed(false)}
                         chatVisibility={chatVisibility()}
+                        linkOpenMode={linkOpenMode()}
                     />
                 </div>
             </div>

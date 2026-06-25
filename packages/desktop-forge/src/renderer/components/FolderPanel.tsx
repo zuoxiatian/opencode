@@ -18,6 +18,7 @@ import FileType from "lucide-solid/icons/file-type"
 import FileVideo from "lucide-solid/icons/file-video"
 import Folder from "lucide-solid/icons/folder"
 import FolderOpen from "lucide-solid/icons/folder-open"
+import Globe from "lucide-solid/icons/globe"
 import Image from "lucide-solid/icons/image"
 import Info from "lucide-solid/icons/info"
 import Brain from "lucide-solid/icons/brain"
@@ -41,7 +42,7 @@ import Wrench from "lucide-solid/icons/wrench"
 import X from "lucide-solid/icons/x"
 import type { ThemeMode } from "../theme"
 import type { ClientAuthSession } from "../auth"
-import type { ChatVisibilitySettings } from "../settings"
+import type { ChatVisibilitySettings, LinkOpenMode } from "../settings"
 import type { ClientAppInfo } from "../../shared/client-update"
 import { CLIENT_UPDATE_CHANNEL } from "../config"
 import { checkClientUpdate } from "../services/client-update"
@@ -73,6 +74,8 @@ interface FolderPanelProps {
     onLogout: () => void
     chatVisibility: ChatVisibilitySettings
     onChatVisibilityChange: (settings: ChatVisibilitySettings) => void
+    linkOpenMode: LinkOpenMode
+    onLinkOpenModeChange: (mode: LinkOpenMode) => void
 }
 
 const LAST_PROJECT_STORAGE_KEY = "desktop-lxz.lastProjectFolder"
@@ -1237,6 +1240,21 @@ export function FolderPanel(props: FolderPanelProps) {
                                                 description="展示文件、搜索、任务等非 Shell 工具调用。默认关闭。"
                                                 checked={props.chatVisibility.toolCalls}
                                                 onChange={(toolCalls) => updateChatVisibility({ toolCalls })}
+                                            />
+                                        </div>
+                                    </section>
+                                    <section class="settings-section">
+                                        <div class="settings-section-heading">
+                                            <h4>链接打开方式</h4>
+                                            <p>控制聊天消息中的链接如何打开。</p>
+                                        </div>
+                                        <div class="settings-option-list">
+                                            <SettingsSwitchRow
+                                                icon={Globe}
+                                                title="使用默认浏览器打开链接"
+                                                description={props.linkOpenMode === "browser" ? "链接会交给系统默认浏览器打开。" : "关闭后在应用内直接打开，并始终使用新窗口。"}
+                                                checked={props.linkOpenMode === "browser"}
+                                                onChange={(checked) => props.onLinkOpenModeChange(checked ? "browser" : "direct")}
                                             />
                                         </div>
                                     </section>

@@ -63,6 +63,8 @@ type CopyLabels = {
   copied: string
 }
 
+type LinkOpenMode = "direct" | "browser"
+
 const urlPattern = /^https?:\/\/[^\s<>()`"']+$/
 
 function codeUrl(text: string) {
@@ -173,12 +175,58 @@ function markCodeLinks(root: HTMLDivElement) {
   }
 }
 
+function normalizeLink(link: HTMLAnchorElement) {
+  link.target = "_blank"
+  const rel = link.getAttribute("rel") ?? ""
+  const set = new Set(rel.split(/\s+/).filter(Boolean))
+  set.add("noopener")
+  set.add("noreferrer")
+  link.setAttribute("rel", Array.from(set).join(" "))
+}
+
+function normalizeLinks(root: HTMLDivElement) {
+  const links = Array.from(root.querySelectorAll("a[href]"))
+  for (const link of links) {
+    if (link instanceof HTMLAnchorElement) normalizeLink(link)
+  }
+}
+
 function decorate(root: HTMLDivElement, labels: CopyLabels) {
   const blocks = Array.from(root.querySelectorAll("pre"))
   for (const block of blocks) {
     ensureCodeWrapper(block, labels)
   }
   markCodeLinks(root)
+  normalizeLinks(root)
+}
+
+function setupLinkBehavior(root: HTMLDivElement, getMode: () => LinkOpenMode, openExternalLink?: (href: string) => void) {
+  const handleClick = (event: MouseEvent) => {
+    if (getMode() !== "browser") return
+    if (event.defaultPrevented) return
+    if (event.type === "click" && event.button !== 0) return
+    if (event.type === "auxclick" && event.button !== 1) return
+
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const link = target.closest("a[href]")
+    if (!(link instanceof HTMLAnchorElement)) return
+
+    event.preventDefault()
+    if (openExternalLink) {
+      openExternalLink(link.href)
+      return
+    }
+    window.open(link.href, "_blank", "noopener,noreferrer")
+  }
+
+  root.addEventListener("click", handleClick)
+  root.addEventListener("auxclick", handleClick)
+  return () => {
+    root.removeEventListener("click", handleClick)
+    root.removeEventListener("auxclick", handleClick)
+  }
 }
 
 function setupCodeCopy(root: HTMLDivElement, getLabels: () => CopyLabels) {
@@ -243,9 +291,19 @@ export function Markdown(
     streaming?: boolean
     class?: string
     classList?: Record<string, boolean>
+    linkOpenMode?: LinkOpenMode
+    openExternalLink?: (href: string) => void
   },
 ) {
-  const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList"])
+  const [local, others] = splitProps(props, [
+    "text",
+    "cacheKey",
+    "streaming",
+    "class",
+    "classList",
+    "linkOpenMode",
+    "openExternalLink",
+  ])
   const marked = useMarked()
   const i18n = useI18n()
   const [root, setRoot] = createSignal<HTMLDivElement>()
@@ -286,6 +344,7 @@ export function Markdown(
   )
 
   let copyCleanup: (() => void) | undefined
+  let linkCleanup: (() => void) | undefined
 
   createEffect(() => {
     const container = root()
@@ -328,10 +387,14 @@ export function Markdown(
         copy: i18n.t("ui.message.copy"),
         copied: i18n.t("ui.message.copied"),
       }))
+    if (!linkCleanup) {
+      linkCleanup = setupLinkBehavior(container, () => local.linkOpenMode ?? "direct", local.openExternalLink)
+    }
   })
 
   onCleanup(() => {
     if (copyCleanup) copyCleanup()
+    if (linkCleanup) linkCleanup()
   })
 
   return (

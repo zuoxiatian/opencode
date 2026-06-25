@@ -46,7 +46,8 @@ import SquareTerminal from "lucide-solid/icons/square-terminal"
 import Wrench from "lucide-solid/icons/wrench"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
 import { isIMECompositionEvent } from "../lib/ime"
-import type { ChatVisibilitySettings } from "../settings"
+import type { ChatVisibilitySettings, LinkOpenMode } from "../settings"
+import { CLIENT_DEBUG_LOGS_ENABLED } from "../config"
 
 interface QueuedPrompt {
     id: string
@@ -69,6 +70,8 @@ interface ModelSelection {
     modelID: string
 }
 
+type CompactionDividerState = "active" | "completed" | "failed"
+
 interface ModelOption extends ModelSelection {
     providerName: string
     modelName: string
@@ -86,6 +89,7 @@ interface ChatPanelProps {
     sidebarCollapsed?: boolean
     onOpenSidebar?: () => void
     chatVisibility: ChatVisibilitySettings
+    linkOpenMode: LinkOpenMode
 }
 
 type PermissionMode = "default" | "auto"
@@ -311,7 +315,14 @@ function reasoningHeading(text: string) {
     }
 }
 
-function ReasoningBlock(props: { text: string; heading?: string; streaming?: boolean; cacheKey: string; time?: { start?: number; end?: number } }) {
+function ReasoningBlock(props: {
+    text: string
+    heading?: string
+    streaming?: boolean
+    cacheKey: string
+    time?: { start?: number; end?: number }
+    linkOpenMode: LinkOpenMode
+}) {
     const [open, setOpen] = createSignal(false)
     const heading = createMemo(() => props.heading || reasoningHeading(props.text) || "")
 
@@ -342,6 +353,8 @@ function ReasoningBlock(props: { text: string; heading?: string; streaming?: boo
                             text={props.text}
                             cacheKey={`${props.cacheKey}:reasoning`}
                             streaming={props.streaming}
+                            linkOpenMode={props.linkOpenMode}
+                            openExternalLink={(href) => void window.electronAPI.openExternal(href)}
                         />
                     </div>
                 </Show>
@@ -913,6 +926,7 @@ export function ChatPanel(props: ChatPanelProps) {
     let chatInputComposing = false
     let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
     let chatInputElement: HTMLTextAreaElement | undefined
+    const emptyAssistantDiagnosticsLogged = new Set<string>()
 
     const resizeChatInput = (element = chatInputElement) => {
         if (!element) return
@@ -2016,6 +2030,141 @@ export function ChatPanel(props: ChatPanelProps) {
             .join("\n")
     }
 
+    const isCompactionUserMessage = (message: Message) => {
+        if (message.role !== "user") return false
+        return partsOf(message.id).some((part) => part.type === "compaction")
+    }
+
+    const isCompactionSummaryMessage = (message: Message, parentID?: string) => {
+        if (message.role !== "assistant") return false
+        if (parentID && message.parentID !== parentID) return false
+        return message.summary === true || message.mode === "compaction"
+    }
+
+    const isCompactionContinueMessage = (message: Message) => {
+        if (message.role !== "user") return false
+        return partsOf(message.id).some((part) => (
+            part.type === "text"
+            && part.synthetic === true
+            && typeof part.metadata === "object"
+            && part.metadata !== null
+            && (part.metadata as Record<string, unknown>).compaction_continue === true
+        ))
+    }
+
+    const isInternalCompactionMessage = (message: Message) => {
+        if (isCompactionUserMessage(message)) return true
+        if (isCompactionContinueMessage(message)) return true
+        if (message.role !== "assistant") return false
+        if (message.mode === "compaction") return true
+        const parent = messages().find((item) => item.id === message.parentID)
+        return parent ? isCompactionUserMessage(parent) : false
+    }
+
+    const hasAssistantText = (message: Message) => {
+        if (message.role !== "assistant") return false
+        return partsOf(message.id).some((part) => part.type === "text" && typeof part.text === "string" && part.text.trim().length > 0)
+    }
+
+    const assistantErrorText = (error: unknown) => {
+        if (!error) return ""
+        if (typeof error === "string") return error
+        if (typeof error !== "object") return "执行失败"
+        const data = (error as Record<string, unknown>).data
+        if (data && typeof data === "object") {
+            const message = (data as Record<string, unknown>).message
+            if (typeof message === "string" && message.trim()) return `执行失败：${message}`
+            const responseBody = (data as Record<string, unknown>).responseBody
+            if (typeof responseBody === "string" && responseBody.trim()) {
+                return `执行失败：${responseBody.slice(0, 500)}`
+            }
+        }
+        const message = (error as Record<string, unknown>).message
+        if (typeof message === "string" && message.trim()) return `执行失败：${message}`
+        const name = (error as Record<string, unknown>).name
+        return typeof name === "string" && name.trim() ? `执行失败：${name}` : "执行失败"
+    }
+
+    const messageError = (message: Message) => "error" in message ? message.error : undefined
+    const messageFinish = (message: Message) => "finish" in message ? message.finish : undefined
+    const messageParentID = (message: Message) => "parentID" in message ? message.parentID : undefined
+
+    const completedAssistantWithoutText = (message: Message) => {
+        if (message.role !== "assistant") return false
+        if (isInternalCompactionMessage(message)) return false
+        if (hasAssistantText(message)) return false
+        return Boolean(message.time.completed || messageError(message) || messageFinish(message) === "error")
+    }
+
+    const assistantFallbackText = (message: Message) => {
+        if (!completedAssistantWithoutText(message)) return ""
+        return assistantErrorText(messageError(message)) || "本轮没有生成文本回复"
+    }
+
+    const compactionDividerText = (auto: boolean, state: CompactionDividerState) => {
+        if (state === "active") return auto ? "正在自动压缩上下文" : "正在压缩上下文"
+        if (state === "failed") return auto ? "上下文自动压缩失败" : "上下文压缩失败"
+        return auto ? "上下文已自动压缩" : "上下文已压缩"
+    }
+
+    const compactionDividerInfo = (message: Message) => {
+        if (!isCompactionUserMessage(message)) return
+        const part = partsOf(message.id).find((item) => item.type === "compaction") as (Part & { auto?: boolean }) | undefined
+        const auto = part?.auto === true
+        const summary = messages().find((item) => isCompactionSummaryMessage(item, message.id))
+        const failed = summary?.role === "assistant" && Boolean(messageError(summary) || messageFinish(summary) === "error")
+        const completed = summary?.role === "assistant" && Boolean(summary.time.completed || messageFinish(summary))
+        const state: CompactionDividerState = failed ? "failed" : completed || !isBusy() ? "completed" : "active"
+
+        return {
+            state,
+            text: compactionDividerText(auto, state),
+        }
+    }
+
+    createEffect(() => {
+        if (!CLIENT_DEBUG_LOGS_ENABLED) return
+        for (const message of messages()) {
+            if (!completedAssistantWithoutText(message)) continue
+            if (emptyAssistantDiagnosticsLogged.has(message.id)) continue
+            emptyAssistantDiagnosticsLogged.add(message.id)
+            console.warn("Assistant turn completed without text", {
+                sessionID: message.sessionID,
+                messageID: message.id,
+                parentID: messageParentID(message),
+                finish: messageFinish(message),
+                error: messageError(message),
+                parts: partsOf(message.id).map((part) => ({
+                    id: part.id,
+                    type: part.type,
+                    textLength: part.type === "text" && typeof part.text === "string" ? part.text.length : undefined,
+                    state: part.type === "tool" ? (part as ToolPartView).state.status : undefined,
+                })),
+            })
+        }
+    })
+
+    const compactionStatusText = createMemo(() => {
+        if (!isBusy()) return ""
+
+        const list = messages()
+        for (let index = list.length - 1; index >= 0; index--) {
+            const message = list[index]
+            if (!isCompactionUserMessage(message)) continue
+
+            const laterUser = list.slice(index + 1).some((item) => item.role === "user" && !isCompactionUserMessage(item))
+            if (laterUser) return ""
+
+            const summary = list.find((item) => isCompactionSummaryMessage(item, message.id))
+            if (summary?.role === "assistant" && (summary.time.completed || summary.error || summary.finish === "error")) return ""
+
+            const part = partsOf(message.id).find((item) => item.type === "compaction") as (Part & { auto?: boolean }) | undefined
+            return part?.auto ? "正在自动压缩上下文" : "正在压缩上下文"
+        }
+
+        return ""
+    })
+
     // 一个 part 是否应该在 chat-turn 中被渲染（与 reducer 的 SKIP_PARTS 一致）
     const isVisiblePart = (part: Part) => {
         if (part.type === "text") return true
@@ -2048,6 +2197,8 @@ export function ChatPanel(props: ChatPanelProps) {
         if (!isBusy()) return ""
         if (activePermissionRequest()) return "等待权限确认"
         if (activeQuestionRequest()) return "等待回答"
+        const compactionText = compactionStatusText()
+        if (compactionText) return ""
         const list = messages()
         for (let i = list.length - 1; i >= 0; i--) {
             const message = list[i]
@@ -2109,7 +2260,7 @@ export function ChatPanel(props: ChatPanelProps) {
                     <Show when={currentSessionId()}>
                         <div class="status-indicator">
                             <span class={`status-dot ${isBusy() ? "busy" : "online"}`}></span>
-                            <span>{isBusy() ? "处理中" : "就绪"}</span>
+                            <span>{compactionStatusText() ? "压缩中" : isBusy() ? "处理中" : "就绪"}</span>
                         </div>
                     </Show>
                 </div>
@@ -2142,18 +2293,41 @@ export function ChatPanel(props: ChatPanelProps) {
                         <For each={messages()}>
                             {(message) => (
                                 <Show
-                                    when={message.role === "assistant"}
+                                    when={!isInternalCompactionMessage(message) && message.role === "assistant"}
                                     fallback={
-                                        <div class="chat-turn user">
-                                            <div class="chat-message user">
-                                                <Markdown
-                                                    class="chat-message-content"
-                                                    text={userMessageText(partsOf(message.id))}
-                                                    cacheKey={message.id}
-                                                    streaming={false}
-                                                />
-                                            </div>
-                                        </div>
+                                        <Show
+                                            when={isCompactionUserMessage(message)}
+                                            fallback={
+                                                <Show when={!isInternalCompactionMessage(message)}>
+                                                    <div class="chat-turn user">
+                                                        <div class="chat-message user">
+                                                            <Markdown
+                                                                class="chat-message-content"
+                                                                text={userMessageText(partsOf(message.id))}
+                                                                cacheKey={message.id}
+                                                                streaming={false}
+                                                                linkOpenMode={props.linkOpenMode}
+                                                                openExternalLink={(href) => void window.electronAPI.openExternal(href)}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </Show>
+                                            }
+                                        >
+                                            <Show when={compactionDividerInfo(message)}>
+                                                {(info) => (
+                                                    <div class="chat-turn compaction">
+                                                        <div class={`chat-compaction-divider ${info().state}`}>
+                                                            <span class="chat-compaction-line" aria-hidden="true"></span>
+                                                            <span class="chat-compaction-label">
+                                                                <span>{info().text}</span>
+                                                            </span>
+                                                            <span class="chat-compaction-line" aria-hidden="true"></span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </Show>
+                                        </Show>
                                     }
                                 >
                                     <For each={partsOf(message.id)}>
@@ -2171,6 +2345,8 @@ export function ChatPanel(props: ChatPanelProps) {
                                                                         text={textPart.text}
                                                                         cacheKey={textPart.id}
                                                                         streaming={streaming()}
+                                                                        linkOpenMode={props.linkOpenMode}
+                                                                        openExternalLink={(href) => void window.electronAPI.openExternal(href)}
                                                                     />
                                                                 </div>
                                                             </div>
@@ -2188,6 +2364,7 @@ export function ChatPanel(props: ChatPanelProps) {
                                                                     cacheKey={reasoningPart.id}
                                                                     streaming={streaming()}
                                                                     time={reasoningPart.time}
+                                                                    linkOpenMode={props.linkOpenMode}
                                                                 />
                                                             </div>
                                                         )
@@ -2208,6 +2385,15 @@ export function ChatPanel(props: ChatPanelProps) {
                                             </Show>
                                         )}
                                     </For>
+                                    <Show when={assistantFallbackText(message)}>
+                                        {(text) => (
+                                            <div class="chat-turn assistant">
+                                                <div class="chat-message assistant">
+                                                    <div class="chat-message-content chat-message-empty">{text()}</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </Show>
                                 </Show>
                             )}
                         </For>
