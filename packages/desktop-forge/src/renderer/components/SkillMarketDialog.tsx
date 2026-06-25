@@ -37,11 +37,52 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
     let searchInput: HTMLInputElement | undefined
 
     const installedByKey = createMemo(() => new Map(installedSkills().map((skill) => [skill.skillKey, skill])))
-    const marketByKey = createMemo(() => new Map(marketSkills().map((skill) => [skill.skillKey, skill])))
-    const activeArchivedSkills = createMemo(() => archivedSkills().filter((skill) => !marketByKey().has(skill.skillKey)))
-    const archivedByKey = createMemo(() => new Map(activeArchivedSkills().map((skill) => [skill.skillKey, skill])))
-    const catalogByKey = createMemo(() => new Map([...activeArchivedSkills(), ...marketSkills()].map((skill) => [skill.skillKey, skill])))
+    const marketByRecordKey = createMemo(() => new Map(marketSkills().map((skill) => [catalogRecordKey(skill), skill])))
+    const marketByKey = createMemo(() => new Map(marketSkills().map((skill) => [catalogLookupKey(skill), skill])))
+    const activeArchivedSkills = createMemo(() => archivedSkills().filter((skill) => !marketByRecordKey().has(catalogRecordKey(skill))))
+    const activeArchivedByKey = createMemo(() => new Map(activeArchivedSkills().map((skill) => [catalogLookupKey(skill), skill])))
+    const archivedByKey = createMemo(() => new Map(activeArchivedSkills().map((skill) => [catalogLookupKey(skill), skill])))
+    const catalogByKey = createMemo(() => new Map([...activeArchivedSkills(), ...marketSkills()].map((skill) => [catalogLookupKey(skill), skill])))
     const operationByKey = createMemo(() => new Map(operations().map((operation) => [operation.skillKey, operation])))
+    const installedBundleDisplaySkill = (bundleKey: string, skills: InstalledSkill[]) => {
+        const catalogSkill = marketByKey().get(bundleKey) ?? activeArchivedByKey().get(bundleKey)
+        const first = skills[0]
+        const skillNames = skills.map((skill) => skill.skillKey).toSorted((a, b) => a.localeCompare(b))
+        return {
+            bundleKey,
+            bundleName: catalogSkill?.name ?? first.bundleName ?? bundleKey,
+            bundleSkillNames: skillNames,
+            bundleSkills: first.bundleSkills ?? skills.map((skill) => ({ skillID: skill.skillID, skillKey: skill.skillKey, version: skill.version })),
+            bundleVersion: first.bundleVersion ?? first.version,
+            canDelete: skills.some((skill) => skill.canDelete),
+            description: catalogSkill?.description ?? first.description,
+            downloadUrl: first.downloadUrl,
+            enabled: skills.some((skill) => skill.enabled),
+            fileName: first.fileName,
+            fileSize: first.fileSize,
+            installedAt: first.installedAt,
+            location: first.location,
+            managed: skills.every((skill) => skill.managed),
+            name: catalogSkill?.name ?? first.bundleName ?? bundleKey,
+            recordType: "bundle",
+            sha256: first.sha256,
+            skillID: first.skillID,
+            skillKey: bundleKey,
+            source: "market",
+            updatedAt: first.updatedAt,
+            version: first.bundleVersion ?? first.version,
+        } satisfies InstalledSkill
+    }
+    const installedDisplaySkills = createMemo(() => {
+        const bundles = installedSkills().reduce((result, skill) => {
+            if (!skill.bundleKey) return result
+            return result.set(skill.bundleKey, [...(result.get(skill.bundleKey) ?? []), skill])
+        }, new Map<string, InstalledSkill[]>())
+        return [
+            ...[...bundles.entries()].map((entry) => installedBundleDisplaySkill(entry[0], entry[1])),
+            ...installedSkills().filter((skill) => !skill.bundleKey),
+        ].toSorted((a, b) => a.name.localeCompare(b.name))
+    })
     const installedDisplayName = (skill: InstalledSkill) => catalogByKey().get(skill.skillKey)?.name ?? skill.name
     const installedDescription = (skill: InstalledSkill) => {
         const catalogSkill = catalogByKey().get(skill.skillKey)
@@ -55,14 +96,19 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
             skill.skillKey,
             skill.category ?? "",
             skill.description ?? "",
+            skill.recordType,
+            ...bundleSkillNames(skill),
         ])),
     )
     const visibleInstalledSkills = createMemo(() =>
-        installedSkills().filter((skill) => matchesQuery([
+        installedDisplaySkills().filter((skill) => matchesQuery([
             installedDisplayName(skill),
             skill.skillKey,
             skill.source,
             installedDescription(skill),
+            skill.bundleKey ?? "",
+            skill.bundleName ?? "",
+            ...(skill.bundleSkillNames ?? []),
         ])),
     )
 
@@ -132,17 +178,21 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
     }
 
     const installSkill = async (skill: ClientSkill) => {
-        if (operationByKey().has(skill.skillKey)) return
-        const installed = installedByKey().get(skill.skillKey)
-        const action = installed ? "更新" : "安装"
-        await runWithBusyKey(skill.skillKey, async () => {
+        const operationKey = clientSkillOperationKey(skill)
+        if (operationByKey().has(operationKey)) return
+        const action = marketStatus(skill) === "update_available" ? "更新" : "安装"
+        await runWithBusyKey(operationKey, async () => {
             const result = await window.electronAPI.installSkill({
+                bundleHistory: skill.bundleHistory,
+                bundleKey: clientSkillBundleKey(skill),
+                bundleMeta: skill.bundleMeta,
                 description: skill.description ?? undefined,
                 downloadUrl: skill.downloadUrl,
                 fileName: skill.fileName,
                 fileSize: skill.fileSize,
                 manifest: skill.manifest,
                 name: skill.name,
+                recordType: skill.recordType,
                 sha256: skill.sha256,
                 skillID: skill.id,
                 skillKey: skill.skillKey,
@@ -162,9 +212,15 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
 
     const deleteSkill = async (skill: InstalledSkill) => {
         if (!canDeleteInstalledSkill(skill)) return
-        if (operationByKey().has(skill.skillKey)) return
-        await runWithBusyKey(skill.skillKey, async () => {
-            const result = await window.electronAPI.deleteSkill(skill.skillKey)
+        const operationKey = installedSkillOperationKey(skill)
+        if (operationByKey().has(operationKey)) return
+        await runWithBusyKey(operationKey, async () => {
+            const result = await window.electronAPI.deleteSkill(
+                skill.skillKey,
+                skill.bundleKey && skill.recordType === "bundle"
+                    ? { bundleKey: skill.bundleKey, bundleSkillKeys: skill.bundleSkillNames ?? [] }
+                    : undefined,
+            )
             if (!result.success) {
                 showToast({ description: result.error, title: "删除失败", variant: "error" })
                 return
@@ -177,7 +233,8 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
     }
 
     const marketStatus = (skill: ClientSkill) => {
-        if (operationByKey().has(skill.skillKey)) return "processing"
+        if (operationByKey().has(clientSkillOperationKey(skill))) return "processing"
+        if (skill.recordType === "bundle") return bundleMarketStatus(skill)
         const installed = installedByKey().get(skill.skillKey)
         if (!installed) return "not_installed"
         if (!installed.managed) return "unknown_local"
@@ -185,8 +242,16 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
         return "installed"
     }
 
+    const bundleMarketStatus = (skill: ClientSkill) => {
+        const installed = installedBundleSkills(skill)
+        if (!installed.length) return "not_installed"
+        if (installed.some((item) => !item.managed)) return "unknown_local"
+        if (compareVersions(skill.version, installedBundleVersion(installed)) > 0) return "update_available"
+        return "installed"
+    }
+
     const statusLabel = (skill: ClientSkill) => {
-        const operation = operationByKey().get(skill.skillKey)
+        const operation = operationByKey().get(clientSkillOperationKey(skill))
         if (operation) return operationLabel(operation)
         const status = marketStatus(skill)
         if (skill.isRequired && status === "update_available") return "必装更新"
@@ -198,10 +263,10 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
     }
 
     const actionLabel = (skill: ClientSkill) => {
-        const operation = operationByKey().get(skill.skillKey)
+        const operation = operationByKey().get(clientSkillOperationKey(skill))
         if (operation) return operationLabel(operation)
         const status = marketStatus(skill)
-        if (busyKeys().has(skill.skillKey)) return "处理中"
+        if (busyKeys().has(clientSkillOperationKey(skill))) return "处理中"
         if (status === "not_installed") return "安装"
         if (status === "update_available") return "更新"
         if (status === "unknown_local") return "本地"
@@ -209,14 +274,27 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
     }
 
     const actionIcon = (skill: ClientSkill) => {
-        if (busyKeys().has(skill.skillKey) || operationByKey().has(skill.skillKey)) return LoaderCircle
+        if (busyKeys().has(clientSkillOperationKey(skill)) || operationByKey().has(clientSkillOperationKey(skill))) return LoaderCircle
         return marketStatus(skill) === "update_available" ? RefreshCw : Download
     }
 
     const canInstallMarketSkill = (skill: ClientSkill) => {
-        if (operationByKey().has(skill.skillKey)) return false
+        if (operationByKey().has(clientSkillOperationKey(skill))) return false
         const status = marketStatus(skill)
         return status === "not_installed" || status === "update_available"
+    }
+
+    const installedBundleSkills = (skill: ClientSkill) =>
+        installedSkills().filter((item) => item.bundleKey === clientSkillBundleKey(skill))
+
+    const installedBundleVersion = (skills: InstalledSkill[]) =>
+        skills.find((skill) => skill.bundleVersion)?.bundleVersion ?? skills[0]?.version ?? "unknown"
+
+    const marketInstalledSkill = (skill: ClientSkill) => {
+        if (skill.recordType !== "bundle") return installedByKey().get(skill.skillKey)
+        const installed = installedBundleSkills(skill)
+        if (!installed.length) return undefined
+        return installedBundleDisplaySkill(clientSkillBundleKey(skill), installed)
     }
 
     const sourceLabel = (source: InstalledSkill["source"]) => {
@@ -224,28 +302,39 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
         return "本地"
     }
 
+    const catalogForInstalledSkill = (skill: InstalledSkill) => {
+        if (skill.bundleKey) return marketByKey().get(skill.bundleKey) ?? activeArchivedByKey().get(skill.bundleKey)
+        return catalogByKey().get(skill.skillKey)
+    }
+
+    const archivedForInstalledSkill = (skill: InstalledSkill) => {
+        if (skill.bundleKey) return activeArchivedByKey().get(skill.bundleKey)
+        return archivedByKey().get(skill.skillKey)
+    }
+
     const installedStatusLabel = (skill: InstalledSkill) => {
-        const operation = operationByKey().get(skill.skillKey)
+        const operation = operationByKey().get(installedSkillOperationKey(skill))
         if (operation) return operationLabel(operation)
-        if (archivedByKey().has(skill.skillKey)) return "已下架"
-        if (marketByKey().get(skill.skillKey)?.isRequired) return "必装"
+        if (archivedForInstalledSkill(skill)) return "已下架"
+        if (catalogForInstalledSkill(skill)?.isRequired) return "必装"
+        if (skill.bundleKey) return "技能包"
         return sourceLabel(skill.source)
     }
 
     const installedStatusClass = (skill: InstalledSkill) => {
-        if (operationByKey().has(skill.skillKey)) return "processing"
-        if (archivedByKey().has(skill.skillKey)) return "archived"
-        if (marketByKey().get(skill.skillKey)?.isRequired) return "required"
+        if (operationByKey().has(installedSkillOperationKey(skill))) return "processing"
+        if (archivedForInstalledSkill(skill)) return "archived"
+        if (catalogForInstalledSkill(skill)?.isRequired) return "required"
         return "installed"
     }
 
-    const isRequiredInstalledSkill = (skill: InstalledSkill) => marketByKey().get(skill.skillKey)?.isRequired === true
+    const isRequiredInstalledSkill = (skill: InstalledSkill) => catalogForInstalledSkill(skill)?.isRequired === true
 
     const canDeleteInstalledSkill = (skill: InstalledSkill) =>
-        skill.canDelete && !isRequiredInstalledSkill(skill) && !operationByKey().has(skill.skillKey)
+        skill.canDelete && !isRequiredInstalledSkill(skill) && !operationByKey().has(installedSkillOperationKey(skill))
 
     const deleteSkillTitle = (skill: InstalledSkill) => {
-        if (busyKeys().has(skill.skillKey) || operationByKey().has(skill.skillKey)) return "处理中"
+        if (busyKeys().has(installedSkillOperationKey(skill)) || operationByKey().has(installedSkillOperationKey(skill))) return "处理中"
         return "删除"
     }
 
@@ -261,6 +350,13 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
         return `${(size / 1024 / 1024).toFixed(1)} MB`
     }
 
+    const bundleSkillCountLabel = (skill: ClientSkill) => {
+        const count = skill.bundleMeta?.skillCount || bundleSkillNames(skill).length
+        return count ? `${count} 个技能` : "技能包"
+    }
+
+    const bundleSkillNamesLabel = (skill: ClientSkill) => bundleSkillNames(skill).join(", ")
+
     return (
         <Portal>
             <div class="skill-market-root">
@@ -271,7 +367,7 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                             <Package class="skill-market-heading-icon" size={19} strokeWidth={1.85} />
                             <div>
                                 <h2 id="skill-market-title">技能市场</h2>
-                                <p>{marketSkills().length} 个技能 · {installedSkills().length} 个已安装</p>
+                                <p>{marketSkills().length} 个条目 · {installedDisplaySkills().length} 个已安装</p>
                             </div>
                         </div>
                         <button type="button" class="settings-dialog-close" onClick={props.onClose} title="关闭" aria-label="关闭">
@@ -333,7 +429,7 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                                     <For each={visibleMarketSkills()}>
                                         {(skill) => {
                                             const Icon = actionIcon(skill)
-                                            const installed = installedByKey().get(skill.skillKey)
+                                            const installed = marketInstalledSkill(skill)
                                             return (
                                                 <article class="skill-market-row">
                                                     <div class="skill-market-row-main">
@@ -348,6 +444,12 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                                                             <span>{skill.category || "未分类"}</span>
                                                             <span>{skill.platform}</span>
                                                             <span>{fileSizeLabel(skill.fileSize)}</span>
+                                                            <Show when={skill.recordType === "bundle"}>
+                                                                <span>{bundleSkillCountLabel(skill)}</span>
+                                                            </Show>
+                                                            <Show when={skill.recordType === "bundle" && bundleSkillNamesLabel(skill)}>
+                                                                <span>{bundleSkillNamesLabel(skill)}</span>
+                                                            </Show>
                                                             <Show when={installed}>
                                                                 {(item) => <span>当前 v{item().version}</span>}
                                                             </Show>
@@ -356,11 +458,11 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                                                     <button
                                                         type="button"
                                                         class="skill-market-action"
-                                                        disabled={!canInstallMarketSkill(skill) || busyKeys().has(skill.skillKey)}
+                                                        disabled={!canInstallMarketSkill(skill) || busyKeys().has(clientSkillOperationKey(skill))}
                                                         onClick={() => void installSkill(skill)}
                                                     >
                                                         <Icon
-                                                            class={`sidebar-lucide-icon ${busyKeys().has(skill.skillKey) || operationByKey().has(skill.skillKey) ? "skill-market-spinner" : ""}`}
+                                                            class={`sidebar-lucide-icon ${busyKeys().has(clientSkillOperationKey(skill)) || operationByKey().has(clientSkillOperationKey(skill)) ? "skill-market-spinner" : ""}`}
                                                             size={15}
                                                             strokeWidth={1.9}
                                                         />
@@ -389,6 +491,12 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                                                         <span>{skill.skillKey}</span>
                                                         <span>v{skill.version}</span>
                                                         <span>{skill.managed ? "受管理" : "本地"}</span>
+                                                        <Show when={skill.recordType === "bundle" && skill.bundleSkillNames?.length}>
+                                                            {(count) => <span>{count()} 个技能</span>}
+                                                        </Show>
+                                                        <Show when={skill.bundleName ?? skill.bundleKey}>
+                                                            {(item) => <span>{item()}</span>}
+                                                        </Show>
                                                     </div>
                                                 </div>
                                                 <Show when={!isRequiredInstalledSkill(skill)}>
@@ -396,13 +504,13 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                                                         <button
                                                             type="button"
                                                             class="skill-market-icon-button danger"
-                                                            disabled={!canDeleteInstalledSkill(skill) || busyKeys().has(skill.skillKey)}
+                                                            disabled={!canDeleteInstalledSkill(skill) || busyKeys().has(installedSkillOperationKey(skill))}
                                                             onClick={() => void deleteSkill(skill)}
                                                             title={deleteSkillTitle(skill)}
                                                             aria-label={deleteSkillTitle(skill)}
                                                         >
                                                             <Show
-                                                                when={busyKeys().has(skill.skillKey) || operationByKey().has(skill.skillKey)}
+                                                                when={busyKeys().has(installedSkillOperationKey(skill)) || operationByKey().has(installedSkillOperationKey(skill))}
                                                                 fallback={<Trash2 class="sidebar-lucide-icon" size={15} strokeWidth={1.85} />}
                                                             >
                                                                 <LoaderCircle class="sidebar-lucide-icon skill-market-spinner" size={15} strokeWidth={2} />
@@ -440,4 +548,30 @@ function versionParts(version: string) {
         .split(/[^0-9]+/)
         .filter(Boolean)
         .map((part) => Number(part))
+}
+
+function catalogRecordKey(skill: ClientSkill) {
+    return `${skill.recordType}:${catalogLookupKey(skill)}`
+}
+
+function catalogLookupKey(skill: ClientSkill) {
+    return skill.recordType === "bundle" ? clientSkillBundleKey(skill) : skill.skillKey
+}
+
+function clientSkillBundleKey(skill: ClientSkill) {
+    return skill.bundleKey ?? skill.bundleMeta?.bundleKey ?? skill.skillKey
+}
+
+function clientSkillOperationKey(skill: ClientSkill) {
+    return skill.recordType === "bundle" ? clientSkillBundleKey(skill) : skill.skillKey
+}
+
+function installedSkillOperationKey(skill: InstalledSkill) {
+    return skill.recordType === "bundle" && skill.bundleKey ? skill.bundleKey : skill.skillKey
+}
+
+function bundleSkillNames(skill: ClientSkill) {
+    const skillNames = skill.bundleMeta?.skillNames.filter(Boolean) ?? []
+    if (skillNames.length) return skillNames
+    return skill.bundleMeta?.skills.map((item) => item.skillKey).filter(Boolean) ?? []
 }

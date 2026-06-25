@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { applyWindowTheme, isThemeMode, writeStoredThemeMode } from "../window/theme"
 import type { DirectoryWatchOptions, MainState, ThemeMode } from "../app/state"
 import { startServer, stopServer } from "../server/opencode-server"
-import { deleteInstalledSkill, installSkillPackage, listInstalledSkills, skillDirFor } from "../server/skill-market"
+import { deleteInstalledBundle, deleteInstalledSkill, installSkillPackage, listInstalledSkills, skillDirFor } from "../server/skill-market"
 import type { ClientApiRequest, ClientApiResponse } from "../../shared/client-api"
 import type { ClientAppInfo, ClientUpdatePrompt } from "../../shared/client-update"
 import type {
@@ -155,11 +155,11 @@ export function registerIpcHandlers(state: MainState) {
     ipcMain.handle("skill-market:install", async (_, input: SkillInstallRequest, options?: SkillMarketOperationOptions) =>
         runSkillOperation(
             state,
-            input.skillKey,
-            installOperationType(input.skillKey),
+            skillInstallOperationKey(input),
+            await installOperationType(input),
             options?.source ?? "manual",
             () => installSkillPackage(input)
-                .then((skill) => ({ skill, success: true } satisfies SkillOperationResult))
+                .then((skills) => ({ skills, success: true } satisfies SkillOperationResult))
                 .catch((error: unknown) => ({ error: errorMessage(error), success: false } satisfies SkillOperationResult)),
         ),
     )
@@ -167,10 +167,12 @@ export function registerIpcHandlers(state: MainState) {
     ipcMain.handle("skill-market:delete", async (_, skillKey: string, options?: SkillMarketOperationOptions) =>
         runSkillOperation(
             state,
-            skillKey,
+            options?.bundleKey ?? skillKey,
             options?.type === "archive-delete" ? "archive-delete" : "delete",
             options?.source ?? "manual",
-            () => deleteInstalledSkill(skillKey)
+            () => (options?.bundleKey
+                ? deleteInstalledBundle(options.bundleKey, options.bundleSkillKeys)
+                : deleteInstalledSkill(skillKey))
                 .then((deleted) => ({ skillKey: deleted, success: true } satisfies SkillDeleteResult))
                 .catch((error: unknown) => ({ error: errorMessage(error), success: false } satisfies SkillDeleteResult)),
         ),
@@ -245,8 +247,16 @@ function broadcastSkillOperations(state: MainState) {
     state.window.webContents.send("skill-market:operations-changed", listSkillOperations())
 }
 
-function installOperationType(skillKey: string): SkillMarketOperationType {
-    return existsSync(join(skillDirFor(skillKey), "SKILL.md")) ? "update" : "install"
+async function installOperationType(input: SkillInstallRequest): Promise<SkillMarketOperationType> {
+    if (input.recordType === "bundle") {
+        return (await listInstalledSkills()).some((skill) => skill.bundleKey === skillInstallOperationKey(input)) ? "update" : "install"
+    }
+    return existsSync(join(skillDirFor(input.skillKey), "SKILL.md")) ? "update" : "install"
+}
+
+function skillInstallOperationKey(input: SkillInstallRequest) {
+    if (input.recordType !== "bundle") return input.skillKey
+    return input.bundleKey || input.bundleMeta?.bundleKey || input.skillKey
 }
 
 function showClientUpdateDialog(sender: Electron.WebContents, update: ClientUpdatePrompt) {
