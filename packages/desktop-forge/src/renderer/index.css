@@ -1105,6 +1105,54 @@ body {
     margin-top: 10px;
 }
 
+.settings-account-summary {
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 2px 0 4px;
+}
+
+.settings-account-avatar {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: var(--surface-base);
+    color: var(--text-secondary);
+}
+
+.settings-account-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.settings-account-name {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 20px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-account-meta {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 540;
+    line-height: 17px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .settings-about-list {
     display: flex;
     flex-direction: column;
@@ -1182,6 +1230,226 @@ body {
 
 .settings-update-spinner {
     animation: spin 0.8s linear infinite;
+}
+
+.settings-password-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.settings-password-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 15px;
+}
+
+.settings-password-input-wrap {
+    height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 11px;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: var(--surface-base);
+    color: var(--text-secondary);
+    transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-password-input-wrap:focus-within {
+    border-color: var(--border-selected);
+    background: var(--surface-base-hover);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 2px var(--lxz-selection-bg);
+}
+
+.settings-password-input-icon {
+    flex: 0 0 auto;
+    color: currentColor;
+}
+
+.settings-password-input {
+    min-width: 0;
+    flex: 1 1 auto;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 520;
+    line-height: 18px;
+}
+
+.settings-password-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.settings-password-input:disabled {
+    cursor: wait;
+}
+
+.settings-password-toggle {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.settings-password-toggle:hover:not(:disabled) {
+    background: var(--button-ghost-hover);
+    color: var(--text-primary);
+}
+
+.settings-password-toggle:disabled {
+    cursor: wait;
+    opacity: 0.55;
+}
+
+.settings-password-toggle-icon {
+    flex: 0 0 auto;
+    color: currentColor;
+}
+
+.settings-password-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.settings-password-trigger,
+.settings-password-cancel,
+.settings-password-submit {
+    height: 38px;
+    min-width: 128px;
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 14px;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: var(--surface-base);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 560;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-password-cancel {
+    min-width: 72px;
+}
+
+.settings-password-submit {
+    min-width: 104px;
+}
+
+.settings-password-trigger:hover:not(:disabled),
+.settings-password-cancel:hover:not(:disabled),
+.settings-password-submit:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-base-hover);
+    color: var(--text-primary);
+}
+
+.settings-password-trigger:disabled,
+.settings-password-cancel:disabled,
+.settings-password-submit:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
+.settings-password-dialog-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.settings-password-dialog-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.34);
+    cursor: default;
+}
+
+.settings-password-dialog {
+    position: relative;
+    z-index: 1;
+    width: min(360px, calc(100vw - 72px));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 22px;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: var(--background-base);
+    box-shadow: var(--shadow-xl);
+}
+
+.settings-password-dialog-heading {
+    padding-right: 28px;
+}
+
+.settings-password-dialog-heading h4 {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 660;
+    line-height: 21px;
+}
+
+.settings-password-dialog-heading p {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 520;
+    line-height: 17px;
+}
+
+.settings-password-dialog-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.settings-password-dialog-close:hover:not(:disabled) {
+    background: var(--button-ghost-hover);
+    color: var(--text-primary);
+}
+
+.settings-password-dialog-close:disabled {
+    cursor: wait;
+    opacity: 0.55;
 }
 
 .settings-option-list {

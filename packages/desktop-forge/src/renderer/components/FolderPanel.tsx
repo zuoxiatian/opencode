@@ -9,6 +9,8 @@ import Check from "lucide-solid/icons/check"
 import CircleMinus from "lucide-solid/icons/circle-minus"
 import CircleQuestionMark from "lucide-solid/icons/circle-question-mark"
 import CircleUser from "lucide-solid/icons/circle-user"
+import Eye from "lucide-solid/icons/eye"
+import EyeOff from "lucide-solid/icons/eye-off"
 import FileCode from "lucide-solid/icons/file-code"
 import FileIcon from "lucide-solid/icons/file"
 import FileAudio from "lucide-solid/icons/file-audio"
@@ -23,6 +25,7 @@ import Image from "lucide-solid/icons/image"
 import Info from "lucide-solid/icons/info"
 import Brain from "lucide-solid/icons/brain"
 import LoaderCircle from "lucide-solid/icons/loader-circle"
+import Lock from "lucide-solid/icons/lock"
 import LogOut from "lucide-solid/icons/log-out"
 import MessageCircle from "lucide-solid/icons/message-circle"
 import Monitor from "lucide-solid/icons/monitor"
@@ -45,6 +48,7 @@ import type { ClientAuthSession } from "../auth"
 import type { ChatVisibilitySettings, LinkOpenMode } from "../settings"
 import type { ClientAppInfo } from "../../shared/client-update"
 import { CLIENT_UPDATE_CHANNEL } from "../config"
+import { changeClientPassword, type ClientPasswordFailureReason } from "../api/client"
 import { checkClientUpdate } from "../services/client-update"
 import { SkillMarketDialog } from "./SkillMarketDialog"
 import appIcon from "../../../build/128x128.png"
@@ -64,7 +68,12 @@ type SidebarDialog =
     | { kind: "delete-project"; project: Project }
     | { kind: "delete-session"; folder: string; session: Session }
 
-type SettingsSection = "appearance" | "chat" | "about"
+type SettingsSection = "appearance" | "account" | "chat" | "about"
+type PasswordFormState = {
+    confirmPassword: string
+    currentPassword: string
+    newPassword: string
+}
 
 interface FolderPanelProps {
     onCollapse: () => void
@@ -89,6 +98,7 @@ const THEME_MODE_OPTIONS = [
 ] as const
 const SETTINGS_SECTION_OPTIONS = [
     { section: "appearance", label: "外观", description: "主题与界面", icon: Palette },
+    { section: "account", label: "账户", description: "账号安全", icon: CircleUser },
     { section: "chat", label: "聊天", description: "消息显示", icon: MessageCircle },
     { section: "about", label: "关于", description: "版本更新", icon: Info },
 ] as const
@@ -122,6 +132,43 @@ function SettingsSwitchRow(props: { icon: LucideIcon; title: string; description
     )
 }
 
+function SettingsPasswordField(props: { autocomplete: string; disabled: boolean; label: string; onInput: (value: string) => void; placeholder: string; value: string }) {
+    const [visible, setVisible] = createSignal(false)
+
+    return (
+        <label class="settings-password-field">
+            <span class="settings-password-label">{props.label}</span>
+            <span class="settings-password-input-wrap">
+                <Lock class="settings-password-input-icon" size={15} strokeWidth={1.9} />
+                <input
+                    class="settings-password-input"
+                    autocomplete={props.autocomplete}
+                    disabled={props.disabled}
+                    placeholder={props.placeholder}
+                    type={visible() ? "text" : "password"}
+                    value={props.value}
+                    onInput={(event) => props.onInput(event.currentTarget.value)}
+                />
+                <button
+                    type="button"
+                    class="settings-password-toggle"
+                    disabled={props.disabled}
+                    title={visible() ? "隐藏密码" : "显示密码"}
+                    aria-label={visible() ? "隐藏密码" : "显示密码"}
+                    onClick={() => setVisible(!visible())}
+                >
+                    <Show
+                        when={visible()}
+                        fallback={<Eye class="settings-password-toggle-icon" size={16} strokeWidth={1.9} />}
+                    >
+                        <EyeOff class="settings-password-toggle-icon" size={16} strokeWidth={1.9} />
+                    </Show>
+                </button>
+            </span>
+        </label>
+    )
+}
+
 export function FolderPanel(props: FolderPanelProps) {
     const sdk = useSDK()
     const [projects, setProjects] = createSignal<Project[]>([])
@@ -145,6 +192,13 @@ export function FolderPanel(props: FolderPanelProps) {
     const [settingsSection, setSettingsSection] = createSignal<SettingsSection>("appearance")
     const [appInfo, setAppInfo] = createSignal<ClientAppInfo | null>(null)
     const [isManualUpdateChecking, setIsManualUpdateChecking] = createSignal(false)
+    const [passwordForm, setPasswordForm] = createSignal<PasswordFormState>({
+        confirmPassword: "",
+        currentPassword: "",
+        newPassword: "",
+    })
+    const [isPasswordFormOpen, setIsPasswordFormOpen] = createSignal(false)
+    const [isPasswordSubmitting, setIsPasswordSubmitting] = createSignal(false)
     const sessionLoadFolders = new Set<string>()
     let fileLoadRequest = 0
     let fileRefreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -167,8 +221,18 @@ export function FolderPanel(props: FolderPanelProps) {
         closeMenus()
     }
 
+    const resetPasswordForm = () => {
+        setPasswordForm({
+            confirmPassword: "",
+            currentPassword: "",
+            newPassword: "",
+        })
+    }
+
     const openSettings = () => {
         closeMenus()
+        resetPasswordForm()
+        setIsPasswordFormOpen(false)
         setSettingsOpen(true)
     }
 
@@ -389,6 +453,11 @@ export function FolderPanel(props: FolderPanelProps) {
         if (!settingsOpen() && !accountMenuPosition()) return
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key !== "Escape") return
+            if (isPasswordFormOpen()) {
+                event.preventDefault()
+                closePasswordForm()
+                return
+            }
             setSettingsOpen(false)
             closeMenus()
         }
@@ -703,6 +772,15 @@ export function FolderPanel(props: FolderPanelProps) {
     const currentThemeModeOption = () => THEME_MODE_OPTIONS.find((item) => item.mode === props.themeMode) ?? SYSTEM_THEME_MODE_OPTION
     const currentSettingsSection = () => SETTINGS_SECTION_OPTIONS.find((item) => item.section === settingsSection()) ?? SETTINGS_SECTION_OPTIONS[0]
     const accountName = () => props.clientAuthSession.user.name ?? props.clientAuthSession.user.username
+    const accountSummaryMeta = () =>
+        [
+            props.clientAuthSession.user.username !== accountName() ? `用户名 ${props.clientAuthSession.user.username}` : null,
+            props.clientAuthSession.user.department
+                && props.clientAuthSession.user.department !== accountName()
+                && props.clientAuthSession.user.department !== props.clientAuthSession.user.username
+                ? `部门 ${props.clientAuthSession.user.department}`
+                : null,
+        ].filter((item): item is string => Boolean(item)).join(" · ") || "当前账号"
     const accountMeta = () => {
         if (props.clientAuthSession.user.department) return props.clientAuthSession.user.department
         if (props.clientAuthSession.user.quotaLimit !== null) {
@@ -729,6 +807,65 @@ export function FolderPanel(props: FolderPanelProps) {
         if (appInfo()?.platform === "mac") return "macOS"
         if (appInfo()?.platform === "win") return "Windows"
         return "当前平台"
+    }
+    const updatePasswordForm = (changes: Partial<PasswordFormState>) => {
+        setPasswordForm((prev) => ({ ...prev, ...changes }))
+    }
+    const passwordChangeErrorDescription = (result: { reason: ClientPasswordFailureReason; message?: string }) => {
+        if (result.reason === "invalid_current_password") return "当前密码不正确"
+        if (result.message) return result.message
+        if (result.reason === "network") return "无法连接登录服务"
+        if (result.reason === "unauthorized") return "登录已失效，请重新登录"
+        return "修改密码失败，请稍后重试"
+    }
+    const notifyPasswordChangeError = (description: string) => {
+        showToast({
+            description,
+            title: "修改密码失败",
+            variant: "error",
+        })
+    }
+    const closePasswordForm = () => {
+        if (isPasswordSubmitting()) return
+        resetPasswordForm()
+        setIsPasswordFormOpen(false)
+    }
+    const submitPasswordChange = async (event: Event) => {
+        event.preventDefault()
+        if (isPasswordSubmitting()) return
+
+        const form = passwordForm()
+        const nextPassword = form.newPassword.trim()
+        if (!form.currentPassword || !nextPassword) {
+            notifyPasswordChangeError("请输入当前密码和新密码")
+            return
+        }
+        if (nextPassword.length > 255) {
+            notifyPasswordChangeError("新密码不能超过 255 个字符")
+            return
+        }
+        if (nextPassword !== form.confirmPassword.trim()) {
+            notifyPasswordChangeError("两次输入的新密码不一致")
+            return
+        }
+
+        setIsPasswordSubmitting(true)
+        const result = await changeClientPassword({
+            currentPassword: form.currentPassword,
+            newPassword: nextPassword,
+        })
+        setIsPasswordSubmitting(false)
+        if (!result.ok) {
+            notifyPasswordChangeError(passwordChangeErrorDescription(result))
+            return
+        }
+
+        resetPasswordForm()
+        setIsPasswordFormOpen(false)
+        showToast({
+            title: "密码已修改",
+            variant: "success",
+        })
     }
 
     createEffect(() => {
@@ -1222,6 +1359,36 @@ export function FolderPanel(props: FolderPanelProps) {
                                         </div>
                                     </section>
                                 </Show>
+                                <Show when={settingsSection() === "account"}>
+                                    <section class="settings-section">
+                                        <div class="settings-section-heading">
+                                            <h4>当前账号</h4>
+                                        </div>
+                                        <div class="settings-account-summary">
+                                            <span class="settings-account-avatar" aria-hidden="true">
+                                                <CircleUser class="sidebar-lucide-icon" size={17} strokeWidth={1.85} />
+                                            </span>
+                                            <span class="settings-account-copy">
+                                                <span class="settings-account-name">{accountName()}</span>
+                                                <span class="settings-account-meta">{accountSummaryMeta()}</span>
+                                            </span>
+                                        </div>
+                                    </section>
+                                    <section class="settings-section">
+                                        <div class="settings-section-heading">
+                                            <h4>修改密码</h4>
+                                            <p>请确认当前密码后设置新密码。</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            class="settings-password-trigger"
+                                            onClick={() => setIsPasswordFormOpen(true)}
+                                        >
+                                            <Lock class="sidebar-lucide-icon" size={16} strokeWidth={1.9} />
+                                            <span>修改密码</span>
+                                        </button>
+                                    </section>
+                                </Show>
                                 <Show when={settingsSection() === "chat"}>
                                     <section class="settings-section">
                                         <div class="settings-section-heading">
@@ -1313,6 +1480,79 @@ export function FolderPanel(props: FolderPanelProps) {
                                 </Show>
                             </main>
                         </div>
+                        <Show when={isPasswordFormOpen()}>
+                            <div class="settings-password-dialog-layer">
+                                <button
+                                    type="button"
+                                    class="settings-password-dialog-backdrop"
+                                    aria-label="关闭修改密码"
+                                    onClick={closePasswordForm}
+                                />
+                                <form
+                                    class="settings-password-dialog"
+                                    role="dialog"
+                                    aria-modal="true"
+                                    aria-labelledby="desktop-lxz-password-title"
+                                    onSubmit={submitPasswordChange}
+                                >
+                                    <button
+                                        type="button"
+                                        class="settings-password-dialog-close"
+                                        disabled={isPasswordSubmitting()}
+                                        onClick={closePasswordForm}
+                                        title="关闭"
+                                        aria-label="关闭修改密码"
+                                    >
+                                        <X class="sidebar-lucide-icon" size={15} strokeWidth={1.9} />
+                                    </button>
+                                    <div class="settings-password-dialog-heading">
+                                        <h4 id="desktop-lxz-password-title">修改密码</h4>
+                                        <p>请确认当前密码后设置新密码。</p>
+                                    </div>
+                                    <SettingsPasswordField
+                                        autocomplete="current-password"
+                                        disabled={isPasswordSubmitting()}
+                                        label="当前密码"
+                                        placeholder="当前密码"
+                                        value={passwordForm().currentPassword}
+                                        onInput={(currentPassword) => updatePasswordForm({ currentPassword })}
+                                    />
+                                    <SettingsPasswordField
+                                        autocomplete="new-password"
+                                        disabled={isPasswordSubmitting()}
+                                        label="新密码"
+                                        placeholder="新密码"
+                                        value={passwordForm().newPassword}
+                                        onInput={(newPassword) => updatePasswordForm({ newPassword })}
+                                    />
+                                    <SettingsPasswordField
+                                        autocomplete="new-password"
+                                        disabled={isPasswordSubmitting()}
+                                        label="确认新密码"
+                                        placeholder="再次输入新密码"
+                                        value={passwordForm().confirmPassword}
+                                        onInput={(confirmPassword) => updatePasswordForm({ confirmPassword })}
+                                    />
+                                    <div class="settings-password-actions">
+                                        <button
+                                            type="button"
+                                            class="settings-password-cancel"
+                                            disabled={isPasswordSubmitting()}
+                                            onClick={closePasswordForm}
+                                        >
+                                            取消
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            class="settings-password-submit"
+                                            disabled={isPasswordSubmitting()}
+                                        >
+                                            <span>{isPasswordSubmitting() ? "保存中" : "保存新密码"}</span>
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </Show>
                     </div>
                 </Portal>
             </Show>

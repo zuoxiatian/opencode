@@ -13,6 +13,7 @@ import {
 } from "../auth"
 
 export type ClientLoginFailureReason = "network" | "unauthorized" | "invalid"
+export type ClientPasswordFailureReason = "network" | "unauthorized" | "invalid_current_password" | "invalid"
 type ClientRefreshFailureReason = "missing" | "network" | "expired" | "invalid"
 let refreshPromise: Promise<ClientAuthSession> | null = null
 
@@ -37,6 +38,38 @@ export async function loginClient(input: { username: string; password: string })
     const session = clientAuthSessionFromResponse(data)
     writeClientAuthSession(session)
     return { ok: true, session } as const
+}
+
+export async function changeClientPassword(input: { currentPassword: string; newPassword: string }) {
+    const response = await ensureClientLoginToken()
+        .then((session) => clientApiFetch("/api/client/password", withClientAuthHeaders("/api/client/password", {
+            body: JSON.stringify(input),
+            headers: new Headers({ "Content-Type": "application/json" }),
+            method: "PUT",
+        }, session.loginToken)))
+        .catch((error: unknown) => ({ error } as const))
+
+    if (!response) return { ok: false, reason: "network" } as const
+    if (!(response instanceof Response)) {
+        return {
+            message: errorMessage(response.error),
+            ok: false,
+            reason: clientPasswordFailureReasonFromError(response.error),
+        } as const
+    }
+
+    const data = await response.json().catch(() => undefined) as unknown
+    if (response.ok && isClientAuthResponse(data)) {
+        const session = clientAuthSessionFromResponse(data)
+        writeClientAuthSession(session)
+        return { ok: true, session } as const
+    }
+
+    return {
+        message: responseMessage(data),
+        ok: false,
+        reason: clientPasswordFailureReason(response, data),
+    } as const
 }
 
 export async function refreshClientAuth() {
@@ -287,6 +320,24 @@ function errorMessage(input: unknown) {
     if (input instanceof Error && input.message.trim()) return input.message
     const message = String(input)
     return message && message !== "[object Object]" ? message : undefined
+}
+
+function clientPasswordFailureReason(response: Response, data: unknown): ClientPasswordFailureReason {
+    if (responseCode(data) === "invalid_current_password") return "invalid_current_password"
+    if (response.status === 401) return "unauthorized"
+    return "invalid"
+}
+
+function clientPasswordFailureReasonFromError(error: unknown): ClientPasswordFailureReason {
+    const message = errorMessage(error)
+    if (message === "未登录" || message === "登录已失效") return "unauthorized"
+    return "network"
+}
+
+function responseCode(input: unknown) {
+    if (typeof input !== "object" || input === null) return undefined
+    const code = (input as { code?: unknown }).code
+    return typeof code === "string" && code.trim() ? code : undefined
 }
 
 function responseMessage(input: unknown) {
