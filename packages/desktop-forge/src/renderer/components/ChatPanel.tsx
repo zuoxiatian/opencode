@@ -2088,6 +2088,29 @@ export function ChatPanel(props: ChatPanelProps) {
     const messageError = (message: Message) => "error" in message ? message.error : undefined
     const messageFinish = (message: Message) => "finish" in message ? message.finish : undefined
     const messageParentID = (message: Message) => "parentID" in message ? message.parentID : undefined
+    const isAbortedAssistantMessage = (message: Message) => (
+        message.role === "assistant"
+        && typeof message.error === "object"
+        && message.error !== null
+        && message.error.name === "MessageAbortedError"
+    )
+    const stopDurationText = (message: Message) => {
+        if (message.role !== "assistant") return ""
+        if (typeof message.time.completed !== "number") return ""
+        const duration = message.time.completed - message.time.created
+        if (!Number.isFinite(duration) || duration < 0) return ""
+        if (duration < 1000) return "不到 1s"
+        const seconds = Math.max(1, Math.round(duration / 1000))
+        if (seconds < 60) return `${seconds}s`
+        const minutes = Math.floor(seconds / 60)
+        const rest = seconds % 60
+        return rest ? `${minutes}m ${rest}s` : `${minutes}m`
+    }
+    const assistantStopText = (message: Message) => {
+        if (!isAbortedAssistantMessage(message)) return ""
+        const duration = stopDurationText(message)
+        return duration ? `你在 ${duration} 后停止了` : "你停止了"
+    }
 
     const completedAssistantWithoutText = (message: Message) => {
         if (message.role !== "assistant") return false
@@ -2097,6 +2120,7 @@ export function ChatPanel(props: ChatPanelProps) {
     }
 
     const assistantFallbackText = (message: Message) => {
+        if (isAbortedAssistantMessage(message)) return ""
         if (!completedAssistantWithoutText(message)) return ""
         return assistantErrorText(messageError(message)) || "本轮没有生成文本回复"
     }
@@ -2390,6 +2414,15 @@ export function ChatPanel(props: ChatPanelProps) {
                                             <div class="chat-turn assistant">
                                                 <div class="chat-message assistant">
                                                     <div class="chat-message-content chat-message-empty">{text()}</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </Show>
+                                    <Show when={assistantStopText(message)}>
+                                        {(text) => (
+                                            <div class="chat-turn stopped">
+                                                <div class="chat-stop-divider">
+                                                    <span class="chat-stop-label">{text()}</span>
                                                 </div>
                                             </div>
                                         )}

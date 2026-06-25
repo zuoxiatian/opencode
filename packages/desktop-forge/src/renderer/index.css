@@ -4787,6 +4787,11 @@ body {
     padding: 1px 0;
 }
 
+.chat-turn.stopped {
+    justify-content: center;
+    padding: 2px 0 4px;
+}
+
 .chat-message {
     min-width: 0;
     animation: messageIn 180ms ease-out;
@@ -4863,6 +4868,28 @@ body {
     display: inline-flex;
     align-items: center;
     white-space: nowrap;
+}
+
+.chat-stop-divider {
+    width: 100%;
+    min-width: 0;
+    display: block;
+    border-bottom: 1px solid var(--border-strong);
+    padding: 0 0 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    text-align: right;
+    user-select: none;
+    animation: messageIn 180ms ease-out;
+}
+
+.chat-stop-label {
+    display: inline-block;
+    max-width: 100%;
+    text-align: right;
+    overflow-wrap: anywhere;
 }
 
 .chat-thinking {
