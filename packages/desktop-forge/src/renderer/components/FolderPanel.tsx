@@ -68,6 +68,7 @@ type SettingsSection = "appearance" | "chat" | "about"
 
 interface FolderPanelProps {
     onCollapse: () => void
+    opencodeServiceStatus: "checking" | "online" | "offline"
     clientAuthSession: ClientAuthSession
     themeMode: ThemeMode
     onThemeModeChange: (mode: ThemeMode) => void
@@ -709,6 +710,21 @@ export function FolderPanel(props: FolderPanelProps) {
         }
         return props.clientAuthSession.user.role
     }
+    const serviceStatusClass = () => props.opencodeServiceStatus === "online"
+        ? "online"
+        : props.opencodeServiceStatus === "offline"
+            ? "offline"
+            : "connecting"
+    const serviceStatusText = () => props.opencodeServiceStatus === "online"
+        ? "服务在线"
+        : props.opencodeServiceStatus === "offline"
+            ? "服务离线"
+            : "检测中"
+    const serviceStatusTitle = () => props.opencodeServiceStatus === "online"
+        ? "服务在线"
+        : props.opencodeServiceStatus === "offline"
+            ? "服务连接异常"
+            : "正在检测服务"
     const appPlatformText = () => {
         if (appInfo()?.platform === "mac") return "macOS"
         if (appInfo()?.platform === "win") return "Windows"
@@ -1059,9 +1075,9 @@ export function FolderPanel(props: FolderPanelProps) {
                     <Settings class="sidebar-lucide-icon" size={14} strokeWidth={1.8} />
                     <span>设置</span>
                 </button>
-                <div class="service-status" title="服务器在线">
-                    <span class="status-dot online"></span>
-                    <span>服务在线</span>
+                <div class="service-status" title={serviceStatusTitle()}>
+                    <span class={`status-dot ${serviceStatusClass()}`}></span>
+                    <span>{serviceStatusText()}</span>
                 </div>
             </div>
 

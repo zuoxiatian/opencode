@@ -22,11 +22,19 @@ interface ServerInfo {
 }
 
 const CLIENT_STATUS_CHECK_INTERVAL_MS = 30_000
+const OPENCODE_SERVICE_CHECK_INTERVAL_MS = 5_000
+const OPENCODE_SERVICE_RECOVERY_GRACE_MS = 60_000
+const OPENCODE_SERVICE_OFFLINE_FAILURE_THRESHOLD = 2
+const OPENCODE_SERVICE_RECOVERY_STORAGE_KEY = "desktop-lxz.serviceRecoveryStartedAt"
+
+type OpencodeServiceStatus = "checking" | "online" | "offline"
 
 function Root() {
     const [serverInfo, setServerInfo] = createSignal<ServerInfo | null>(null)
     const [isServerStarting, setIsServerStarting] = createSignal(false)
     const [serverStartError, setServerStartError] = createSignal("")
+    const [opencodeServiceStatus, setOpencodeServiceStatus] = createSignal<OpencodeServiceStatus>("checking")
+    const [isOpencodeOfflineDialogShown, setIsOpencodeOfflineDialogShown] = createSignal(false)
     const [isModelConfigLoading, setIsModelConfigLoading] = createSignal(false)
     const [isSkillSyncing, setIsSkillSyncing] = createSignal(false)
     const [skillSyncUserID, setSkillSyncUserID] = createSignal<number | null>(null)
@@ -53,6 +61,9 @@ function Root() {
         setServerInfo(null)
         setIsServerStarting(false)
         setServerStartError("")
+        setOpencodeServiceStatus("checking")
+        setIsOpencodeOfflineDialogShown(false)
+        sessionStorage.removeItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY)
         setIsModelConfigLoading(false)
         setIsSkillSyncing(false)
         setSkillSyncUserID(null)
@@ -97,6 +108,9 @@ function Root() {
         window.electronAPI.onServerReady((info) => {
             console.log("服务器就绪:", info)
             setServerInfo(info)
+            setOpencodeServiceStatus("online")
+            setIsOpencodeOfflineDialogShown(false)
+            sessionStorage.removeItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY)
             setIsServerStarting(false)
             setServerStartError("")
         })
@@ -167,6 +181,60 @@ function Root() {
         })
     })
 
+    createEffect(() => {
+        const info = serverInfo()
+        if (!info) {
+            setOpencodeServiceStatus("checking")
+            return
+        }
+
+        setOpencodeServiceStatus("online")
+        let failedChecks = 0
+        let wasOnline = true
+        const startedAt = Date.now()
+        const checkService = () => {
+            void window.electronAPI.checkServerHealth().catch(() => false).then((online) => {
+                if (serverInfo()?.url !== info.url) return
+                if (online) {
+                    failedChecks = 0
+                    wasOnline = true
+                    sessionStorage.removeItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY)
+                    setIsOpencodeOfflineDialogShown(false)
+                    setOpencodeServiceStatus("online")
+                    return
+                }
+                if (!wasOnline && Date.now() - startedAt < OPENCODE_SERVICE_RECOVERY_GRACE_MS) {
+                    setOpencodeServiceStatus("checking")
+                    return
+                }
+                if (isOpencodeServiceRecoveryGraceActive()) {
+                    return
+                }
+                failedChecks += 1
+                if (failedChecks < OPENCODE_SERVICE_OFFLINE_FAILURE_THRESHOLD) {
+                    if (!wasOnline) setOpencodeServiceStatus("checking")
+                    return
+                }
+                setOpencodeServiceStatus("offline")
+                promptReloadForOfflineOpencodeService()
+            })
+        }
+
+        checkService()
+        const timer = setInterval(checkService, OPENCODE_SERVICE_CHECK_INTERVAL_MS)
+        onCleanup(() => clearInterval(timer))
+    })
+
+    const promptReloadForOfflineOpencodeService = () => {
+        if (isOpencodeOfflineDialogShown()) return
+        setIsOpencodeOfflineDialogShown(true)
+        setTimeout(() => {
+            window.alert("服务连接异常，需要重新加载以恢复。点击确定后将自动重新加载。")
+            sessionStorage.setItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY, String(Date.now()))
+            void window.electronAPI.stopServer().finally(() => window.location.reload())
+        }, 0)
+    }
+
     const startOpencodeServer = async () => {
         if (serverInfo() || isServerStarting()) return
         setIsServerStarting(true)
@@ -207,6 +275,9 @@ function Root() {
             return
         }
         setServerInfo(info)
+        setOpencodeServiceStatus("online")
+        setIsOpencodeOfflineDialogShown(false)
+        sessionStorage.removeItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY)
         setIsServerStarting(false)
     }
 
@@ -303,6 +374,7 @@ function Root() {
                         {(info) => (
                             <App
                                 serverInfo={info()}
+                                opencodeServiceStatus={opencodeServiceStatus()}
                                 clientAuthSession={session()}
                                 themeMode={themeMode()}
                                 onThemeModeChange={setThemeMode}
@@ -315,6 +387,17 @@ function Root() {
             <Toast.Region />
         </>
     )
+}
+
+function isOpencodeServiceRecoveryGraceActive() {
+    const startedAt = Number(sessionStorage.getItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY))
+    if (!Number.isFinite(startedAt) || startedAt <= 0) {
+        sessionStorage.removeItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY)
+        return false
+    }
+    if (Date.now() - startedAt < OPENCODE_SERVICE_RECOVERY_GRACE_MS) return true
+    sessionStorage.removeItem(OPENCODE_SERVICE_RECOVERY_STORAGE_KEY)
+    return false
 }
 
 function notifySkillSyncSummary(summary: SkillSyncSummary) {

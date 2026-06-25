@@ -81,6 +81,8 @@ export function registerIpcHandlers(state: MainState) {
         return info
     })
 
+    ipcMain.handle("check-server-health", () => checkServerHealth(state))
+
     ipcMain.handle("stop-server", () => {
         state.closeDirectoryWatchers()
         stopServer(state)
@@ -199,6 +201,14 @@ async function requestClientApi(input: ClientApiRequest): Promise<ClientApiRespo
         status: response.status,
         statusText: response.statusText,
     }
+}
+
+function checkServerHealth(state: MainState) {
+    return Boolean(state.serverInfo && isServerProcessRunning(state))
+}
+
+function isServerProcessRunning(state: MainState) {
+    return Boolean(state.serverProcess && state.serverProcess.exitCode === null && state.serverProcess.signalCode === null)
 }
 
 function listSkillOperations() {

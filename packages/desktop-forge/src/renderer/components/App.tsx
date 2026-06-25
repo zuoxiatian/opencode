@@ -23,6 +23,7 @@ interface ServerInfo {
 
 interface AppProps {
     serverInfo: ServerInfo
+    opencodeServiceStatus: "checking" | "online" | "offline"
     clientAuthSession: ClientAuthSession
     themeMode: ThemeMode
     onThemeModeChange: (mode: ThemeMode) => void
@@ -113,6 +114,7 @@ export function App(props: AppProps) {
                     >
                         <FolderPanel
                             onCollapse={() => setFolderCollapsed(true)}
+                            opencodeServiceStatus={props.opencodeServiceStatus}
                             clientAuthSession={props.clientAuthSession}
                             themeMode={props.themeMode}
                             onThemeModeChange={props.onThemeModeChange}

@@ -31,6 +31,7 @@ export interface ElectronAPI {
     onServerReady: (callback: (data: ServerInfo) => void) => void
     getServerInfo: () => Promise<ServerInfo | null>
     startServer: (options: { opencodeConfig: unknown }) => Promise<ServerInfo>
+    checkServerHealth: () => Promise<boolean>
     stopServer: () => Promise<{ success: boolean }>
     pickDirectory: () => Promise<string | null>
     pickFile: (options?: { multiple?: boolean }) => Promise<string | string[] | null>
@@ -63,6 +64,8 @@ const electronAPI: ElectronAPI = {
     getServerInfo: () => ipcRenderer.invoke("get-server-info"),
 
     startServer: (options) => ipcRenderer.invoke("start-server", options),
+
+    checkServerHealth: () => ipcRenderer.invoke("check-server-health"),
 
     stopServer: () => ipcRenderer.invoke("stop-server"),
 

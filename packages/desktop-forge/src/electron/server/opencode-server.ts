@@ -19,7 +19,7 @@ export async function startServer(state: MainState, opencodeConfig: unknown): Pr
         const baseEnv = inheritUserShellEnv(state)
         const command = serverCommand()
 
-        state.serverProcess = spawn(command.cmd, command.args, {
+        const serverProcess = spawn(command.cmd, command.args, {
             cwd: app.isPackaged ? app.getPath("userData") : repoRoot(),
             env: {
                 ...baseEnv,
@@ -33,22 +33,27 @@ export async function startServer(state: MainState, opencodeConfig: unknown): Pr
             },
             stdio: ["pipe", "pipe", "pipe"],
         })
+        state.serverProcess = serverProcess
 
         let output = ""
         let serverUrl: string | undefined
 
-        state.serverProcess.stdout?.on("data", (data) => {
+        serverProcess.stdout?.on("data", (data) => {
             output += data.toString()
             const match = output.match(/listening on (http:\/\/[^\s]+)/)
             if (match?.[1]) serverUrl = match[1].trim()
         })
 
-        state.serverProcess.stderr?.on("data", (data) => {
+        serverProcess.stderr?.on("data", (data) => {
             console.error("Server stderr:", data.toString())
         })
 
-        state.serverProcess.on("error", reject)
-        state.serverProcess.on("exit", (code) => {
+        serverProcess.on("error", reject)
+        serverProcess.on("exit", (code) => {
+            if (state.serverProcess === serverProcess) {
+                state.serverInfo = null
+                state.serverProcess = null
+            }
             if (code !== 0 && code !== null) reject(new Error(`Server exited with code ${code}`))
         })
 
