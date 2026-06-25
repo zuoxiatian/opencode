@@ -19,6 +19,7 @@ import { Button } from "@opencode-ai/ui/button"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Markdown } from "@opencode-ai/ui/markdown"
 import type { LucideIcon } from "lucide-solid"
+import ArrowDown from "lucide-solid/icons/arrow-down"
 import ArrowUp from "lucide-solid/icons/arrow-up"
 import Brain from "lucide-solid/icons/brain"
 import Check from "lucide-solid/icons/check"
@@ -111,6 +112,7 @@ const MESSAGE_AUTO_FOLLOW_SETTLE_FRAMES = 4
 const MESSAGE_AUTO_FOLLOW_SETTLE_BURST_MS = 280
 const MESSAGE_AUTO_FOLLOW_REPIN_GRACE_MS = 1200
 const MESSAGE_TOUCH_FINGER_DOWN_THRESHOLD = 2
+const MESSAGE_BOTTOM_BUTTON_EPSILON = 2
 const SKILL_MENTION_PATTERN = /(?:^|\s)\/(\S+)/g
 const PERMISSION_MODE_OPTIONS = [
     { mode: "default", label: "默认权限", description: "遇到权限请求时手动确认" },
@@ -906,6 +908,7 @@ export function ChatPanel(props: ChatPanelProps) {
     const [newSessionPermissionMode, setNewSessionPermissionMode] = createSignal<PermissionMode>("default")
     const [historyCursors, setHistoryCursors] = createSignal<Record<string, string | undefined>>({})
     const [historyLoadingSessions, setHistoryLoadingSessions] = createSignal<Set<string>>(new Set())
+    const [scrollToBottomVisible, setScrollToBottomVisible] = createSignal(false)
     const loadedSessions = new Set<string>()
     const loadingSessions = new Set<string>()
     const autoRespondingPermissions = new Set<string>()
@@ -1105,11 +1108,16 @@ export function ChatPanel(props: ChatPanelProps) {
         return Math.max(0, messagesContainer.scrollHeight - messagesContainer.clientHeight)
     }
 
+    const updateScrollToBottomVisibility = () => {
+        setScrollToBottomVisible(Boolean(messagesContainer && messagesMaxScrollTop() - messagesContainer.scrollTop > MESSAGE_BOTTOM_BUTTON_EPSILON))
+    }
+
     const writeMessagesScrollTop = (target: number) => {
         if (!messagesContainer) return
         markProgrammaticScroll()
         messagesContainer.scrollTop = Math.max(0, Math.min(target, messagesMaxScrollTop()))
         lastMessagesScrollTop = messagesContainer.scrollTop
+        updateScrollToBottomVisibility()
     }
 
     // 滚动到底部
@@ -1212,6 +1220,7 @@ export function ChatPanel(props: ChatPanelProps) {
         messagesResizeObserver = undefined
         if (typeof ResizeObserver === "undefined") return
         messagesResizeObserver = new ResizeObserver(() => {
+            updateScrollToBottomVisibility()
             if (preservingHistoryScroll || !shouldAutoFollowMessages) return
             scheduleScrollToBottom()
         })
@@ -1271,6 +1280,7 @@ export function ChatPanel(props: ChatPanelProps) {
         lastMessagesScrollTop = element.scrollTop
         bindMessagesIntentListeners(element)
         resetMessagesResizeObserver()
+        updateScrollToBottomVisibility()
         if (shouldAutoFollowMessages) scheduleScrollToBottom()
     }
 
@@ -1307,6 +1317,7 @@ export function ChatPanel(props: ChatPanelProps) {
             element.scrollTop = scrollTop + element.scrollHeight - scrollHeight
             lastMessagesScrollTop = element.scrollTop
             preservingHistoryScroll = false
+            updateScrollToBottomVisibility()
         })
     }
 
@@ -1320,6 +1331,7 @@ export function ChatPanel(props: ChatPanelProps) {
     createEffect(() => {
         messageScrollSignature()
         workingStatusText()
+        queueMicrotask(updateScrollToBottomVisibility)
         if (preservingHistoryScroll) return
         if (!shouldAutoFollowMessages) {
             if (!isNearBottom() || !canRepinMessagesAutoFollow()) return
@@ -1331,6 +1343,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
     createEffect(() => {
         currentSessionId()
+        setScrollToBottomVisible(false)
         queueMicrotask(resumeMessagesAutoFollow)
     })
 
@@ -1689,6 +1702,7 @@ export function ChatPanel(props: ChatPanelProps) {
                     startAutoFollowLoop()
                 }
             }
+            updateScrollToBottomVisibility()
         }
         const sessionId = currentSessionId()
         if (!sessionId || !historyCursors()[sessionId] || historyLoadingSessions().has(sessionId)) return
@@ -2451,6 +2465,20 @@ export function ChatPanel(props: ChatPanelProps) {
                     </div>
                 </Show>
             </div>
+
+            <Show when={scrollToBottomVisible()}>
+                <div class="chat-scroll-bottom-anchor">
+                    <button
+                        class="chat-scroll-bottom-btn"
+                        type="button"
+                        title="返回底部"
+                        aria-label="返回底部"
+                        onClick={scrollToBottom}
+                    >
+                        <ArrowDown class="lucide-control-icon" size={16} strokeWidth={2} />
+                    </button>
+                </div>
+            </Show>
 
             <Show when={activeQuestionRequest()}>
                 {(request) => (

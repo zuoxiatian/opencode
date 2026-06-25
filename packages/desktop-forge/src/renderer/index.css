@@ -4738,6 +4738,45 @@ body {
     padding: 0 18px;
 }
 
+.chat-scroll-bottom-anchor {
+    flex-shrink: 0;
+    height: 0;
+    display: flex;
+    justify-content: center;
+    position: relative;
+    z-index: 58;
+    pointer-events: none;
+}
+
+.chat-scroll-bottom-btn {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--lxz-composer-border);
+    border-radius: var(--radius-full);
+    background: var(--lxz-composer-bg-focus);
+    color: var(--text-secondary);
+    box-shadow: 0 14px 30px -18px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.025);
+    cursor: pointer;
+    pointer-events: auto;
+    transform: translateY(-58px);
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.chat-scroll-bottom-btn:hover {
+    border-color: var(--border-strong);
+    background: var(--lxz-composer-bg-focus);
+    color: var(--text-primary);
+    box-shadow: 0 16px 34px -18px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    transform: translateY(-58px);
+}
+
+.chat-scroll-bottom-btn:active {
+    transform: translateY(-58px) scale(0.98);
+}
+
 .chat-history-loader {
     display: flex;
     justify-content: center;
