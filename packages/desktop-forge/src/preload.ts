@@ -40,6 +40,7 @@ export interface ElectronAPI {
     clientApiRequest: (input: ClientApiRequest) => Promise<ClientApiResponse>
     getAppInfo: () => Promise<ClientAppInfo>
     promptClientUpdate: (update: ClientUpdatePrompt) => Promise<{ action: "cancel" | "open" }>
+    promptSkillUpdateReminder: () => Promise<void>
     openPath: (path: string) => Promise<{ success: boolean; error?: string }>
     restart: () => Promise<void>
     readDirectory: (path: string) => Promise<Array<{ name: string; path: string; isDirectory: boolean }>>
@@ -82,6 +83,8 @@ const electronAPI: ElectronAPI = {
     getAppInfo: () => ipcRenderer.invoke("get-app-info"),
 
     promptClientUpdate: (update) => ipcRenderer.invoke("client-update:prompt", update),
+
+    promptSkillUpdateReminder: () => ipcRenderer.invoke("skill-sync:prompt-updated"),
 
     openPath: (path) => ipcRenderer.invoke("open-path", path),
 

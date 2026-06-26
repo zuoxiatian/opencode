@@ -61,6 +61,8 @@ export function registerIpcHandlers(state: MainState) {
         return { action: "open" }
     })
 
+    ipcMain.handle("skill-sync:prompt-updated", (event) => showSkillUpdateReminderDialog(event.sender))
+
     ipcMain.handle("open-path", async (_, targetPath: string) => {
         const error = await shell.openPath(targetPath)
         return error ? { error, success: false } : { success: true }
@@ -281,6 +283,21 @@ function showClientUpdateDialog(sender: Electron.WebContents, update: ClientUpda
 
 function clientUpdateActionButtonIndex(update: ClientUpdatePrompt) {
     return update.forceUpdate ? 0 : 1
+}
+
+function showSkillUpdateReminderDialog(sender: Electron.WebContents) {
+    const options: MessageBoxOptions = {
+        buttons: ["知道了"],
+        cancelId: 0,
+        defaultId: 0,
+        detail: "历史对话可能仍在使用旧版本基础技能，可能影响当前业务处理效果。建议开启新对话窗口后再继续。",
+        message: "基础技能已经更新",
+        noLink: true,
+        title: "基础技能更新",
+        type: "none",
+    }
+    const window = BrowserWindow.fromWebContents(sender)
+    return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options)
 }
 
 function clientReleasePlatform(): ClientAppInfo["platform"] {

@@ -38,6 +38,7 @@ function Root() {
     const [isModelConfigLoading, setIsModelConfigLoading] = createSignal(false)
     const [isSkillSyncing, setIsSkillSyncing] = createSignal(false)
     const [skillSyncUserID, setSkillSyncUserID] = createSignal<number | null>(null)
+    const [skillUpdateReminderPending, setSkillUpdateReminderPending] = createSignal(false)
     const [isUpdateChecking, setIsUpdateChecking] = createSignal(false)
     const [updateCheckUserID, setUpdateCheckUserID] = createSignal<number | null>(null)
     const [clientAuthSession, setClientAuthSession] = createSignal<ClientAuthSession | null>(readStoredClientAuthSession())
@@ -67,6 +68,7 @@ function Root() {
         setIsModelConfigLoading(false)
         setIsSkillSyncing(false)
         setSkillSyncUserID(null)
+        setSkillUpdateReminderPending(false)
         setIsUpdateChecking(false)
         setUpdateCheckUserID(null)
         void window.electronAPI.stopServer()
@@ -293,7 +295,10 @@ function Root() {
             })
             return null
         })
-        if (summary) notifySkillSyncSummary(summary)
+        if (summary) {
+            notifySkillSyncSummary(summary)
+            if (summary.requiredUpdated > 0) setSkillUpdateReminderPending(true)
+        }
         setSkillSyncUserID(session.user.id)
         setIsSkillSyncing(false)
     }
@@ -337,6 +342,16 @@ function Root() {
         if (serverInfo() || isServerStarting()) return
         if (serverStartError()) return
         void startOpencodeServer()
+    })
+
+    createEffect(() => {
+        if (!serverInfo() || !skillUpdateReminderPending()) return
+        setSkillUpdateReminderPending(false)
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (serverInfo()) void window.electronAPI.promptSkillUpdateReminder()
+            })
+        })
     })
 
     const logout = () => {
