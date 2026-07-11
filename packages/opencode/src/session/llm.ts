@@ -2,7 +2,7 @@ import { Provider } from "@/provider/provider"
 import * as Log from "@opencode-ai/core/util/log"
 import { Context, Effect, Layer, Record } from "effect"
 import * as Stream from "effect/Stream"
-import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
+import { APICallError, streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -24,10 +24,35 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import { errorMessage } from "@/util/error"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 type Result = Awaited<ReturnType<typeof streamText>>
+
+function streamErrorLog(error: unknown) {
+  if (APICallError.isInstance(error)) {
+    return {
+      name: error.name,
+      message: error.message,
+      statusCode: error.statusCode,
+      responseHeaders: error.responseHeaders,
+      responseBody: error.responseBody,
+      isRetryable: error.isRetryable,
+      data: error.data,
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    }
+  }
+
+  return { message: errorMessage(error) }
+}
 
 export type StreamInput = {
   user: MessageV2.User
@@ -333,7 +358,7 @@ const live: Layer.Layer<
       return streamText({
         onError(error) {
           l.error("stream error", {
-            error,
+            error: streamErrorLog(error),
           })
         },
         async experimental_repairToolCall(failed) {

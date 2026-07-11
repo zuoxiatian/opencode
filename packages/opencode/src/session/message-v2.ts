@@ -35,8 +35,44 @@ interface FetchDecompressionError extends Error {
   path: string
 }
 
-export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached image(s) from tool result:"
+const MAX_TOOL_RESULT_PDF_BYTES = 1024 * 1024
+const MAX_TOOL_RESULT_IMAGE_BYTES = 5 * 1024 * 1024
+
+export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:"
 export { isMedia }
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function dataUrlSize(url: string) {
+  const commaIndex = url.indexOf(",")
+  if (commaIndex === -1) return url.length
+
+  const data = url.slice(commaIndex + 1)
+  if (!url.slice(0, commaIndex).includes(";base64")) return data.length
+
+  return Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+}
+
+function mediaModality(mime: string) {
+  if (mime.startsWith("image/")) return "image"
+  if (mime === "application/pdf") return "pdf"
+  return undefined
+}
+
+function mediaAttachmentBlockReason(model: Provider.Model, attachment: { mime: string; url: string }) {
+  const modality = mediaModality(attachment.mime)
+  if (!modality) return undefined
+  if (!model.capabilities.input[modality]) return `this model does not support ${modality} input`
+
+  const size = dataUrlSize(attachment.url)
+  const limit = modality === "pdf" ? MAX_TOOL_RESULT_PDF_BYTES : MAX_TOOL_RESULT_IMAGE_BYTES
+  if (size > limit) return `the ${formatBytes(size)} attachment exceeds the ${formatBytes(limit)} direct model attachment limit`
+
+  return undefined
+}
 
 export const OutputLengthError = namedSchemaError("MessageOutputLengthError", {})
 export const AbortedError = namedSchemaError("MessageAbortedError", { message: Schema.String })
@@ -861,7 +897,28 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             const outputText = part.state.time.compacted
               ? "[Old tool result content cleared]"
               : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
-            const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+            const attachmentEntries = (part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])).map(
+              (attachment) => ({
+                attachment,
+                blockReason: isMedia(attachment.mime) ? mediaAttachmentBlockReason(model, attachment) : undefined,
+              }),
+            )
+            const blockedAttachments = attachmentEntries.filter((entry) => entry.blockReason !== undefined)
+            const attachments = attachmentEntries
+              .filter((entry) => entry.blockReason === undefined)
+              .map((entry) => entry.attachment)
+            const outputTextWithAttachmentWarnings =
+              blockedAttachments.length === 0
+                ? outputText
+                : [
+                    outputText,
+                    blockedAttachments
+                      .map(
+                        (entry) =>
+                          `ERROR: Attached ${entry.attachment.mime} was omitted because ${entry.blockReason}. Inform the user that the file cannot be sent to this model directly and suggest text extraction, conversion, or a smaller file workflow.`,
+                      )
+                      .join("\n"),
+                  ].join("\n\n")
 
             // For providers that don't support media in tool results, extract media files
             // (images, PDFs) to be sent as a separate user message
@@ -875,10 +932,10 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             const output =
               finalAttachments.length > 0
                 ? {
-                    text: outputText,
+                    text: outputTextWithAttachmentWarnings,
                     attachments: finalAttachments,
                   }
-                : outputText
+                : outputTextWithAttachmentWarnings
 
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,

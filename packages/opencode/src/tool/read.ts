@@ -17,6 +17,13 @@ const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024
 const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
+const MAX_PDF_ATTACHMENT_BYTES = 1024 * 1024
+const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
 
 // `offset` and `limit` were originally `z.coerce.number()` — the runtime
 // coercion was useful when the tool was called from a shell but serves no
@@ -210,24 +217,49 @@ export const ReadTool = Tool.define(
             preview: sliced.slice(0, 20).join("\n"),
             truncated,
             loaded: [] as string[],
+            size: Number(stat.size),
+            sizeLabel: formatBytes(Number(stat.size)),
           },
         }
       }
 
       const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID)
-      const sample = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
+      const fileSize = Number(stat.size)
+      const fileSizeLabel = formatBytes(fileSize)
+      const sample = yield* readSample(filepath, fileSize, SAMPLE_BYTES)
 
       const mime = sniffAttachmentMime(sample, AppFileSystem.mimeType(filepath))
-      if (isImageAttachment(mime) || isPdfAttachment(mime)) {
+      const isImage = isImageAttachment(mime)
+      const isPdf = isPdfAttachment(mime)
+      if (isImage || isPdf) {
+        const msg = isPdf ? "PDF read successfully" : "Image read successfully"
+        const limit = isPdf ? MAX_PDF_ATTACHMENT_BYTES : MAX_IMAGE_ATTACHMENT_BYTES
+        if (fileSize > limit) {
+          const output = `${msg}\nFile size: ${fileSizeLabel} (${fileSize} bytes)\nThe file is too large to attach directly to the model. Use text extraction, conversion, or a page-level/chunked workflow instead.`
+          return {
+            title,
+            output,
+            metadata: {
+              preview: output,
+              truncated: true,
+              loaded: loaded.map((item) => item.filepath),
+              size: fileSize,
+              sizeLabel: fileSizeLabel,
+            },
+          }
+        }
+
         const bytes = yield* fs.readFile(filepath)
-        const msg = isPdfAttachment(mime) ? "PDF read successfully" : "Image read successfully"
+        const output = `${msg}\nFile size: ${fileSizeLabel} (${fileSize} bytes)`
         return {
           title,
-          output: msg,
+          output,
           metadata: {
-            preview: msg,
+            preview: output,
             truncated: false,
             loaded: loaded.map((item) => item.filepath),
+            size: fileSize,
+            sizeLabel: fileSizeLabel,
           },
           attachments: [
             {
@@ -252,7 +284,12 @@ export const ReadTool = Tool.define(
         )
       }
 
-      let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>\n"].join("\n")
+      let output = [
+        `<path>${filepath}</path>`,
+        `<type>file</type>`,
+        `<size>${fileSize} bytes (${fileSizeLabel})</size>`,
+        "<content>\n",
+      ].join("\n")
       output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
 
       const last = file.offset + file.raw.length - 1
@@ -280,6 +317,8 @@ export const ReadTool = Tool.define(
           preview: file.raw.slice(0, 20).join("\n"),
           truncated,
           loaded: loaded.map((item) => item.filepath),
+          size: fileSize,
+          sizeLabel: fileSizeLabel,
         },
       }
     })
