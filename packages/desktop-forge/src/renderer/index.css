@@ -6138,6 +6138,60 @@ body {
     box-shadow: var(--lxz-composer-shadow-focus);
 }
 
+.chat-image-input {
+    display: none;
+}
+
+.chat-image-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 12px 0;
+}
+
+.chat-image-attachment {
+    width: 58px;
+    height: 58px;
+    position: relative;
+    flex: 0 0 auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-elevated);
+}
+
+.chat-image-attachment img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.chat-image-remove {
+    width: 20px;
+    height: 20px;
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(15, 15, 18, 0.78);
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+    padding: 0;
+}
+
+.chat-image-remove:hover {
+    background: rgba(32, 32, 36, 0.94);
+}
+
+.chat-image-remove-icon {
+    flex: 0 0 auto;
+}
+
 .chat-input {
     width: 100%;
     height: auto;

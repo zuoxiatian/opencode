@@ -13,6 +13,7 @@ import type {
     QuestionRequest,
     Session,
     SessionStatus,
+    FilePartInput,
     TextPartInput,
 } from "@opencode-ai/sdk/v2/client"
 import { Button } from "@opencode-ai/ui/button"
@@ -33,6 +34,7 @@ import FileText from "lucide-solid/icons/file-text"
 import Folder from "lucide-solid/icons/folder"
 import FolderPlus from "lucide-solid/icons/folder-plus"
 import Globe from "lucide-solid/icons/globe"
+import ImageIcon from "lucide-solid/icons/image"
 import ListChecks from "lucide-solid/icons/list-checks"
 import MonitorCheck from "lucide-solid/icons/monitor-check"
 import Package from "lucide-solid/icons/package"
@@ -45,6 +47,7 @@ import ShieldCheck from "lucide-solid/icons/shield-check"
 import Square from "lucide-solid/icons/square"
 import SquareTerminal from "lucide-solid/icons/square-terminal"
 import Wrench from "lucide-solid/icons/wrench"
+import X from "lucide-solid/icons/x"
 import { SessionPermissionDock, SessionQuestionDock } from "./SessionRequestDock"
 import { isIMECompositionEvent } from "../lib/ime"
 import type { ChatVisibilitySettings, LinkOpenMode } from "../settings"
@@ -54,9 +57,19 @@ interface QueuedPrompt {
     id: string
     sessionID: string
     text: string
-    parts: TextPartInput[]
+    parts: PromptPartInput[]
     agent: string
     model: ModelSelection
+}
+
+type PromptPartInput = TextPartInput | FilePartInput
+
+interface ImageAttachment {
+    id: string
+    name: string
+    mime: string
+    size: number
+    url: string
 }
 
 interface AgentOption {
@@ -78,6 +91,7 @@ interface ModelOption extends ModelSelection {
     modelName: string
     context: number
     isDefault: boolean
+    supportsImageInput: boolean
 }
 
 interface SkillOption {
@@ -255,6 +269,7 @@ function buildModelOptions(providers: Provider[], defaults: Record<string, strin
                 modelName: model.name || model.id,
                 context: model.limit.context,
                 isDefault: defaults[provider.id] === model.id,
+                supportsImageInput: model.capabilities.input.image,
             })),
     )
     if (options.length) return sortModelOptions(options)
@@ -269,9 +284,35 @@ function buildModelOptions(providers: Provider[], defaults: Record<string, strin
                     modelName: model.name || model.id,
                     context: model.limit.context,
                     isDefault: defaults[provider.id] === model.id,
+                    supportsImageInput: model.capabilities.input.image,
                 })),
         ),
     )
+}
+
+const imageMimeForFile = (filename: string) => {
+    const ext = filename.split(".").pop()?.toLowerCase()
+    if (ext === "png") return "image/png"
+    if (ext === "jpg" || ext === "jpeg") return "image/jpeg"
+    if (ext === "webp") return "image/webp"
+    if (ext === "gif") return "image/gif"
+    return undefined
+}
+
+const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024
+const IMAGE_ATTACHMENT_ACCEPT = "image/png,image/jpeg,image/webp,image/gif"
+
+const imageMimeForUpload = (file: File) => {
+    if (file.type === "image/png") return file.type
+    if (file.type === "image/jpeg") return file.type
+    if (file.type === "image/webp") return file.type
+    if (file.type === "image/gif") return file.type
+    return imageMimeForFile(file.name)
+}
+
+const formatBytes = (bytes: number) => {
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.ceil(bytes / 1024))} KB`
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function pickDefaultAgent(agents: AgentOption[]) {
@@ -885,6 +926,7 @@ function createAscendingID(prefix: "msg" | "prt") {
 export function ChatPanel(props: ChatPanelProps) {
     const sdk = useSDK()
     const [inputText, setInputText] = createSignal("")
+    const [imageAttachments, setImageAttachments] = createSignal<ImageAttachment[]>([])
     const [agents, setAgents] = createSignal<AgentOption[]>([])
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
     const [skillOptions, setSkillOptions] = createSignal<SkillOption[]>([])
@@ -929,6 +971,7 @@ export function ChatPanel(props: ChatPanelProps) {
     let chatInputComposing = false
     let chatInputCompositionEndTimer: ReturnType<typeof setTimeout> | undefined
     let chatInputElement: HTMLTextAreaElement | undefined
+    let imageInputElement: HTMLInputElement | undefined
     const emptyAssistantDiagnosticsLogged = new Set<string>()
 
     const resizeChatInput = (element = chatInputElement) => {
@@ -1400,12 +1443,19 @@ export function ChatPanel(props: ChatPanelProps) {
         )
     })
 
-    const promptParts = (text: string): TextPartInput[] => {
+    const promptParts = (text: string, images: ImageAttachment[]): PromptPartInput[] => {
         const selectedFiles = sdk.selectedFiles().filter((file) => !file.isDirectory)
         const selectedSkills = collectInlineSkillMentions(text, skillNameSet())
         const skillInstruction = buildSkillMentionInstruction(selectedSkills)
         return [
             { id: createAscendingID("prt"), type: "text", text },
+            ...images.map((image) => ({
+                id: image.id,
+                type: "file" as const,
+                mime: image.mime,
+                filename: image.name,
+                url: image.url,
+            } satisfies FilePartInput)),
             ...(selectedFiles.length === 0 ? [] : [{
                 id: createAscendingID("prt"),
                 type: "text",
@@ -1429,6 +1479,74 @@ export function ChatPanel(props: ChatPanelProps) {
                 metadata: { selectedSkills },
             } satisfies TextPartInput] : []),
         ]
+    }
+
+    const readImageAttachment = (file: File) => new Promise<ImageAttachment | undefined>((resolve) => {
+        const mime = imageMimeForUpload(file)
+        if (!mime) {
+            resolve(undefined)
+            return
+        }
+        if (file.size > MAX_IMAGE_ATTACHMENT_BYTES) {
+            setSendError(`图片 ${file.name || "image"} 大小为 ${formatBytes(file.size)}，超过 ${formatBytes(MAX_IMAGE_ATTACHMENT_BYTES)} 限制。`)
+            resolve(undefined)
+            return
+        }
+
+        const reader = new FileReader()
+        reader.onload = () => {
+            const result = reader.result
+            resolve(typeof result === "string"
+                ? {
+                    id: createAscendingID("prt"),
+                    name: file.name || "pasted-image.png",
+                    mime,
+                    size: file.size,
+                    url: result,
+                }
+                : undefined)
+        }
+        reader.onerror = () => {
+            setSendError(`读取图片 ${file.name || "image"} 失败。`)
+            resolve(undefined)
+        }
+        reader.readAsDataURL(file)
+    })
+
+    const addImageFiles = async (files: File[]) => {
+        const candidates = files.filter((file) => imageMimeForUpload(file))
+        if (candidates.length === 0) return false
+
+        const attachments = (await Promise.all(candidates.map(readImageAttachment)))
+            .filter((attachment): attachment is ImageAttachment => Boolean(attachment))
+        if (attachments.length === 0) return true
+
+        setImageAttachments((current) => [...current, ...attachments])
+        setSendError(null)
+        queueMicrotask(() => resizeChatInput())
+        return true
+    }
+
+    const handlePickImages = () => {
+        imageInputElement?.click()
+    }
+
+    const handleImageInputChange = (event: Event) => {
+        const input = event.currentTarget as HTMLInputElement
+        void addImageFiles(Array.from(input.files ?? []))
+        input.value = ""
+    }
+
+    const handlePasteImages = (event: ClipboardEvent) => {
+        const files = Array.from(event.clipboardData?.files ?? [])
+        if (!files.some((file) => imageMimeForUpload(file))) return
+        event.preventDefault()
+        void addImageFiles(files)
+    }
+
+    const removeImageAttachment = (id: string) => {
+        setImageAttachments((current) => current.filter((image) => image.id !== id))
+        queueMicrotask(() => resizeChatInput())
     }
 
     const loadSkillOptions = async () => {
@@ -1943,34 +2061,56 @@ export function ChatPanel(props: ChatPanelProps) {
 
     const handleSend = async () => {
         const text = inputText().trim()
-        if (!text || hasPendingRequest()) return
+        const images = imageAttachments()
+        if (!text) {
+            if (images.length > 0) setSendError("请输入要发送的文字说明。")
+            return
+        }
+        if (hasPendingRequest()) return
 
         if (!sdk.directory()) {
             setSendError("请先在左侧选择一个文件夹。")
             return
         }
 
+        const model = currentModel()
+        if (!model) {
+            setSendError("请选择模型后再发送")
+            return
+        }
+        const modelInfo = currentModelInfo()
+
+        if (images.length > 0 && !modelInfo?.supportsImageInput) {
+            setSendError("当前模型不支持图片输入，请切换支持视觉的模型或取消选择图片。")
+            return
+        }
+        const oversizedImage = images.find((image) => image.size > MAX_IMAGE_ATTACHMENT_BYTES)
+        if (oversizedImage) {
+            setSendError(`图片 ${oversizedImage.name} 大小为 ${formatBytes(oversizedImage.size)}，超过 ${formatBytes(MAX_IMAGE_ATTACHMENT_BYTES)} 限制。`)
+            return
+        }
+
+        const messageText = text
         setInputText("")
+        setImageAttachments([])
         setSendError(null)
 
         let optimisticPrompt: QueuedPrompt | undefined
         try {
-            const model = currentModel()
-            if (!model) throw new Error("请选择模型后再发送")
             const existingSessionId = currentSessionId()
             let sid = existingSessionId
             if (!sid) {
-                sid = await createNewSessionForFolder(createInitialSessionTitle(text))
+                sid = await createNewSessionForFolder(createInitialSessionTitle(messageText))
             }
             if (!sid) throw new Error("创建会话失败")
 
-            await ensureInitialSessionTitle(sid, text)
+            await ensureInitialSessionTitle(sid, messageText)
 
             const prompt: QueuedPrompt = {
                 id: createAscendingID("msg"),
                 sessionID: sid,
-                text,
-                parts: promptParts(text),
+                text: messageText,
+                parts: promptParts(messageText, images),
                 agent: currentAgent(),
                 model: toModelSelection(model),
             }
@@ -2512,6 +2652,36 @@ export function ChatPanel(props: ChatPanelProps) {
                     </div>
                 </Show>
                 <div class="chat-input-container">
+                    <input
+                        ref={(element) => {
+                            imageInputElement = element
+                        }}
+                        class="chat-image-input"
+                        type="file"
+                        accept={IMAGE_ATTACHMENT_ACCEPT}
+                        multiple
+                        onChange={handleImageInputChange}
+                    />
+                    <Show when={imageAttachments().length > 0}>
+                        <div class="chat-image-attachments">
+                            <For each={imageAttachments()}>
+                                {(image) => (
+                                    <div class="chat-image-attachment" title={`${image.name} (${formatBytes(image.size)})`}>
+                                        <img src={image.url} alt={image.name} />
+                                        <button
+                                            class="chat-image-remove"
+                                            type="button"
+                                            title="移除图片"
+                                            aria-label={`移除图片 ${image.name}`}
+                                            onClick={() => removeImageAttachment(image.id)}
+                                        >
+                                            <X class="chat-image-remove-icon" size={12} strokeWidth={2.2} />
+                                        </button>
+                                    </div>
+                                )}
+                            </For>
+                        </div>
+                    </Show>
                     <textarea
                         ref={(element) => {
                             chatInputElement = element
@@ -2525,6 +2695,7 @@ export function ChatPanel(props: ChatPanelProps) {
                             resizeChatInput(event.currentTarget)
                         }}
                         onKeyDown={handleKeyDown}
+                        onPaste={handlePasteImages}
                         onCompositionStart={handleChatInputCompositionStart}
                         onCompositionEnd={handleChatInputCompositionEnd}
                         disabled={hasPendingRequest() || !sdk.directory()}
@@ -2551,6 +2722,13 @@ export function ChatPanel(props: ChatPanelProps) {
                                 </DropdownMenu.Trigger>
                                 <DropdownMenu.Portal>
                                     <DropdownMenu.Content class="composer-add-menu">
+                                        <DropdownMenu.Item
+                                            class="composer-add-menu-item"
+                                            onSelect={() => handlePickImages()}
+                                        >
+                                            <ImageIcon class="lucide-control-icon" size={15} strokeWidth={1.8} />
+                                            <span data-slot="composer-add-menu-label">上传图片</span>
+                                        </DropdownMenu.Item>
                                         <DropdownMenu.Sub>
                                             <DropdownMenu.SubTrigger class="composer-add-menu-item">
                                                 <Puzzle class="lucide-control-icon" size={15} strokeWidth={1.8} />
