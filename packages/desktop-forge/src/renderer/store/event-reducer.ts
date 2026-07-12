@@ -92,11 +92,12 @@ export function applySessionEvent(input: {
                 setStore("part", part.messageID, [part])
                 break
             }
-            const result = Binary.search(parts, part.id, (p) => p.id)
-            if (result.found) {
-                setStore("part", part.messageID, result.index, reconcile(part))
+            const existing = parts.findIndex((item) => item.id === part.id)
+            if (existing >= 0) {
+                setStore("part", part.messageID, existing, reconcile(part))
                 break
             }
+            const result = Binary.search(parts, part.id, (p) => p.id)
             setStore(
                 "part",
                 part.messageID,

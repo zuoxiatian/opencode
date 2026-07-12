@@ -1,6 +1,6 @@
 import { createSignal, For, Show, createMemo, createEffect, onCleanup, onMount, batch } from "solid-js"
 import { reconcile } from "solid-js/store"
-import { Dynamic } from "solid-js/web"
+import { Dynamic, Portal } from "solid-js/web"
 import { useSDK, type DiscussIssue } from "../context/sdk"
 import type {
     Agent,
@@ -63,6 +63,7 @@ interface QueuedPrompt {
 }
 
 type PromptPartInput = TextPartInput | FilePartInput
+type ImageFilePart = Part & { type: "file"; mime: string; url: string; filename?: string }
 
 interface ImageAttachment {
     id: string
@@ -927,6 +928,7 @@ export function ChatPanel(props: ChatPanelProps) {
     const sdk = useSDK()
     const [inputText, setInputText] = createSignal("")
     const [imageAttachments, setImageAttachments] = createSignal<ImageAttachment[]>([])
+    const [previewImage, setPreviewImage] = createSignal<ImageFilePart | null>(null)
     const [agents, setAgents] = createSignal<AgentOption[]>([])
     const [modelOptions, setModelOptions] = createSignal<ModelOption[]>([])
     const [skillOptions, setSkillOptions] = createSignal<SkillOption[]>([])
@@ -985,6 +987,17 @@ export function ChatPanel(props: ChatPanelProps) {
 
     // 当前选中的会话 ID 派生自 SDK 的 selectedSession
     const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
+
+    const closePreviewImage = () => setPreviewImage(null)
+
+    createEffect(() => {
+        if (!previewImage()) return
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") closePreviewImage()
+        }
+        window.addEventListener("keydown", handleKeyDown)
+        onCleanup(() => window.removeEventListener("keydown", handleKeyDown))
+    })
 
     const currentPermissionMode = createMemo<PermissionMode>(() => {
         const sid = currentSessionId()
@@ -1940,7 +1953,7 @@ export function ChatPanel(props: ChatPanelProps) {
             id: part.id ?? createAscendingID("prt"),
             sessionID: prompt.sessionID,
             messageID: prompt.id,
-        } as Part))
+        } as Part)).sort((a, b) => a.id.localeCompare(b.id))
 
         batch(() => {
             const current = sdk.store.message[prompt.sessionID] ?? []
@@ -2182,6 +2195,54 @@ export function ChatPanel(props: ChatPanelProps) {
             .filter((part): part is Part & { type: "text"; text: string; synthetic?: boolean } => part.type === "text" && !part.synthetic)
             .map((part) => part.text)
             .join("\n")
+    }
+
+    const isImageFilePart = (part: Part): part is ImageFilePart => part.type === "file" && part.mime.startsWith("image/")
+
+    const userMessageImages = (parts: Part[]) => parts.filter(isImageFilePart)
+
+    const UserMessageContent = (input: { message: Message }) => {
+        const parts = createMemo(() => partsOf(input.message.id))
+        const text = createMemo(() => userMessageText(parts()))
+        const images = createMemo(() => userMessageImages(parts()))
+        return (
+            <>
+                <Show when={images().length > 0}>
+                    <div class="chat-message-images">
+                        <For each={images()}>
+                            {(image) => (
+                                <button
+                                    class="chat-message-image"
+                                    type="button"
+                                    title={image.filename ?? image.mime}
+                                    aria-label={`预览图片 ${image.filename ?? image.mime}`}
+                                    onClick={() => setPreviewImage(image)}
+                                >
+                                    <img
+                                        src={image.url}
+                                        alt={image.filename ?? "上传图片"}
+                                        onLoad={() => queueMicrotask(updateScrollToBottomVisibility)}
+                                        onError={() => queueMicrotask(updateScrollToBottomVisibility)}
+                                    />
+                                </button>
+                            )}
+                        </For>
+                    </div>
+                </Show>
+                <Show when={text()}>
+                    {(content) => (
+                        <Markdown
+                            class="chat-message-content"
+                            text={content()}
+                            cacheKey={input.message.id}
+                            streaming={false}
+                            linkOpenMode={props.linkOpenMode}
+                            openExternalLink={(href) => void window.electronAPI.openExternal(href)}
+                        />
+                    )}
+                </Show>
+            </>
+        )
     }
 
     const isCompactionUserMessage = (message: Message) => {
@@ -2479,14 +2540,7 @@ export function ChatPanel(props: ChatPanelProps) {
                                                 <Show when={!isInternalCompactionMessage(message)}>
                                                     <div class="chat-turn user">
                                                         <div class="chat-message user">
-                                                            <Markdown
-                                                                class="chat-message-content"
-                                                                text={userMessageText(partsOf(message.id))}
-                                                                cacheKey={message.id}
-                                                                streaming={false}
-                                                                linkOpenMode={props.linkOpenMode}
-                                                                openExternalLink={(href) => void window.electronAPI.openExternal(href)}
-                                                            />
+                                                            <UserMessageContent message={message} />
                                                         </div>
                                                     </div>
                                                 </Show>
@@ -3016,6 +3070,35 @@ export function ChatPanel(props: ChatPanelProps) {
                     </Show>
                 </div>
             </div>
+            <Show when={previewImage()}>
+                {(image) => (
+                    <Portal>
+                        <div class="chat-image-preview-backdrop" onMouseDown={closePreviewImage}>
+                            <div
+                                class="chat-image-preview-shell"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label={image().filename ?? "图片预览"}
+                                onMouseDown={(event) => event.stopPropagation()}
+                            >
+                                <div class="chat-image-preview-header">
+                                    <div class="chat-image-preview-title">{image().filename ?? image().mime}</div>
+                                    <button
+                                        class="chat-image-preview-close"
+                                        type="button"
+                                        title="关闭"
+                                        aria-label="关闭图片预览"
+                                        onClick={closePreviewImage}
+                                    >
+                                        <X class="chat-image-preview-close-icon" size={18} strokeWidth={2.1} />
+                                    </button>
+                                </div>
+                                <img class="chat-image-preview-img" src={image().url} alt={image().filename ?? "图片预览"} />
+                            </div>
+                        </div>
+                    </Portal>
+                )}
+            </Show>
         </div>
     )
 }
