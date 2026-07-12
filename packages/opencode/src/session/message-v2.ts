@@ -37,6 +37,7 @@ interface FetchDecompressionError extends Error {
 
 const MAX_TOOL_RESULT_PDF_BYTES = 1024 * 1024
 const MAX_TOOL_RESULT_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_TOOL_RESULT_VIDEO_BYTES = 10 * 1024 * 1024
 
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:"
 export { isMedia }
@@ -58,6 +59,7 @@ function dataUrlSize(url: string) {
 
 function mediaModality(mime: string) {
   if (mime.startsWith("image/")) return "image"
+  if (mime.startsWith("video/")) return "video"
   if (mime === "application/pdf") return "pdf"
   return undefined
 }
@@ -68,7 +70,12 @@ function mediaAttachmentBlockReason(model: Provider.Model, attachment: { mime: s
   if (!model.capabilities.input[modality]) return `this model does not support ${modality} input`
 
   const size = dataUrlSize(attachment.url)
-  const limit = modality === "pdf" ? MAX_TOOL_RESULT_PDF_BYTES : MAX_TOOL_RESULT_IMAGE_BYTES
+  const limit =
+    modality === "pdf"
+      ? MAX_TOOL_RESULT_PDF_BYTES
+      : modality === "video"
+        ? MAX_TOOL_RESULT_VIDEO_BYTES
+        : MAX_TOOL_RESULT_IMAGE_BYTES
   if (size > limit) return `the ${formatBytes(size)} attachment exceeds the ${formatBytes(limit)} direct model attachment limit`
 
   return undefined

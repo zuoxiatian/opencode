@@ -1,0 +1,13 @@
+Inspect image or video files without dumping media bytes into text context.
+
+Use this tool when the user asks to analyze, inspect, describe, OCR, summarize, review, or understand an image or video file.
+
+Rules:
+- Prefer this tool over Read for images and videos.
+- Do not read a whole video as text or base64.
+- Small supported media is returned as file attachments for direct multimodal model input.
+- Use strategy=frames when the user asks for specific video timestamps, a video interval, or when a video is too large for direct model input.
+- For exact timestamps, pass timestamps in seconds. For intervals, pass startTime/endTime and maxFrames.
+- Large videos should not be attached directly. Use ffmpeg frame extraction, ask for a smaller clip, or use a provider-specific upload workflow if available.
+- For Kimi K2.6, small videos can be sent directly as video input. Large videos should use Moonshot file upload and ms:// file URLs.
+- If the model does not support the returned media type, the model-message layer will omit it and tell you to suggest conversion, extraction, or a smaller workflow.

@@ -12,5 +12,6 @@ Usage:
 - Call this tool in parallel when you know there are multiple files you want to read.
 - Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.
 - This tool can read image files and PDFs and return them as file attachments when they are small enough for direct model input.
+- For image or video understanding tasks, prefer the media_inspect tool. It keeps media bytes out of text output and applies direct-attachment size limits.
 - For large PDFs, Office files, images, archives, or other binary files, do not repeatedly try to load the whole file as an attachment. Use the returned file size to decide whether to propose text extraction, conversion, page-level/chunked reading, or a specialized document tool.
-- If a PDF or image is too large to attach directly, explain that limitation to the user and choose a chunked or converted-text workflow instead.
+- If a PDF, image, or video is too large to attach directly, explain that limitation to the user and choose a chunked, converted-text, media_inspect, or provider-upload workflow instead.
