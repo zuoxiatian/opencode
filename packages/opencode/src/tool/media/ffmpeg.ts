@@ -79,9 +79,12 @@ async function probeVideo(filepath: string, abort?: AbortSignal): Promise<VideoI
 }
 
 async function ensureFfmpeg(abort?: AbortSignal) {
-  const result = await Process.text(["ffmpeg", "-version"], { nothrow: true, abort })
-  if (result.code === 0) return
-  throw new Error("Frame extraction requires ffmpeg. Install ffmpeg and make sure it is available on PATH.")
+  const result = await Promise.all([
+    Process.text(["ffmpeg", "-version"], { nothrow: true, abort }),
+    Process.text(["ffprobe", "-version"], { nothrow: true, abort }),
+  ])
+  if (result.every((item) => item.code === 0)) return
+  throw new Error("Frame extraction requires ffmpeg and ffprobe. Install FFmpeg and make sure both are available on PATH.")
 }
 
 export async function extractFrames(input: {

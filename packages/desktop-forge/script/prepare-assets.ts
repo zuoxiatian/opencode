@@ -50,6 +50,7 @@ async function prepareAssets(target: PrepareTarget) {
         bun,
         "run",
         "script/build.ts",
+        ...(target === "win" || target === "win-zip" ? ["--single"] : []),
         ...(options.skipOpencodeInstall ? ["--skip-install"] : []),
       ],
       {
