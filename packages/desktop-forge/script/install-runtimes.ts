@@ -292,7 +292,7 @@ async function currentFfmpegVersion(target: RuntimeTarget, targetDir: string, me
   if (!prefix) return undefined
 
   return await capture([...prefix, ffmpegExecutable(target, targetDir, "ffmpeg"), "-version"])
-    .then((text) => text.match(/^ffmpeg version\s+([^\s]+)/)?.[1])
+    .then((text) => text?.match(/^ffmpeg version\s+([^\s]+)/)?.[1])
     .catch(() => undefined)
 }
 
