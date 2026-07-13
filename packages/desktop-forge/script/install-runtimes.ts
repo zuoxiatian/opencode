@@ -20,6 +20,12 @@ type FfmpegDownload = Download & {
   executables: FfmpegExecutable[]
 }
 
+type DirectFfmpegDefaults = {
+  sha256?: string
+  url?: string
+  version?: string
+}
+
 type FfmpegInstall = {
   archives: string[]
   build: string
@@ -59,6 +65,24 @@ const pythonVersion = process.env.OPENCODE_DESKTOP_PYTHON_VERSION ?? "3.14.5"
 const pythonStandaloneRelease = process.env.OPENCODE_DESKTOP_PYTHON_STANDALONE_RELEASE ?? "20260510"
 const ffmpegRelease = process.env.OPENCODE_DESKTOP_FFMPEG_RELEASE ?? "n8.1"
 const ffmpegBuild = process.env.OPENCODE_DESKTOP_FFMPEG_BUILD ?? "lgpl-shared"
+const darwinFfmpegDefaults = {
+  "darwin-x64": {
+    ffmpeg: { url: "https://evermeet.cx/ffmpeg/getrelease/zip" },
+    ffprobe: { url: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" },
+  },
+  "darwin-arm64": {
+    ffmpeg: {
+      sha256: "ebb82529562b71170807bbc6b0e7eb4f0b13af8cbb0e085bb9e8f6fe709598ad",
+      url: "https://www.osxexperts.net/ffmpeg81arm.zip",
+      version: "8.1",
+    },
+    ffprobe: {
+      sha256: "a6640a77d38a6f0527c5b597e599cb36a3427a6931444ed80bc62542421950a1",
+      url: "https://www.osxexperts.net/ffprobe81arm.zip",
+      version: "8.1",
+    },
+  },
+} as const satisfies Record<"darwin-x64" | "darwin-arm64", Record<FfmpegExecutable, DirectFfmpegDefaults>>
 const args = process.argv.slice(2)
 const options = {
   all: args.includes("--all"),
@@ -475,23 +499,16 @@ async function resolveFfmpegDownloads(target: RuntimeTarget): Promise<FfmpegDown
   if (target.windows) return [await resolveBtbNFfmpegDownload(target)]
   if (target.id === "darwin-x64") {
     return [
-      directFfmpegDownload(target, "ffmpeg", "OPENCODE_DESKTOP_FFMPEG_DARWIN_X64_FFMPEG", "https://evermeet.cx/ffmpeg/getrelease/zip"),
-      directFfmpegDownload(target, "ffprobe", "OPENCODE_DESKTOP_FFMPEG_DARWIN_X64_FFPROBE", "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip"),
+      directFfmpegDownload(target, "ffmpeg", "OPENCODE_DESKTOP_FFMPEG_DARWIN_X64_FFMPEG", darwinFfmpegDefaults[target.id].ffmpeg),
+      directFfmpegDownload(target, "ffprobe", "OPENCODE_DESKTOP_FFMPEG_DARWIN_X64_FFPROBE", darwinFfmpegDefaults[target.id].ffprobe),
     ]
   }
 
   if (target.id === "darwin-arm64") {
-    const downloads = [
-      directFfmpegDownload(target, "ffmpeg", "OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFMPEG"),
-      directFfmpegDownload(target, "ffprobe", "OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFPROBE"),
+    return [
+      directFfmpegDownload(target, "ffmpeg", "OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFMPEG", darwinFfmpegDefaults[target.id].ffmpeg),
+      directFfmpegDownload(target, "ffprobe", "OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFPROBE", darwinFfmpegDefaults[target.id].ffprobe),
     ]
-    if (downloads.every((download) => download.url)) return downloads
-    throw new Error(
-      [
-        "Bundled FFmpeg for darwin-arm64 requires explicit download URLs.",
-        "Set OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFMPEG_URL and OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFPROBE_URL.",
-      ].join(" "),
-    )
   }
 
   return undefined
@@ -522,16 +539,25 @@ function directFfmpegDownload(
   target: RuntimeTarget,
   executable: FfmpegExecutable,
   envPrefix: string,
-  defaultUrl?: string,
+  defaults: DirectFfmpegDefaults = {},
 ): FfmpegDownload {
-  const url = process.env[`${envPrefix}_URL`] ?? defaultUrl ?? ""
+  const url = process.env[`${envPrefix}_URL`] ?? defaults.url ?? ""
+  const usesDefaultUrl = !!defaults.url && url === defaults.url
+  const expectedSha256 = process.env[`${envPrefix}_SHA256`] ?? (usesDefaultUrl ? defaults.sha256 : undefined)
   return {
     archive: process.env[`${envPrefix}_ARCHIVE`] ?? `${executable}-${target.id}.zip`,
-    expectedSha256: process.env[`${envPrefix}_SHA256`],
+    expectedSha256,
     executables: [executable],
     url,
-    version: process.env[`${envPrefix}_VERSION`] ?? (path.basename(url) || "custom"),
+    version: process.env[`${envPrefix}_VERSION`] ?? (usesDefaultUrl ? defaults.version : undefined) ?? (path.basename(url) || "custom"),
   }
+}
+
+function directFfmpegBuildKey(envPrefix: string, defaults: DirectFfmpegDefaults) {
+  const url = process.env[`${envPrefix}_URL`] ?? defaults.url ?? ""
+  const usesDefaultUrl = !!defaults.url && url === defaults.url
+  const expectedSha256 = process.env[`${envPrefix}_SHA256`] ?? (usesDefaultUrl ? defaults.sha256 : undefined)
+  return expectedSha256 ? `${url}#sha256:${expectedSha256}` : url
 }
 
 function pythonAssetVersion(name: string, target: RuntimeTarget) {
@@ -757,16 +783,12 @@ function ffmpegSupported(target: RuntimeTarget) {
 
 function ffmpegBuildKey(target: RuntimeTarget) {
   if (target.windows) return `btbn:${ffmpegRelease}:${ffmpegBuild}`
-  if (target.id === "darwin-x64") {
+  if (target.id === "darwin-x64" || target.id === "darwin-arm64") {
+    const defaults = darwinFfmpegDefaults[target.id]
+    const envPrefix = target.id === "darwin-x64" ? "OPENCODE_DESKTOP_FFMPEG_DARWIN_X64" : "OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64"
     return [
-      process.env.OPENCODE_DESKTOP_FFMPEG_DARWIN_X64_FFMPEG_URL ?? "https://evermeet.cx/ffmpeg/getrelease/zip",
-      process.env.OPENCODE_DESKTOP_FFMPEG_DARWIN_X64_FFPROBE_URL ?? "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip",
-    ].join("|")
-  }
-  if (target.id === "darwin-arm64") {
-    return [
-      process.env.OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFMPEG_URL ?? "",
-      process.env.OPENCODE_DESKTOP_FFMPEG_DARWIN_ARM64_FFPROBE_URL ?? "",
+      directFfmpegBuildKey(`${envPrefix}_FFMPEG`, defaults.ffmpeg),
+      directFfmpegBuildKey(`${envPrefix}_FFPROBE`, defaults.ffprobe),
     ].join("|")
   }
   return "unsupported"

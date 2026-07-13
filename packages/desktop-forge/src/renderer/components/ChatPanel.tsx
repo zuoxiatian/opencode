@@ -2303,6 +2303,13 @@ export function ChatPanel(props: ChatPanelProps) {
     const messageError = (message: Message) => "error" in message ? message.error : undefined
     const messageFinish = (message: Message) => "finish" in message ? message.finish : undefined
     const messageParentID = (message: Message) => "parentID" in message ? message.parentID : undefined
+    const isAssistantToolStep = (message: Message) => (
+        message.role === "assistant"
+        && (
+            ["tool-calls", "unknown"].includes(messageFinish(message) ?? "")
+            || partsOf(message.id).some((part) => part.type === "tool")
+        )
+    )
     const isAbortedAssistantMessage = (message: Message) => (
         message.role === "assistant"
         && typeof message.error === "object"
@@ -2331,6 +2338,8 @@ export function ChatPanel(props: ChatPanelProps) {
         if (message.role !== "assistant") return false
         if (isInternalCompactionMessage(message)) return false
         if (hasAssistantText(message)) return false
+        if (messageError(message)) return true
+        if (isAssistantToolStep(message)) return false
         return Boolean(message.time.completed || messageError(message) || messageFinish(message) === "error")
     }
 
