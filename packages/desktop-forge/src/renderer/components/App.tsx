@@ -25,6 +25,7 @@ interface AppProps {
     serverInfo: ServerInfo
     opencodeServiceStatus: "checking" | "online" | "offline"
     clientAuthSession: ClientAuthSession
+    appMarketEnabled: boolean
     themeMode: ThemeMode
     onThemeModeChange: (mode: ThemeMode) => void
     onLogout: () => void
@@ -116,6 +117,7 @@ export function App(props: AppProps) {
                             onCollapse={() => setFolderCollapsed(true)}
                             opencodeServiceStatus={props.opencodeServiceStatus}
                             clientAuthSession={props.clientAuthSession}
+                            appMarketEnabled={props.appMarketEnabled}
                             themeMode={props.themeMode}
                             onThemeModeChange={props.onThemeModeChange}
                             onLogout={props.onLogout}

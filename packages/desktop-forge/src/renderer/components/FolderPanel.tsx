@@ -79,6 +79,7 @@ interface FolderPanelProps {
     onCollapse: () => void
     opencodeServiceStatus: "checking" | "online" | "offline"
     clientAuthSession: ClientAuthSession
+    appMarketEnabled: boolean
     themeMode: ThemeMode
     onThemeModeChange: (mode: ThemeMode) => void
     onLogout: () => void
@@ -237,6 +238,7 @@ export function FolderPanel(props: FolderPanelProps) {
     }
 
     const openSkillMarket = () => {
+        if (!props.appMarketEnabled) return
         closeMenus()
         setSkillMarketOpen(true)
     }
@@ -406,6 +408,11 @@ export function FolderPanel(props: FolderPanelProps) {
         if (!project?.worktree) return
         applyProjectUpdate(project)
     }
+
+    createEffect(() => {
+        if (props.appMarketEnabled) return
+        setSkillMarketOpen(false)
+    })
 
     createEffect(() => {
         sdk.sessionListVersion()
@@ -1234,15 +1241,17 @@ export function FolderPanel(props: FolderPanelProps) {
                                 <span class="account-menu-info">{accountName()} · {accountMeta()}</span>
                             </div>
                             <span class="account-menu-separator" aria-hidden="true" />
-                            <button
-                                type="button"
-                                class="sidebar-context-menu-item"
-                                role="menuitem"
-                                onClick={openSkillMarket}
-                            >
-                                <Puzzle class="sidebar-action-icon" size={14} strokeWidth={1.8} />
-                                <span>技能市场</span>
-                            </button>
+                            <Show when={props.appMarketEnabled}>
+                                <button
+                                    type="button"
+                                    class="sidebar-context-menu-item"
+                                    role="menuitem"
+                                    onClick={openSkillMarket}
+                                >
+                                    <Puzzle class="sidebar-action-icon" size={14} strokeWidth={1.8} />
+                                    <span>技能市场</span>
+                                </button>
+                            </Show>
                             <button
                                 type="button"
                                 class="sidebar-context-menu-item"
@@ -1269,7 +1278,7 @@ export function FolderPanel(props: FolderPanelProps) {
                 )}
             </Show>
 
-            <Show when={skillMarketOpen()}>
+            <Show when={props.appMarketEnabled && skillMarketOpen()}>
                 <SkillMarketDialog onClose={() => setSkillMarketOpen(false)} />
             </Show>
 

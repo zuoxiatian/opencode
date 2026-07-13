@@ -7,6 +7,14 @@ import { App } from "./components/App"
 import { LoginPage } from "./components/LoginPage"
 import { clearClientAuthSession, isClientAuthSessionExpired, readStoredClientAuthSession, subscribeClientAuthSession, type ClientAuthSession } from "./auth"
 import { checkClientStatus } from "./api/client"
+import {
+    clearStoredClientCapabilities,
+    clientCapabilitiesAccountKey,
+    getClientCapabilities,
+    readStoredClientCapabilities,
+    writeStoredClientCapabilities,
+    type ClientCapabilities,
+} from "./api/capabilities"
 import { CLIENT_DEBUG_LOGS_ENABLED } from "./config"
 import { getClientModelConfig } from "./api/model-config"
 import { checkClientUpdate } from "./services/client-update"
@@ -42,8 +50,11 @@ function Root() {
     const [isUpdateChecking, setIsUpdateChecking] = createSignal(false)
     const [updateCheckUserID, setUpdateCheckUserID] = createSignal<number | null>(null)
     const [clientAuthSession, setClientAuthSession] = createSignal<ClientAuthSession | null>(readStoredClientAuthSession())
+    const [clientCapabilities, setClientCapabilities] = createSignal<ClientCapabilities | null>(null)
     const [themeMode, setThemeMode] = createSignal(readStoredThemeMode())
     const [systemTheme, setSystemTheme] = createSignal(getSystemTheme())
+    let clientCapabilitiesRequest: { accountKey: string; promise: Promise<boolean> } | null = null
+    if (!clientAuthSession()) clearStoredClientCapabilities()
     const resolvedTheme = () => resolveThemeMode(themeMode(), systemTheme())
     const syncTitleBarOverlay = () => {
         if (!navigator.platform.toLowerCase().includes("win")) return
@@ -58,7 +69,10 @@ function Root() {
         })
     }
     const stopServerForLoggedOutSession = () => {
+        clientCapabilitiesRequest = null
         setClientAuthSession(null)
+        setClientCapabilities(null)
+        clearStoredClientCapabilities()
         setServerInfo(null)
         setIsServerStarting(false)
         setServerStartError("")
@@ -97,6 +111,29 @@ function Root() {
             variant: "error",
         })
         if (clientAuthSession()) clearSessionAndStopServer()
+    }
+    const refreshClientCapabilitiesForSession = (session: ClientAuthSession) => {
+        const accountKey = clientCapabilitiesAccountKey(session.user)
+        if (clientCapabilitiesRequest?.accountKey === accountKey) return clientCapabilitiesRequest.promise
+
+        const promise = getClientCapabilities()
+            .then((features) => {
+                const currentSession = clientAuthSession()
+                if (!currentSession || clientCapabilitiesAccountKey(currentSession.user) !== accountKey) return false
+                writeStoredClientCapabilities(currentSession.user, features)
+                setClientCapabilities(features)
+                return true
+            })
+            .catch((error: unknown) => {
+                if (CLIENT_DEBUG_LOGS_ENABLED) console.warn("读取客户端能力失败:", error)
+                return false
+            })
+        clientCapabilitiesRequest = { accountKey, promise }
+        void promise.finally(() => {
+            if (clientCapabilitiesRequest?.promise !== promise) return
+            clientCapabilitiesRequest = null
+        })
+        return promise
     }
 
     onMount(() => {
@@ -149,6 +186,16 @@ function Root() {
         }
         const timer = setInterval(checkExpiration, 60_000)
         onCleanup(() => clearInterval(timer))
+    })
+
+    createEffect(() => {
+        const session = clientAuthSession()
+        if (!session) {
+            setClientCapabilities(null)
+            return
+        }
+        setClientCapabilities(readStoredClientCapabilities(session.user))
+        void refreshClientCapabilitiesForSession(session)
     })
 
     createEffect(() => {
@@ -391,6 +438,7 @@ function Root() {
                                 serverInfo={info()}
                                 opencodeServiceStatus={opencodeServiceStatus()}
                                 clientAuthSession={session()}
+                                appMarketEnabled={clientCapabilities()?.appMarket === true}
                                 themeMode={themeMode()}
                                 onThemeModeChange={setThemeMode}
                                 onLogout={logout}
