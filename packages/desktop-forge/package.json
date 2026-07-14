@@ -1,7 +1,7 @@
 {
   "name": "desktop-forge",
   "productName": "LongwiseTechAgent",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "LongwiseTechAgent desktop client",
   "main": ".vite/build/main.js",
   "private": true,
