@@ -11,6 +11,8 @@ import { ensureDefaultDirectory } from "./default-directory"
 
 export async function startServer(state: MainState, opencodeConfig: unknown): Promise<ServerInfo> {
     if (!isRecord(opencodeConfig)) throw new Error("模型配置不是 JSON 对象")
+    if (!state.browserTransport) throw new Error("内嵌浏览器服务尚未就绪")
+    const browserTransport = state.browserTransport
     const defaultDirectory = await ensureDefaultDirectory()
     await removeLegacySyncedOpencodeConfig()
 
@@ -18,6 +20,7 @@ export async function startServer(state: MainState, opencodeConfig: unknown): Pr
         const password = Math.random().toString(36).substring(2, 15)
         const baseEnv = inheritUserShellEnv(state)
         const command = serverCommand()
+        const noProxy = loopbackNoProxy(baseEnv.NO_PROXY ?? baseEnv.no_proxy)
 
         const serverProcess = spawn(command.cmd, command.args, {
             cwd: app.isPackaged ? app.getPath("userData") : repoRoot(),
@@ -26,8 +29,12 @@ export async function startServer(state: MainState, opencodeConfig: unknown): Pr
                 ...runtimeEnv(baseEnv),
                 OPENCODE_AUTO_UPDATE: "false",
                 OPENCODE_CONFIG_CONTENT: `${JSON.stringify(opencodeConfig, null, 2)}\n`,
+                OPENCODE_DESKTOP_BROWSER_TOKEN: browserTransport.token,
+                OPENCODE_DESKTOP_BROWSER_URL: browserTransport.url,
                 OPENCODE_DISABLE_GLOBAL_CONFIG: "true",
                 OPENCODE_SERVER_PASSWORD: password,
+                NO_PROXY: noProxy,
+                no_proxy: noProxy,
                 ComSpec: process.env.ComSpec || "C:\\WINDOWS\\system32\\cmd.exe",
                 SystemRoot: process.env.SystemRoot || "C:\\WINDOWS",
             },
@@ -70,6 +77,7 @@ export function stopServer(state: MainState) {
     state.serverProcess?.kill()
     state.serverProcess = null
     state.serverInfo = null
+    state.serverStartPromise = null
 }
 
 function serverCommand() {
@@ -84,6 +92,15 @@ function serverCommand() {
         args: ["run", "--cwd", join(repoRoot(), "packages", "opencode"), "--conditions=browser", "src/index.ts", "serve"],
         cmd: getBunCommand(),
     }
+}
+
+function loopbackNoProxy(input?: string) {
+    return [...new Set([
+        ...(input ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    ])].join(",")
 }
 
 async function waitForServer(serverUrl: () => string | undefined) {

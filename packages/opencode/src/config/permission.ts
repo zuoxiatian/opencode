@@ -33,6 +33,8 @@ const InputObject = Schema.StructWithRest(
     external_directory: Schema.optional(Rule),
     todowrite: Schema.optional(Action),
     question: Schema.optional(Action),
+    browser_cdp: Schema.optional(Rule),
+    browser_interaction: Schema.optional(Rule),
     webfetch: Schema.optional(Action),
     websearch: Schema.optional(Action),
     codesearch: Schema.optional(Action),

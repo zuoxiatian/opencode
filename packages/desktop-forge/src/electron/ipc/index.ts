@@ -18,6 +18,7 @@ import type {
     SkillMarketOperationType,
     SkillOperationResult,
 } from "../../shared/skill-market"
+import type { BrowserBounds, BrowserCommandInput } from "../../shared/browser"
 
 type SkillMarketMutationResult = SkillOperationResult | SkillDeleteResult
 
@@ -42,7 +43,28 @@ export function registerIpcHandlers(state: MainState) {
     })
 
     ipcMain.handle("open-external", async (_, url: string) => {
+        if (!isWebUrl(url)) throw new Error("只允许打开 HTTP 或 HTTPS 链接")
         await shell.openExternal(url)
+    })
+
+    ipcMain.handle("browser:get-state", (event) => {
+        assertMainWindowSender(state, event.sender)
+        return state.browserRuntime
+            ?.command({ command: { name: "browser.state" } })
+            .then((result) => result.state ?? null) ?? null
+    })
+
+    ipcMain.handle("browser:set-bounds", (event, bounds: BrowserBounds) => {
+        assertMainWindowSender(state, event.sender)
+        return state.browserRuntime?.command({
+            command: { bounds, name: "browser.viewport.set" },
+        })
+    })
+
+    ipcMain.handle("browser:command", (event, command: BrowserCommandInput) => {
+        assertMainWindowSender(state, event.sender)
+        if (!state.browserRuntime) throw new Error("内嵌浏览器当前不可用")
+        return state.browserRuntime.command(command)
     })
 
     ipcMain.handle("client-api:request", (_, input: ClientApiRequest) => requestClientApi(input))
@@ -77,10 +99,18 @@ export function registerIpcHandlers(state: MainState) {
 
     ipcMain.handle("start-server", async (_, options?: { opencodeConfig?: unknown }) => {
         if (state.serverInfo) return state.serverInfo
-        const info = await startServer(state, options?.opencodeConfig)
-        state.serverInfo = info
-        state.window?.webContents.send("server-ready", info)
-        return info
+        if (state.serverStartPromise) return state.serverStartPromise
+        const pending = startServer(state, options?.opencodeConfig)
+            .then((info) => {
+                state.serverInfo = info
+                state.window?.webContents.send("server-ready", info)
+                return info
+            })
+            .finally(() => {
+                if (state.serverStartPromise === pending) state.serverStartPromise = null
+            })
+        state.serverStartPromise = pending
+        return pending
     })
 
     ipcMain.handle("check-server-health", () => checkServerHealth(state))
@@ -183,6 +213,16 @@ export function registerIpcHandlers(state: MainState) {
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error)
+}
+
+function assertMainWindowSender(state: MainState, sender: Electron.WebContents) {
+    if (!state.window || state.window.isDestroyed() || state.window.webContents !== sender) {
+        throw new Error("拒绝非主窗口发起的浏览器操作")
+    }
+}
+
+function isWebUrl(input: string) {
+    return input.startsWith("https://") || input.startsWith("http://")
 }
 
 async function requestClientApi(input: ClientApiRequest): Promise<ClientApiResponse> {

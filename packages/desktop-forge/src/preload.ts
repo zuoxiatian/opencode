@@ -9,6 +9,12 @@ import type {
 } from "./shared/skill-market"
 import type { ClientApiRequest, ClientApiResponse } from "./shared/client-api"
 import type { ClientAppInfo, ClientUpdatePrompt } from "./shared/client-update"
+import type {
+    BrowserBounds,
+    BrowserCommandInput,
+    BrowserCommandResponse,
+    BrowserState,
+} from "./shared/browser"
 
 export interface DirectoryChangeEvent {
     path: string
@@ -28,6 +34,10 @@ interface ServerInfo {
 }
 
 export interface ElectronAPI {
+    browserCommand: (command: BrowserCommandInput) => Promise<BrowserCommandResponse>
+    getBrowserState: () => Promise<BrowserState | null>
+    onBrowserStateChanged: (callback: (state: BrowserState) => void) => () => void
+    setBrowserBounds: (bounds: BrowserBounds) => Promise<void>
     onServerReady: (callback: (data: ServerInfo) => void) => void
     getServerInfo: () => Promise<ServerInfo | null>
     startServer: (options: { opencodeConfig: unknown }) => Promise<ServerInfo>
@@ -58,6 +68,18 @@ export interface ElectronAPI {
 }
 
 const electronAPI: ElectronAPI = {
+    browserCommand: (command) => ipcRenderer.invoke("browser:command", command),
+
+    getBrowserState: () => ipcRenderer.invoke("browser:get-state"),
+
+    onBrowserStateChanged: (callback) => {
+        const handler = (_: unknown, state: BrowserState) => callback(state)
+        ipcRenderer.on("browser:state-changed", handler)
+        return () => ipcRenderer.removeListener("browser:state-changed", handler)
+    },
+
+    setBrowserBounds: (bounds) => ipcRenderer.invoke("browser:set-bounds", bounds),
+
     onServerReady: (callback) => {
         ipcRenderer.on("server-ready", (_, data) => callback(data))
     },

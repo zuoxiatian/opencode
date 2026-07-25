@@ -48,6 +48,8 @@ import { Bus } from "../bus"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
+import { BrowserTool } from "./browser"
+import { DESKTOP_BROWSER_AVAILABLE } from "../browser/config"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -117,6 +119,7 @@ export const layer: Layer.Layer<
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const mediatool = yield* MediaInspectTool
+    const browsertool = yield* BrowserTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -203,6 +206,7 @@ export const layer: Layer.Layer<
           code: Tool.init(codesearch),
           skill: Tool.init(skilltool),
           media: Tool.init(mediatool),
+          browser: Tool.init(browsertool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -222,6 +226,7 @@ export const layer: Layer.Layer<
             tool.write,
             tool.task,
             tool.fetch,
+            ...(DESKTOP_BROWSER_AVAILABLE ? [tool.browser] : []),
             tool.todo,
             tool.search,
             tool.code,

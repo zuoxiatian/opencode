@@ -53,6 +53,10 @@ function registerAppLifecycle() {
     app.on("before-quit", () => {
         state.closeDirectoryWatchers()
         stopServer(state)
+        void state.browserRuntime?.destroy()
+        state.browserRuntime = null
+        state.browserTransport?.close()
+        state.browserTransport = null
     })
 }
 

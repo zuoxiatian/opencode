@@ -85,6 +85,8 @@ export const layer = Layer.effect(
 
         const defaults = Permission.fromConfig({
           "*": "allow",
+          browser_cdp: "ask",
+          browser_interaction: "ask",
           doom_loop: "ask",
           external_directory: {
             "*": "ask",

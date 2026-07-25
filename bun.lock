@@ -81,6 +81,15 @@
         "vite-plugin-solid": "catalog:",
       },
     },
+    "packages/browser-protocol": {
+      "name": "@opencode-ai/browser-protocol",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
     "packages/console/app": {
       "name": "@opencode-ai/console-app",
       "version": "1.14.29",
@@ -305,12 +314,16 @@
       "name": "desktop-forge",
       "version": "1.0.3",
       "dependencies": {
+        "@opencode-ai/browser-protocol": "workspace:*",
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
+        "acorn": "8.16.0",
         "electron-squirrel-startup": "^1.0.1",
         "extract-zip": "^2.0.1",
+        "happy-dom": "20.9.0",
         "lucide-solid": "1.14.0",
         "pdfjs-dist": "5.4.530",
+        "playwright-core": "1.59.1",
         "solid-js": "^1.9.13",
       },
       "devDependencies": {
@@ -481,6 +494,7 @@
         "@octokit/graphql": "9.0.2",
         "@octokit/rest": "catalog:",
         "@openauthjs/openauth": "catalog:",
+        "@opencode-ai/browser-protocol": "workspace:*",
         "@opencode-ai/plugin": "workspace:*",
         "@opencode-ai/script": "workspace:*",
         "@opencode-ai/sdk": "workspace:*",
@@ -1758,6 +1772,8 @@
     "@openauthjs/openauth": ["@openauthjs/openauth@0.0.0-20250322224806", "https://registry.npmmirror.com/@openauthjs/openauth/-/openauth-0.0.0-20250322224806.tgz", { "dependencies": { "@standard-schema/spec": "1.0.0-beta.3", "aws4fetch": "1.0.20", "jose": "5.9.6" }, "peerDependencies": { "arctic": "^2.2.2", "hono": "^4.0.0" } }, "sha512-p5IWSRXvABcwocH2dNI0w8c1QJelIOFulwhKk+aLLFfUbs8u1pr7kQbYe8yCSM2+bcLHiwbogpUQc2ovrGwCuw=="],
 
     "@opencode-ai/app": ["@opencode-ai/app@workspace:packages/app"],
+
+    "@opencode-ai/browser-protocol": ["@opencode-ai/browser-protocol@workspace:packages/browser-protocol"],
 
     "@opencode-ai/console-app": ["@opencode-ai/console-app@workspace:packages/console/app"],
 
@@ -3777,7 +3793,7 @@
 
     "get-tsconfig": ["get-tsconfig@4.13.8", "https://registry.npmmirror.com/get-tsconfig/-/get-tsconfig-4.13.8.tgz", { "dependencies": { "resolve-pkg-maps": "^1.0.0" } }, "sha512-J87BxkLXykmisLQ+KA4x2+O6rVf+PJrtFUO8lGyiRg4lyxJLJ8/v0sRAKdVZQOy6tR6lMRAF1NqzCf9BQijm0w=="],
 
-    "ghostty-web": ["ghostty-web@github:anomalyco/ghostty-web#513463a", {}, "anomalyco-ghostty-web-513463a", "sha512-GZR8LSmgGzViWnBJrqRI8MpAZRCJxhcr1Hi9Tyeh7YRooHZQjK9J97FQRD3tbBaM2wjq05gzGY2UEsG+JtZeBw=="],
+    "ghostty-web": ["ghostty-web@github:anomalyco/ghostty-web#83c0a07", {}, "anomalyco-ghostty-web-83c0a07", "sha512-Lf2v1agHkVUpMpHBWWuCZrhOEmcwwin5/Hboc9rZwQ7/CKkIh5rU1r1CvfLlhkMoFv+ed8z52RZ8hkzGZZj3MQ=="],
 
     "gifwrap": ["gifwrap@0.10.1", "https://registry.npmmirror.com/gifwrap/-/gifwrap-0.10.1.tgz", { "dependencies": { "image-q": "^4.0.0", "omggif": "^1.0.10" } }, "sha512-2760b1vpJHNmLzZ/ubTtNnEx5WApN/PYWJvXvgS+tL1egTTthayFYIQQNi136FLEDcN/IyEY2EcGpIITD6eYUw=="],
 

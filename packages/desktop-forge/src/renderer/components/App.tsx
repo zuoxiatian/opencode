@@ -1,10 +1,12 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js"
 import { FolderPanel } from "./FolderPanel"
 import { ChatPanel } from "./ChatPanel"
+import { BrowserPanel } from "./BrowserPanel"
 import { SDKProvider } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import type { ThemeMode } from "../theme"
 import type { ClientAuthSession } from "../auth"
+import type { BrowserState } from "../../shared/browser"
 import {
     readChatVisibility,
     readLinkOpenMode,
@@ -33,8 +35,11 @@ interface AppProps {
 
 export function App(props: AppProps) {
     const [folderWidth, setFolderWidth] = createSignal(260)
+    const [browserWidth, setBrowserWidth] = createSignal<number | null>(null)
     const [folderCollapsed, setFolderCollapsed] = createSignal(false)
-    const [isDragging, setIsDragging] = createSignal<"folder" | null>(null)
+    const [isDragging, setIsDragging] = createSignal<"folder" | "browser" | null>(null)
+    const [browserLayoutRevision, setBrowserLayoutRevision] = createSignal(0)
+    const [browserState, setBrowserState] = createSignal<BrowserState | null>(null)
     const [chatVisibility, setChatVisibility] = createSignal(readChatVisibility())
     const [linkOpenMode, setLinkOpenMode] = createSignal(readLinkOpenMode())
     const platform = navigator.platform.toLowerCase()
@@ -49,11 +54,21 @@ export function App(props: AppProps) {
         writeLinkOpenMode(mode)
         setLinkOpenMode(mode)
     }
+    const toggleBrowser = () => {
+        const name = browserState()?.visible ? "browser.hide" : "browser.show"
+        void window.electronAPI.browserCommand({ command: { name } }).then((result) => {
+            if (result.state) setBrowserState(result.state)
+            setBrowserLayoutRevision((value) => value + 1)
+        }).catch((error: unknown) => console.error("切换内嵌浏览器失败:", error))
+    }
 
     // 拖拽处理
-    const handleMouseDown = (type: "folder") => (e: MouseEvent) => {
+    const handleMouseDown = (type: "folder" | "browser") => (e: MouseEvent) => {
         e.preventDefault()
         setIsDragging(type)
+        void window.electronAPI
+            .setBrowserBounds({ height: 0, width: 0, x: 0, y: 0 })
+            .catch(() => undefined)
         document.body.style.cursor = "col-resize"
         document.body.style.userSelect = "none"
     }
@@ -67,6 +82,10 @@ export function App(props: AppProps) {
                 setFolderWidth(newWidth)
             }
         }
+        if (isDragging() === "browser") {
+            const maxWidth = Math.max(420, window.innerWidth - visibleFolderWidth() - 420)
+            setBrowserWidth(Math.min(Math.max(window.innerWidth - e.clientX, 420), maxWidth))
+        }
     }
 
     const handleMouseUp = () => {
@@ -74,12 +93,18 @@ export function App(props: AppProps) {
             setIsDragging(null)
             document.body.style.cursor = ""
             document.body.style.userSelect = ""
+            setBrowserLayoutRevision((value) => value + 1)
         }
     }
 
     onMount(() => {
         document.addEventListener("mousemove", handleMouseMove)
         document.addEventListener("mouseup", handleMouseUp)
+        const unsubscribe = window.electronAPI.onBrowserStateChanged(setBrowserState)
+        void window.electronAPI.getBrowserState()
+            .then(setBrowserState)
+            .catch((error: unknown) => console.error("读取内嵌浏览器状态失败:", error))
+        onCleanup(unsubscribe)
     })
 
     onCleanup(() => {
@@ -98,6 +123,7 @@ export function App(props: AppProps) {
                     isMac ? "app-layout-macos" : "",
                     isWindows ? "app-layout-windows" : "",
                     folderCollapsed() ? "app-layout-folder-collapsed" : "",
+                    browserState()?.visible && browserWidth() === null ? "app-layout-browser-default" : "",
                 ].filter(Boolean).join(" ")}
             >
                 {/* 拖拽时的透明遮罩层 - 防止 iframe 捕获鼠标事件 */}
@@ -144,8 +170,37 @@ export function App(props: AppProps) {
                         onOpenSidebar={() => setFolderCollapsed(false)}
                         chatVisibility={chatVisibility()}
                         linkOpenMode={linkOpenMode()}
+                        browserVisible={browserState()?.visible ?? false}
+                        onToggleBrowser={toggleBrowser}
                     />
                 </div>
+
+                <Show when={browserState()}>
+                    {(state) => (
+                        <>
+                            <div
+                                class="resizer browser-resizer"
+                                classList={{
+                                    active: isDragging() === "browser",
+                                    visible: state().visible,
+                                }}
+                                onMouseDown={handleMouseDown("browser")}
+                            />
+                            <div
+                                class="browser-panel-wrapper"
+                                classList={{ visible: state().visible }}
+                                style={{ width: browserWidth() === null ? "auto" : `${browserWidth()}px` }}
+                                aria-hidden={!state().visible}
+                                inert={!state().visible}
+                            >
+                                <BrowserPanel
+                                    layoutRevision={browserLayoutRevision()}
+                                    state={state()}
+                                />
+                            </div>
+                        </>
+                    )}
+                </Show>
             </div>
         </SDKProvider>
         </MarkedProvider>

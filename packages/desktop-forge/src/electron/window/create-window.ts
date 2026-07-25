@@ -5,6 +5,8 @@ import { APP_NAME, APP_VERSION } from "../constants"
 import { BUNDLE_DIR, appIconPath } from "../resources/paths"
 import { readStoredThemeMode, resolveThemeMode, windowThemeColors } from "./theme"
 import type { MainState } from "../app/state"
+import { createBrowserRuntime } from "../browser/runtime"
+import { startBrowserTransportServer } from "../browser/transport-server"
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -57,9 +59,28 @@ export async function createMainWindow(state: MainState) {
     window.on("ready-to-show", () => window.show())
     window.on("closed", () => {
         state.closeDirectoryWatchers()
+        void state.browserRuntime?.destroy()
+        state.browserRuntime = null
         if (state.window === window) state.window = null
     })
 
+    await state.browserRuntime?.destroy()
+    state.browserRuntime = createBrowserRuntime(window)
+    state.browserTransport ??= await startBrowserTransportServer(() => state.browserRuntime)
+    window.webContents.setWindowOpenHandler(({ url }) => {
+        if (isWebUrl(url)) {
+            void state.browserRuntime
+                ?.command({ command: { name: "tabs.new" } })
+                .then((created) => created.data.tab?.id
+                    ? state.browserRuntime?.command({
+                        command: { name: "tab.goto", url },
+                        tabId: created.data.tab.id,
+                    })
+                    : undefined)
+                .catch(() => undefined)
+        }
+        return { action: "deny" }
+    })
     registerEditShortcuts(window)
     await loadRenderer(window)
     return window
@@ -134,4 +155,8 @@ function registerEditShortcuts(window: BrowserWindowType) {
         event.preventDefault()
         command()
     })
+}
+
+function isWebUrl(input: string) {
+    return input.startsWith("https://") || input.startsWith("http://")
 }

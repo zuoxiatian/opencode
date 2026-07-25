@@ -62,12 +62,16 @@
     "vite-plugin-solid": "^2.11.12"
   },
   "dependencies": {
+    "@opencode-ai/browser-protocol": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
+    "acorn": "8.16.0",
     "electron-squirrel-startup": "^1.0.1",
     "extract-zip": "^2.0.1",
+    "happy-dom": "20.9.0",
     "lucide-solid": "1.14.0",
     "pdfjs-dist": "5.4.530",
+    "playwright-core": "1.59.1",
     "solid-js": "^1.9.13"
   }
 }

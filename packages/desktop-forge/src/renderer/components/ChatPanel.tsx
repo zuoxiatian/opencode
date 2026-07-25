@@ -39,6 +39,7 @@ import ListChecks from "lucide-solid/icons/list-checks"
 import MonitorCheck from "lucide-solid/icons/monitor-check"
 import Package from "lucide-solid/icons/package"
 import PanelLeftOpen from "lucide-solid/icons/panel-left-open"
+import PanelRightOpen from "lucide-solid/icons/panel-right-open"
 import Pencil from "lucide-solid/icons/pencil"
 import Plus from "lucide-solid/icons/plus"
 import Puzzle from "lucide-solid/icons/puzzle"
@@ -104,6 +105,8 @@ interface SkillOption {
 interface ChatPanelProps {
     sidebarCollapsed?: boolean
     onOpenSidebar?: () => void
+    browserVisible?: boolean
+    onToggleBrowser?: () => void
     chatVisibility: ChatVisibilitySettings
     linkOpenMode: LinkOpenMode
 }
@@ -412,6 +415,13 @@ function cleanToolError(error: string) {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value)
+const isImageFilePart = (part: unknown): part is ImageFilePart => (
+    isRecord(part)
+    && part.type === "file"
+    && typeof part.mime === "string"
+    && part.mime.startsWith("image/")
+    && typeof part.url === "string"
+)
 
 const normalizeToolName = (tool: string) => {
     const value = tool.trim().toLowerCase()
@@ -419,11 +429,21 @@ const normalizeToolName = (tool: string) => {
     return value.split(".").filter(Boolean).slice(-1)[0] ?? value
 }
 
+const toolStateTitle = (part: ToolPartView) =>
+    "title" in part.state && typeof part.state.title === "string" ? part.state.title.trim() : ""
+
+const isSkillToolPart = (part: ToolPartView) => {
+    const title = toolStateTitle(part).toLowerCase()
+    return normalizeToolName(part.tool) === "skill" || title.includes("技能") || title.includes("skill")
+}
+
 const toolLabel = (part: ToolPartView) => {
-    if ("title" in part.state && typeof part.state.title === "string" && part.state.title.trim()) return part.state.title.trim()
+    if (isSkillToolPart(part)) return "加载技能"
+    if (toolStateTitle(part)) return toolStateTitle(part)
     const labels: Record<string, string> = {
         apply_patch: "应用补丁",
         bash: "Shell 执行",
+        browser: "内嵌浏览器",
         codesearch: "代码搜索",
         create: "创建文件",
         edit: "编辑文件",
@@ -449,16 +469,15 @@ const toolLabel = (part: ToolPartView) => {
 
 const toolIcon = (part: ToolPartView): LucideIcon => {
     const normalized = normalizeToolName(part.tool)
-    const title = "title" in part.state && typeof part.state.title === "string" ? part.state.title.toLowerCase() : ""
     if (normalized === "bash" || normalized === "shell") return SquareTerminal
     if (normalized === "question") return CircleQuestionMark
-    if (normalized === "skill" || title.includes("技能") || title.includes("skill")) return Puzzle
+    if (isSkillToolPart(part)) return Puzzle
     if (normalized === "task") return Brain
     if (normalized === "edit" || normalized === "multiedit" || normalized === "apply_patch") return Pencil
     if (normalized === "write" || normalized === "create" || normalized === "file_write") return Pencil
     if (normalized === "read" || normalized === "file_read") return FileText
     if (normalized === "grep" || normalized === "glob" || normalized === "codesearch") return Search
-    if (normalized === "webfetch" || normalized === "websearch") return Globe
+    if (normalized === "browser" || normalized === "webfetch" || normalized === "websearch") return Globe
     if (normalized === "todowrite" || normalized === "todoread") return ListChecks
     return Wrench
 }
@@ -531,6 +550,7 @@ const toolDescription = (part: ToolPartView) => {
     if ((normalized === "bash" || normalized === "shell") && shellCommand(input)) return shellCommand(input)?.split("\n")[0].slice(0, 120)
     if (normalized === "task") return stringField(input, ["description", "prompt"])?.slice(0, 120)
     if (normalized === "webfetch") return stringField(input, ["url"])
+    if (normalized === "browser") return stringField(input, ["url", "action"])
     if (normalized === "websearch" || normalized === "codesearch") return stringField(input, ["query"])
     if (normalized === "grep") return stringField(input, ["pattern"])
     if (normalized === "glob") return stringField(input, ["pattern"])
@@ -815,12 +835,21 @@ function ToolCallDetails(props: { part: ToolPartView }) {
     )
 }
 
-function ToolCallBlock(props: { part: ToolPartView }) {
+function ToolCallBlock(props: {
+    part: ToolPartView
+    onImageLoad?: () => void
+    onPreviewImage: (image: ImageFilePart) => void
+}) {
     const [open, setOpen] = createSignal(false)
     const status = createMemo(() => props.part.state.status)
     const active = createMemo(() => isToolActive(props.part.state))
     const details = createMemo(() => hasToolDetails(props.part))
     const description = createMemo(() => toolDescription(props.part))
+    const images = createMemo(() => (
+        props.part.state.status === "completed"
+            ? (props.part.state.attachments ?? []).filter(isImageFilePart)
+            : []
+    ))
     const toggle = () => {
         if (!details()) return
         setOpen((value) => !value)
@@ -853,6 +882,27 @@ function ToolCallBlock(props: { part: ToolPartView }) {
                     <ChevronRight class="tool-call-chevron" size={14} strokeWidth={1.9} />
                 </Show>
             </button>
+            <Show when={images().length > 0}>
+                <div class="tool-call-images">
+                    <For each={images()}>
+                        {(image) => (
+                            <button
+                                class="tool-call-image"
+                                type="button"
+                                title={image.filename ?? image.mime}
+                                aria-label={`预览截图 ${image.filename ?? image.mime}`}
+                                onClick={() => props.onPreviewImage(image)}
+                            >
+                                <img
+                                    src={image.url}
+                                    alt={image.filename ?? "浏览器截图"}
+                                    onLoad={() => props.onImageLoad?.()}
+                                />
+                            </button>
+                        )}
+                    </For>
+                </div>
+            </Show>
             <Show when={details() && open()}>
                 <div class="tool-call-details">
                     <ToolCallDetails part={props.part} />
@@ -2197,8 +2247,6 @@ export function ChatPanel(props: ChatPanelProps) {
             .join("\n")
     }
 
-    const isImageFilePart = (part: Part): part is ImageFilePart => part.type === "file" && part.mime.startsWith("image/")
-
     const userMessageImages = (parts: Part[]) => parts.filter(isImageFilePart)
 
     const UserMessageContent = (input: { message: Message }) => {
@@ -2505,11 +2553,23 @@ export function ChatPanel(props: ChatPanelProps) {
                     </div>
                 </div>
                 <div class="chat-header-actions">
-                    <Show when={currentSessionId()}>
+                    <Show when={currentSessionId() && (compactionStatusText() || isBusy())}>
                         <div class="status-indicator">
-                            <span class={`status-dot ${isBusy() ? "busy" : "online"}`}></span>
-                            <span>{compactionStatusText() ? "压缩中" : isBusy() ? "处理中" : "就绪"}</span>
+                            <span class="status-dot busy"></span>
+                            <span>{compactionStatusText() ? "压缩中" : "处理中"}</span>
                         </div>
+                    </Show>
+                    <Show when={!props.browserVisible}>
+                        <button
+                            type="button"
+                            class="chat-header-btn chat-browser-toggle"
+                            title="展开浏览器"
+                            aria-label="展开浏览器"
+                            aria-pressed={false}
+                            onClick={() => props.onToggleBrowser?.()}
+                        >
+                            <PanelRightOpen class="lucide-control-icon" size={17} strokeWidth={1.8} />
+                        </button>
                     </Show>
                 </div>
             </div>
@@ -2617,7 +2677,11 @@ export function ChatPanel(props: ChatPanelProps) {
                                                         return (
                                                             <div class="chat-turn assistant">
                                                                 <div class="tool-calls">
-                                                                    <ToolCallBlock part={tool} />
+                                                                    <ToolCallBlock
+                                                                        part={tool}
+                                                                        onPreviewImage={(image) => setPreviewImage(image)}
+                                                                        onImageLoad={() => queueMicrotask(updateScrollToBottomVisibility)}
+                                                                    />
                                                                 </div>
                                                             </div>
                                                         )

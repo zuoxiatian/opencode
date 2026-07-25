@@ -1444,7 +1444,7 @@ export function FolderPanel(props: FolderPanelProps) {
                                             <SettingsSwitchRow
                                                 icon={Globe}
                                                 title="使用默认浏览器打开链接"
-                                                description={props.linkOpenMode === "browser" ? "链接会交给系统默认浏览器打开。" : "关闭后在应用内直接打开，并始终使用新窗口。"}
+                                                description={props.linkOpenMode === "browser" ? "链接会交给系统默认浏览器打开。" : "关闭后链接会在应用右侧的内嵌浏览器中打开。"}
                                                 checked={props.linkOpenMode === "browser"}
                                                 onChange={(checked) => props.onLinkOpenModeChange(checked ? "browser" : "direct")}
                                             />
