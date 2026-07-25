@@ -4,6 +4,7 @@ import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import type { EmbeddedTab } from "./tab"
 import type { EmbeddedTabStore } from "./tab-store"
+import { onDebuggerMessage } from "./automation/cdp"
 
 type RunDialogInfo = {
     defaultPromptText?: string
@@ -23,8 +24,8 @@ export class DialogService {
     ) {}
 
     register(tab: EmbeddedTab) {
-        tab.view.webContents.removeAllListeners("-run-dialog")
-        const onRunDialog = tab.view.webContents.on.bind(tab.view.webContents) as unknown as (
+        tab.webContents.removeAllListeners("-run-dialog")
+        const onRunDialog = tab.webContents.on.bind(tab.webContents) as unknown as (
             event: "-run-dialog",
             listener: (info: RunDialogInfo, callback: RunDialogCallback) => void,
         ) => WebContents
@@ -49,8 +50,8 @@ export class DialogService {
             this.events.publish("dialog.opened", eventInput(tab, { dialog: tab.dialog }))
             this.tabs.changed(tab)
         })
-        tab.view.webContents.once("destroyed", () => this.callbacks.delete(tab.id))
-        tab.view.webContents.debugger.on("message", (_event, method, params) => {
+        tab.webContents.once("destroyed", () => this.callbacks.delete(tab.id))
+        onDebuggerMessage(tab.webContents, (_event, method, params) => {
             if (method === "Page.javascriptDialogClosed") {
                 if (this.callbacks.has(tab.id)) return
                 if (!tab.dialog) return
@@ -74,12 +75,12 @@ export class DialogService {
             this.waiters.get(tab.id)?.forEach((waiter) => waiter(tab.dialog!))
             this.events.publish("dialog.opened", eventInput(tab, { dialog: tab.dialog }))
             this.tabs.changed(tab)
-        })
+        }, () => !tab.closed)
     }
 
     wait(tab: EmbeddedTab, timeout = 30_000, signal?: AbortSignal) {
         if (tab.dialog) return Promise.resolve(tab.dialog)
-        const webContents = tab.view.webContents
+        const webContents = tab.webContents
         if (webContents.isDestroyed()) {
             return Promise.reject(new BrowserRuntimeException("TAB_CLOSED", "Browser tab is closed"))
         }
@@ -147,7 +148,7 @@ export class DialogService {
             this.tabs.changed(tab, request)
             return
         }
-        await tab.view.webContents.debugger.sendCommand("Page.handleJavaScriptDialog", {
+        await tab.webContents.debugger.sendCommand("Page.handleJavaScriptDialog", {
             accept: input.accept,
             promptText: input.promptText,
         })

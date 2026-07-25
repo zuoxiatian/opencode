@@ -5,8 +5,8 @@ export const EMPTY_BOUNDS: BrowserBounds = { height: 0, width: 0, x: 0, y: 0 }
 
 export function tabState(tab: EmbeddedTab): BrowserTabState {
     return {
-        canGoBack: tab.view.webContents.navigationHistory.canGoBack(),
-        canGoForward: tab.view.webContents.navigationHistory.canGoForward(),
+        canGoBack: tab.webContents.navigationHistory.canGoBack(),
+        canGoForward: tab.webContents.navigationHistory.canGoForward(),
         capabilities: ["cdp"],
         dialog: tab.dialog ? { ...tab.dialog } : null,
         downloadCount: tab.downloads.size,
@@ -14,10 +14,10 @@ export function tabState(tab: EmbeddedTab): BrowserTabState {
         favicon: tab.error ? null : tab.favicon ?? null,
         generation: tab.generation,
         id: tab.id,
-        loading: tab.view.webContents.isLoading(),
+        loading: tab.webContents.isLoading(),
         ownership: { ...tab.ownership },
-        title: tab.view.webContents.getTitle(),
-        url: tab.error?.url || tab.pendingUrl || tab.view.webContents.getURL(),
+        title: tab.webContents.getTitle(),
+        url: tab.error?.url || tab.pendingUrl || tab.webContents.getURL(),
     }
 }
 

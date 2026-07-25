@@ -3,7 +3,7 @@ import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import type { EmbeddedTab } from "./tab"
 import type { EmbeddedTabStore } from "./tab-store"
-import { asRecord, withDebugger } from "./automation/cdp"
+import { onDebuggerMessage, withDebugger } from "./automation/cdp"
 
 interface PendingChooser extends BrowserFileChooser {
     backendNodeId: number
@@ -19,7 +19,7 @@ export class FileChooserService {
     ) {}
 
     register(tab: EmbeddedTab) {
-        const webContents = tab.view.webContents
+        const webContents = tab.webContents
         const clear = () => {
             let removed = false
             this.choosers.forEach((chooser, id) => {
@@ -44,7 +44,7 @@ export class FileChooserService {
         trigger?: () => Promise<unknown>,
     ) {
         if (tab.fileChooser) return Promise.resolve(tab.fileChooser)
-        const webContents = tab.view.webContents
+        const webContents = tab.webContents
         if (webContents.isDestroyed()) {
             return Promise.reject(new BrowserRuntimeException("TAB_CLOSED", "Browser tab is closed"))
         }
@@ -56,6 +56,7 @@ export class FileChooserService {
             const browserDebugger = webContents.debugger
             const attached = browserDebugger.isAttached()
             if (!attached) browserDebugger.attach("1.3")
+            let removeDebuggerListener: () => void = () => undefined
             const sender = (method: string, params?: Record<string, unknown>) =>
                 browserDebugger.sendCommand(method, params)
             const message = (
@@ -63,6 +64,7 @@ export class FileChooserService {
                 method: string,
                 params: Record<string, unknown>,
             ) => {
+                if (tab.closed || webContents.isDestroyed()) return
                 if (method !== "Page.fileChooserOpened") return
                 const backendNodeId = params.backendNodeId
                 if (typeof backendNodeId !== "number") return
@@ -115,7 +117,7 @@ export class FileChooserService {
             timer.unref()
             const cleanup = (disable = false) => {
                 clearTimeout(timer)
-                browserDebugger.removeListener("message", message)
+                removeDebuggerListener()
                 webContents.removeListener("destroyed", closed)
                 webContents.removeListener("did-start-navigation", replaced)
                 signal?.removeEventListener("abort", cancel)
@@ -126,7 +128,7 @@ export class FileChooserService {
                     browserDebugger.detach()
                 }
             }
-            browserDebugger.on("message", message)
+            removeDebuggerListener = onDebuggerMessage(webContents, message, () => !tab.closed)
             webContents.once("destroyed", closed)
             webContents.on("did-start-navigation", replaced)
             signal?.addEventListener("abort", cancel, { once: true })

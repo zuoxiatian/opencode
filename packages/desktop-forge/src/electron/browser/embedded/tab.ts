@@ -1,4 +1,4 @@
-import type { WebContentsView } from "electron"
+import type { WebContents, WebContentsView } from "electron"
 import type {
     BrowserCdpEvent,
     BrowserDialog,
@@ -12,6 +12,7 @@ export interface EmbeddedTab {
     cdpEvents: BrowserCdpEvent[]
     cdpSequence: number
     cdpSessions: Set<string>
+    closed: boolean
     debuggerQueue: Promise<void>
     debuggerReady: Promise<void>
     dialog: BrowserDialog | null
@@ -34,4 +35,5 @@ export interface EmbeddedTab {
     ownership: BrowserTabOwnership
     pendingUrl?: string
     view: WebContentsView
+    webContents: WebContents
 }

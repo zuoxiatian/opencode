@@ -1,4 +1,5 @@
 import type { BrowserCdpTarget } from "@opencode-ai/browser-protocol"
+import type { WebContents } from "electron"
 import type { EmbeddedTab } from "../tab"
 import { BrowserRuntimeException } from "../../errors"
 
@@ -8,14 +9,41 @@ export type CdpSender = (
     sessionId?: string,
 ) => Promise<unknown>
 
+export type CdpMessageListener = (
+    event: Electron.Event,
+    method: string,
+    params: Record<string, unknown>,
+    sessionId?: string,
+) => void
+
+export function onDebuggerMessage(
+    webContents: WebContents,
+    listener: CdpMessageListener,
+    active: () => boolean = () => true,
+) {
+    const browserDebugger = webContents.debugger
+    const message: CdpMessageListener = (...args) => {
+        if (!active() || webContents.isDestroyed()) return
+        listener(...args)
+    }
+    const destroyed = () => browserDebugger.removeListener("message", message)
+    const cleanup = () => {
+        browserDebugger.removeListener("message", message)
+        webContents.removeListener("destroyed", destroyed)
+    }
+    browserDebugger.on("message", message)
+    webContents.once("destroyed", destroyed)
+    return cleanup
+}
+
 export function sendCdp(tab: EmbeddedTab): CdpSender {
-    const browserDebugger = tab.view.webContents.debugger
+    const browserDebugger = tab.webContents.debugger
     return (method, params = {}, sessionId) =>
         browserDebugger.sendCommand(method, params, sessionId)
 }
 
 export function withDebugger<T>(tab: EmbeddedTab, operation: (send: CdpSender) => Promise<T>) {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     const browserDebugger = webContents.debugger
     const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string) =>
         browserDebugger.sendCommand(method, params, sessionId)

@@ -13,7 +13,7 @@ import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import { BrowserLifecycle } from "../lifecycle"
 import { AriaSnapshotService } from "./automation/aria-snapshot"
-import { executeRawCdp, withDebugger } from "./automation/cdp"
+import { executeRawCdp, onDebuggerMessage, withDebugger } from "./automation/cdp"
 import {
     coordinateClick,
     coordinateDrag,
@@ -97,8 +97,8 @@ export function createEmbeddedBrowserBackend(
         navigation.register(tab)
         dialogs.register(tab)
         fileChoosers.register(tab)
-        if (!tab.view.webContents.debugger.isAttached()) {
-            tab.view.webContents.debugger.attach("1.3")
+        if (!tab.webContents.debugger.isAttached()) {
+            tab.webContents.debugger.attach("1.3")
         }
         const documentRequests = new Set<string>()
         let debuggerStarted = false
@@ -106,8 +106,8 @@ export function createEmbeddedBrowserBackend(
             if (debuggerStarted) return
             debuggerStarted = true
             const ready = Promise.all([
-                tab.view.webContents.debugger.sendCommand("Network.enable"),
-                tab.view.webContents.debugger.sendCommand("Page.enable"),
+                tab.webContents.debugger.sendCommand("Network.enable"),
+                tab.webContents.debugger.sendCommand("Page.enable"),
             ]).then(() => undefined)
                 .catch((error: unknown) => {
                     debuggerStarted = false
@@ -116,15 +116,15 @@ export function createEmbeddedBrowserBackend(
             tab.debuggerReady = ready
             void ready.catch(() => undefined)
         }
-        tab.view.webContents.on("did-start-loading", () => {
+        tab.webContents.on("did-start-loading", () => {
             documentRequests.clear()
             initializeDebugger()
         })
-        tab.view.webContents.on("did-stop-loading", () => {
+        tab.webContents.on("did-stop-loading", () => {
             documentRequests.forEach((requestId) => tab.networkRequests.delete(requestId))
             documentRequests.clear()
         })
-        tab.view.webContents.on("console-message", (details) => {
+        tab.webContents.on("console-message", (details) => {
             tab.logs.push({
                 level: details.level === "warning" ? "warn" : details.level,
                 message: details.message,
@@ -133,7 +133,7 @@ export function createEmbeddedBrowserBackend(
             })
             if (tab.logs.length > 1_000) tab.logs.splice(0, tab.logs.length - 1_000)
         })
-        tab.view.webContents.debugger.on("message", (_event, method, params, sessionId) => {
+        onDebuggerMessage(tab.webContents, (_event, method, params, sessionId) => {
             if (sessionId) tab.cdpSessions.add(sessionId)
             tab.cdpSequence += 1
             tab.cdpEvents.push({
@@ -142,7 +142,7 @@ export function createEmbeddedBrowserBackend(
                 sequence: tab.cdpSequence,
                 source: {
                     ...(sessionId ? { sessionId } : {}),
-                    tabId: tab.view.webContents.id,
+                    tabId: tab.webContents.id,
                     ...(
                         typeof params.targetId === "string"
                             ? { targetId: params.targetId }
@@ -166,8 +166,8 @@ export function createEmbeddedBrowserBackend(
                 documentRequests.delete(requestId)
                 tab.networkRequests.delete(requestId)
             }
-        })
-        tab.view.webContents.setWindowOpenHandler(({ url }) => {
+        }, () => !tab.closed)
+        tab.webContents.setWindowOpenHandler(({ url }) => {
             if (isWebUrl(url)) {
                 const ownership = {
                     ...tab.ownership,
@@ -188,7 +188,7 @@ export function createEmbeddedBrowserBackend(
         callback: (response: Electron.HeadersReceivedResponse) => void,
     ) => {
         const tab = tabs.list().find((candidate) =>
-            candidate.view.webContents.id === (details.webContentsId ?? details.webContents?.id))
+            candidate.webContents.id === (details.webContentsId ?? details.webContents?.id))
         if (tab && details.resourceType === "mainFrame") {
             tab.httpResponse = {
                 contentLength: responseContentLength(details.responseHeaders),
@@ -404,7 +404,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
                 arg: command.arg,
                 expression: command.expression,
                 html: await services.playwright.html(tab),
-                url: tab.view.webContents.getURL(),
+                url: tab.webContents.getURL(),
             }),
         }
     }
@@ -453,10 +453,10 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
         const navigation = await triggeredWait(
             services.context.signal,
             async (signal) => {
-                const url = await expectNavigation(tab.view.webContents, command.timeout, signal, command.url)
+                const url = await expectNavigation(tab.webContents, command.timeout, signal, command.url)
                 if (command.waitUntil && command.waitUntil !== "commit") {
                     await waitForLoadState(
-                        tab.view.webContents,
+                        tab.webContents,
                         command.waitUntil,
                         command.timeout,
                         signal,
@@ -480,7 +480,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     if (command.name === "tab.playwright.waitForURL") {
         return {
             value: await waitForURL(
-                tab.view.webContents,
+                tab.webContents,
                 command.url,
                 command.timeout,
                 services.context.signal,
@@ -492,7 +492,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
         await tab.debuggerReady
         const generation = tab.generation
         await waitForLoadState(
-            tab.view.webContents,
+            tab.webContents,
             command.state,
             command.timeout,
             services.context.signal,
@@ -515,7 +515,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
                     elementHtml: await services.playwright.locatorHtml(tab, command.locator),
                     expression: command.expression,
                     html: await services.playwright.html(tab, command.locator.frameSelectors),
-                    url: tab.view.webContents.getURL(),
+                    url: tab.webContents.getURL(),
                 }),
             }
         }
@@ -570,18 +570,18 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.domCua.scroll") {
         if (command.nodeId) return services.nodes.scroll(tab, { ...command, nodeId: command.nodeId })
-        coordinateScroll(tab.view.webContents, {
+        coordinateScroll(tab.webContents, {
             deltaX: command.deltaX,
             deltaY: command.deltaY,
         })
         return { value: true }
     }
     if (command.name === "tab.domCua.type") {
-        textInput(tab.view.webContents, command.text)
+        textInput(tab.webContents, command.text)
         return { value: true }
     }
     if (command.name === "tab.domCua.keypress") {
-        keypressKeys(tab.view.webContents, command.keys)
+        keypressKeys(tab.webContents, command.keys)
         return { value: true }
     }
     if (command.name === "tab.cua.click") {
@@ -593,34 +593,34 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             await services.navigation.forward(tab, services.request, services.context.signal)
             return { value: true }
         }
-        coordinateClick(tab.view.webContents, {
+        coordinateClick(tab.webContents, {
             ...command,
             button: cuaMouseButton(command.button),
         })
         return { value: true }
     }
     if (command.name === "tab.cua.doubleClick") {
-        coordinateClick(tab.view.webContents, { ...command, clickCount: 2 })
+        coordinateClick(tab.webContents, { ...command, clickCount: 2 })
         return { value: true }
     }
     if (command.name === "tab.cua.move") {
-        coordinateMove(tab.view.webContents, command)
+        coordinateMove(tab.webContents, command)
         return { value: true }
     }
     if (command.name === "tab.cua.drag") {
-        coordinateDrag(tab.view.webContents, command)
+        coordinateDrag(tab.webContents, command)
         return { value: true }
     }
     if (command.name === "tab.cua.scroll") {
-        coordinateScroll(tab.view.webContents, command)
+        coordinateScroll(tab.webContents, command)
         return { value: true }
     }
     if (command.name === "tab.cua.type") {
-        textInput(tab.view.webContents, command.text)
+        textInput(tab.webContents, command.text)
         return { value: true }
     }
     if (command.name === "tab.cua.keypress") {
-        keypressKeys(tab.view.webContents, command.keys)
+        keypressKeys(tab.webContents, command.keys)
         return { value: true }
     }
     if (command.name === "tab.cua.downloadMedia") {
@@ -634,7 +634,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
                     signal,
                     false,
                 ),
-                () => Promise.resolve(coordinateClick(tab.view.webContents, {
+                () => Promise.resolve(coordinateClick(tab.webContents, {
                     x: command.x,
                     y: command.y,
                 })),
@@ -723,7 +723,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
         return {}
     }
     if (command.name === "tab.dev.cdp") {
-        const origin = browserOrigin(tab.view.webContents.getURL())
+        const origin = browserOrigin(tab.webContents.getURL())
         if (!origin || origin !== services.request.expectedOrigin) {
             throw new BrowserRuntimeException("ORIGIN_CHANGED", "CDP approval does not match the current page")
         }
@@ -788,7 +788,7 @@ async function triggeredWait<T>(
 }
 
 function ensureGeneration(tab: EmbeddedTab, generation: number, message: string) {
-    if (tab.view.webContents.isDestroyed()) {
+    if (tab.webContents.isDestroyed()) {
         throw new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed during the command")
     }
     if (tab.generation === generation) return

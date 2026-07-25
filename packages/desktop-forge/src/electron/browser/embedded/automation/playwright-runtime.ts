@@ -31,7 +31,7 @@ export class PlaywrightRuntime {
     private readonly frames = new Set<string>()
 
     async ensure(tab: EmbeddedTab) {
-        await this.ensureFrame(tab, tab.view.webContents.mainFrame)
+        await this.ensureFrame(tab, tab.webContents.mainFrame)
     }
 
     async ensureFrame(tab: EmbeddedTab, frame: WebFrameMain) {
@@ -39,7 +39,7 @@ export class PlaywrightRuntime {
         if (this.frames.has(key)) return
         const generation = tab.generation
         await frame.executeJavaScript(bootstrap, true).catch((error: unknown) => {
-            if (tab.view.webContents.isDestroyed() || frame.isDestroyed()) {
+            if (tab.webContents.isDestroyed() || frame.isDestroyed()) {
                 throw new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed while loading Playwright")
             }
             if (tab.generation !== generation) {
@@ -59,7 +59,7 @@ export class PlaywrightRuntime {
 
     async domSnapshot(tab: EmbeddedTab) {
         const generation = tab.generation
-        const snapshot = await this.snapshotFrame(tab, tab.view.webContents.mainFrame)
+        const snapshot = await this.snapshotFrame(tab, tab.webContents.mainFrame)
         if (tab.generation !== generation) {
             throw new BrowserRuntimeException("NAVIGATION_REPLACED", "Page changed during DOM snapshot", true)
         }
@@ -152,7 +152,7 @@ export class PlaywrightRuntime {
         await this.ensureFrame(tab, frame)
         const generation = tab.generation
         return frame.executeJavaScript(expression, true).catch((error: unknown) => {
-            if (tab.view.webContents.isDestroyed() || frame.isDestroyed()) {
+            if (tab.webContents.isDestroyed() || frame.isDestroyed()) {
                 throw new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed during Playwright evaluation")
             }
             if (tab.generation !== generation) {
@@ -203,7 +203,7 @@ export class PlaywrightRuntime {
     }
 
     private async resolveFrame(tab: EmbeddedTab, selectors: readonly string[]) {
-        let frame = tab.view.webContents.mainFrame
+        let frame = tab.webContents.mainFrame
         let x = 0
         let y = 0
         for (const selector of selectors) {

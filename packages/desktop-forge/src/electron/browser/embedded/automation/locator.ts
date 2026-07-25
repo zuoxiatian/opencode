@@ -53,13 +53,13 @@ export class LocatorService {
         if (result.error === "disabled" || result.error === "not-actionable") {
             throw new BrowserRuntimeException("ELEMENT_NOT_ACTIONABLE", "Matched element is not actionable")
         }
-        if (result.needsInput) textInput(tab.view.webContents, command.value ?? "")
+        if (result.needsInput) textInput(tab.webContents, command.value ?? "")
         if (operation === "press") {
-            keypressValue(tab.view.webContents, command.key ?? command.value ?? "Enter")
+            keypressValue(tab.webContents, command.key ?? command.value ?? "Enter")
         }
         if (operation === "click" || operation === "dblclick") {
             if (!result.rect) throw new BrowserRuntimeException("ELEMENT_NOT_ACTIONABLE", "Element has no visible bounds")
-            coordinateClick(tab.view.webContents, {
+            coordinateClick(tab.webContents, {
                 button: command.button,
                 clickCount: operation === "dblclick" ? 2 : 1,
                 modifiers: command.modifiers ? [...command.modifiers] : undefined,
@@ -71,7 +71,7 @@ export class LocatorService {
             const checked = operation === "setChecked" ? command.checked === true : operation === "check"
             const rect = result.rect
             if (rect) {
-                coordinateClick(tab.view.webContents, {
+                coordinateClick(tab.webContents, {
                     button: command.button,
                     modifiers: command.modifiers ? [...command.modifiers] : undefined,
                     x: rect.x + rect.width / 2,

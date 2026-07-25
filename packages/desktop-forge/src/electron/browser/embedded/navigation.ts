@@ -4,6 +4,7 @@ import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import type { EmbeddedTab } from "./tab"
 import type { EmbeddedTabStore } from "./tab-store"
+import { onDebuggerMessage } from "./automation/cdp"
 import { expectNavigation } from "./automation/waits"
 
 export class NavigationService {
@@ -14,12 +15,12 @@ export class NavigationService {
     ) {}
 
     register(tab: EmbeddedTab) {
-        tab.view.webContents.on("did-start-loading", () => this.tabs.changed(tab))
-        tab.view.webContents.on("did-stop-loading", () => {
+        tab.webContents.on("did-start-loading", () => this.tabs.changed(tab))
+        tab.webContents.on("did-stop-loading", () => {
             this.tabs.changed(tab)
             this.events.publish("navigation.completed", eventInput(tab))
         })
-        tab.view.webContents.on("did-start-navigation", (_event, url, inPlace, isMainFrame) => {
+        tab.webContents.on("did-start-navigation", (_event, url, inPlace, isMainFrame) => {
             if (!isMainFrame || !isWebUrl(url)) return
             if (inPlace) {
                 tab.generation += 1
@@ -35,9 +36,9 @@ export class NavigationService {
             this.events.publish("navigation.started", eventInput(tab, { url }))
             this.tabs.changed(tab)
         })
-        tab.view.webContents.on("did-finish-load", () => {
+        tab.webContents.on("did-finish-load", () => {
             const response = tab.httpResponse
-            const currentUrl = tab.view.webContents.getURL()
+            const currentUrl = tab.webContents.getURL()
             const generation = tab.generation
             if (
                 !response
@@ -49,7 +50,7 @@ export class NavigationService {
             })
             tab.httpCheck = tracked
         })
-        tab.view.webContents.on("did-navigate", (_event, url) => {
+        tab.webContents.on("did-navigate", (_event, url) => {
             if (tab.pendingUrl && tab.pendingUrl !== url) return
             tab.error = undefined
             tab.pendingUrl = undefined
@@ -57,14 +58,14 @@ export class NavigationService {
             this.tabs.recordHistory(tab)
             this.tabs.changed(tab)
         })
-        tab.view.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
+        tab.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
             if (isMainFrame && isWebUrl(url)) {
                 this.events.publish("navigation.committed", eventInput(tab, { url }))
                 this.tabs.recordHistory(tab)
             }
             this.tabs.changed(tab)
         })
-        tab.view.webContents.on("page-favicon-updated", (_event, favicons) => {
+        tab.webContents.on("page-favicon-updated", (_event, favicons) => {
             if (tab.error) return
             const favicon = browserFavicon(favicons)
             if (!favicon || favicon === tab.faviconSource) return
@@ -76,7 +77,7 @@ export class NavigationService {
                 this.tabs.changed(tab)
             })
         })
-        tab.view.webContents.on("page-title-updated", () => this.tabs.changed(tab))
+        tab.webContents.on("page-title-updated", () => this.tabs.changed(tab))
         const failed = (
             _event: Electron.Event,
             code: number,
@@ -86,9 +87,9 @@ export class NavigationService {
         ) => {
             const normalized = description.replace(/^net::/i, "").toUpperCase()
             if (!isMainFrame || code === -3 || ["ERR_ABORTED", "ERR_BLOCKED_BY_CLIENT"].includes(normalized)) return
-            const failedUrl = url || tab.pendingUrl || tab.view.webContents.getURL()
+            const failedUrl = url || tab.pendingUrl || tab.webContents.getURL()
             if (tab.pendingUrl && failedUrl !== tab.pendingUrl) return
-            const currentUrl = tab.view.webContents.getURL()
+            const currentUrl = tab.webContents.getURL()
             if (!tab.pendingUrl && browserOrigin(currentUrl) && failedUrl !== currentUrl) {
                 return
             }
@@ -100,16 +101,16 @@ export class NavigationService {
                 url: failedUrl,
             })
         }
-        tab.view.webContents.on("did-fail-load", failed)
-        tab.view.webContents.on("did-fail-provisional-load", failed)
-        tab.view.webContents.on("render-process-gone", (_event, details) => {
+        tab.webContents.on("did-fail-load", failed)
+        tab.webContents.on("did-fail-provisional-load", failed)
+        tab.webContents.on("render-process-gone", (_event, details) => {
             if (details.reason === "clean-exit") return
             this.events.publish("tab.crashed", eventInput(tab, { reason: details.reason }))
             this.fail(tab, {
                 code: 0,
                 description: details.reason === "oom" ? "ERR_OUT_OF_MEMORY" : "PAGE_CRASHED",
                 kind: "crash",
-                url: tab.pendingUrl || tab.view.webContents.getURL(),
+                url: tab.pendingUrl || tab.webContents.getURL(),
             })
         })
     }
@@ -126,8 +127,8 @@ export class NavigationService {
         this.prepare(tab, url)
         const generation = tab.generation
         if (activate) this.tabs.activate(tab.id, request)
-        const completed = expectNavigation(tab.view.webContents, timeout, signal, url)
-        const loading = tab.view.webContents.loadURL(url)
+        const completed = expectNavigation(tab.webContents, timeout, signal, url)
+        const loading = tab.webContents.loadURL(url)
         void loading.catch(() => undefined)
         this.tabs.changed(tab, request)
         await navigationCompletion(tab, completed, signal).catch((error: unknown) => {
@@ -140,20 +141,20 @@ export class NavigationService {
         this.tabs.changed(tab, request)
         if (tab.error) return failedResult(tab)
         return {
-            finalUrl: tab.view.webContents.getURL(),
+            finalUrl: tab.webContents.getURL(),
             generation: tab.generation,
             status: "committed",
         } satisfies BrowserNavigationResult
     }
 
     async back(tab: EmbeddedTab, request: BrowserCommandRequest, signal?: AbortSignal) {
-        const history = tab.view.webContents.navigationHistory
+        const history = tab.webContents.navigationHistory
         if (!history.canGoBack()) return currentResult(tab)
         const url = history.getEntryAtIndex(history.getActiveIndex() - 1)?.url
         if (!url) return currentResult(tab)
         this.prepare(tab, url)
         const generation = tab.generation
-        const completed = expectNavigation(tab.view.webContents, 10_000, signal)
+        const completed = expectNavigation(tab.webContents, 10_000, signal)
         history.goBack()
         await navigationCompletion(tab, completed, signal).catch((error: unknown) => {
             ensureCurrent(tab, generation)
@@ -167,13 +168,13 @@ export class NavigationService {
     }
 
     async forward(tab: EmbeddedTab, request: BrowserCommandRequest, signal?: AbortSignal) {
-        const history = tab.view.webContents.navigationHistory
+        const history = tab.webContents.navigationHistory
         if (!history.canGoForward()) return currentResult(tab)
         const url = history.getEntryAtIndex(history.getActiveIndex() + 1)?.url
         if (!url) return currentResult(tab)
         this.prepare(tab, url)
         const generation = tab.generation
-        const completed = expectNavigation(tab.view.webContents, 10_000, signal)
+        const completed = expectNavigation(tab.webContents, 10_000, signal)
         history.goForward()
         await navigationCompletion(tab, completed, signal).catch((error: unknown) => {
             ensureCurrent(tab, generation)
@@ -189,12 +190,12 @@ export class NavigationService {
     async reload(tab: EmbeddedTab, request: BrowserCommandRequest, signal?: AbortSignal) {
         await tab.debuggerReady
         if (tab.error?.url) return this.goto(tab, tab.error.url, request, signal)
-        const url = tab.view.webContents.getURL()
+        const url = tab.webContents.getURL()
         if (!url) throw new BrowserRuntimeException("NAVIGATION_FAILED", "Browser tab has no page to reload")
         this.prepare(tab, url)
         const generation = tab.generation
-        const started = expectNavigation(tab.view.webContents, 10_000, signal)
-        tab.view.webContents.reload()
+        const started = expectNavigation(tab.webContents, 10_000, signal)
+        tab.webContents.reload()
         await navigationCompletion(tab, started, signal)
         await tab.httpCheck
         ensureCurrent(tab, generation)
@@ -203,10 +204,10 @@ export class NavigationService {
     }
 
     stop(tab: EmbeddedTab, request: BrowserCommandRequest) {
-        const finalUrl = tab.error?.url || tab.pendingUrl || tab.view.webContents.getURL()
-        if (tab.pendingUrl || tab.view.webContents.isLoading()) tab.generation += 1
+        const finalUrl = tab.error?.url || tab.pendingUrl || tab.webContents.getURL()
+        if (tab.pendingUrl || tab.webContents.isLoading()) tab.generation += 1
         tab.pendingUrl = undefined
-        tab.view.webContents.stop()
+        tab.webContents.stop()
         tab.networkRequests.clear()
         this.tabs.changed(tab, request)
         return {
@@ -217,7 +218,7 @@ export class NavigationService {
     }
 
     private prepare(tab: EmbeddedTab, url: string) {
-        const currentUrl = tab.error?.url || tab.pendingUrl || tab.view.webContents.getURL()
+        const currentUrl = tab.error?.url || tab.pendingUrl || tab.webContents.getURL()
         if (tab.error || browserOrigin(currentUrl) !== browserOrigin(url)) tab.favicon = undefined
         tab.faviconSource = undefined
         tab.dialog = null
@@ -231,7 +232,7 @@ export class NavigationService {
     }
 
     private fail(tab: EmbeddedTab, error: BrowserLoadError, request?: BrowserCommandRequest) {
-        if (tab.view.webContents.isDestroyed()) return
+        if (tab.webContents.isDestroyed()) return
         tab.error = error
         tab.favicon = undefined
         tab.faviconSource = undefined
@@ -252,7 +253,7 @@ export class NavigationService {
         url: string,
         generation: number,
     ) {
-        const hasContent = await tab.view.webContents.executeJavaScript(`(() => {
+        const hasContent = await tab.webContents.executeJavaScript(`(() => {
             const body = document.body
             if (!body) return false
             if ((body.innerText || "").trim().length > 0) return true
@@ -261,7 +262,7 @@ export class NavigationService {
         if (
             hasContent
             || tab.generation !== generation
-            || !sameDocumentUrl(tab.view.webContents.getURL(), url)
+            || !sameDocumentUrl(tab.webContents.getURL(), url)
         ) return
         this.fail(tab, {
             code: statusCode,
@@ -353,7 +354,7 @@ function browserLoadError(error: unknown, url: string): BrowserLoadError {
 
 function currentResult(tab: EmbeddedTab): BrowserNavigationResult {
     return {
-        finalUrl: tab.error?.url || tab.pendingUrl || tab.view.webContents.getURL(),
+        finalUrl: tab.error?.url || tab.pendingUrl || tab.webContents.getURL(),
         generation: tab.generation,
         status: "committed",
     }
@@ -374,14 +375,14 @@ function failedResult(tab: EmbeddedTab): BrowserNavigationResult {
             message: tab.error?.description ?? "Navigation failed",
             retryable: true,
         },
-        finalUrl: tab.error?.url ?? tab.view.webContents.getURL(),
+        finalUrl: tab.error?.url ?? tab.webContents.getURL(),
         generation: tab.generation,
         status: "failed",
     }
 }
 
 function ensureCurrent(tab: EmbeddedTab, generation: number) {
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (!webContents || webContents.isDestroyed()) {
         throw new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed during navigation")
     }
@@ -407,15 +408,15 @@ function navigationCompletion<T>(tab: EmbeddedTab, promise: Promise<T>, signal?:
     if (signal?.aborted) {
         return Promise.reject(new BrowserRuntimeException("CANCELLED", "Browser navigation was cancelled", true))
     }
-    const webContents = tab.view.webContents
+    const webContents = tab.webContents
     if (webContents.isDestroyed()) {
         return Promise.reject(new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed during navigation"))
     }
     if (tab.dialog) {
         return Promise.reject(new BrowserRuntimeException("DIALOG_REQUIRED", "Navigation is waiting for a dialog"))
     }
-    const browserDebugger = webContents.debugger
     return new Promise<T>((resolve, reject) => {
+        let removeDebuggerListener: () => void = () => undefined
         const complete = (value: T) => {
             cleanup()
             resolve(value)
@@ -438,11 +439,11 @@ function navigationCompletion<T>(tab: EmbeddedTab, promise: Promise<T>, signal?:
             reject(new BrowserRuntimeException("CANCELLED", "Browser navigation was cancelled", true))
         }
         const cleanup = () => {
-            browserDebugger.removeListener("message", dialog)
+            removeDebuggerListener()
             webContents.removeListener("destroyed", closed)
             signal?.removeEventListener("abort", cancel)
         }
-        browserDebugger.on("message", dialog)
+        removeDebuggerListener = onDebuggerMessage(webContents, dialog, () => !tab.closed)
         webContents.once("destroyed", closed)
         signal?.addEventListener("abort", cancel, { once: true })
         if (signal?.aborted) {

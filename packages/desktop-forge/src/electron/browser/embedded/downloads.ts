@@ -24,7 +24,7 @@ export class DownloadService {
     ) {
         mkdirSync(this.directory, { recursive: true })
         this.listener = (_event, item, webContents) => {
-            const tab = this.tabs.list().find((candidate) => candidate.view.webContents.id === webContents?.id)
+            const tab = this.tabs.list().find((candidate) => candidate.webContents.id === webContents?.id)
             if (!tab) return
             const download: BrowserDownload = {
                 filename: item.getFilename(),
@@ -110,7 +110,7 @@ export class DownloadService {
                     && Date.now() - (this.createdAt.get(download.id) ?? 0) < 5_000)
             : undefined
         if (existing) return Promise.resolve(existing)
-        const webContents = tab.view.webContents
+        const webContents = tab.webContents
         return new Promise<BrowserDownload>((resolve, reject) => {
             const finish = (download: BrowserDownload) => {
                 cleanup()

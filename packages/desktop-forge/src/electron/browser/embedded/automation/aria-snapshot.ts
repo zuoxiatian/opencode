@@ -48,7 +48,7 @@ export class AriaSnapshotService {
                 .slice(0, MAX_NODES)
             const nodes: BrowserDomNode[] = []
             const registered: RegisteredBrowserNode[] = []
-            if (tab.view.webContents.isDestroyed()) {
+            if (tab.webContents.isDestroyed()) {
                 throw new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed during accessibility snapshot")
             }
             if (tab.generation !== generation) {
@@ -96,9 +96,9 @@ export class AriaSnapshotService {
                 text: nodes
                     .map((node) => `${node.id} ${node.role}${node.name ? ` "${node.name}"` : ""}${node.value ? ` value="${node.value}"` : ""}`)
                     .join("\n"),
-                title: tab.view.webContents.getTitle(),
+                title: tab.webContents.getTitle(),
                 truncated: compact.length >= MAX_NODES,
-                url: tab.error?.url || tab.view.webContents.getURL(),
+                url: tab.error?.url || tab.webContents.getURL(),
             }
             return snapshot
         })

@@ -34,10 +34,20 @@ export class EmbeddedTabStore {
     create(ownership: BrowserTabOwnership, request?: BrowserCommandRequest, activate = true) {
         if (this.destroyed) throw new BrowserRuntimeException("BROWSER_UNAVAILABLE", "Embedded browser is closed")
         const previousActiveTabId = this.activeTabId
+        const view = new WebContentsView({
+            webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false,
+                partition: "persist:desktop-forge-browser",
+                sandbox: true,
+                webSecurity: true,
+            },
+        })
         const tab: EmbeddedTab = {
             cdpEvents: [],
             cdpSequence: 0,
             cdpSessions: new Set(),
+            closed: false,
             debuggerQueue: Promise.resolve(),
             debuggerReady: Promise.resolve(),
             dialog: null,
@@ -49,24 +59,21 @@ export class EmbeddedTabStore {
             logs: [],
             networkRequests: new Set(),
             ownership,
-            view: new WebContentsView({
-                webPreferences: {
-                    contextIsolation: true,
-                    nodeIntegration: false,
-                    partition: "persist:desktop-forge-browser",
-                    sandbox: true,
-                    webSecurity: true,
-                },
-            }),
+            view,
+            webContents: view.webContents,
         }
         this.tabs.push(tab)
         if (activate) this.activeTabId = tab.id
+        tab.webContents.once("destroyed", () => {
+            tab.closed = true
+        })
         try {
             this.register(tab)
         } catch (error) {
             this.tabs.pop()
             this.activeTabId = previousActiveTabId
-            tab.view.webContents.close()
+            tab.closed = true
+            if (!tab.webContents.isDestroyed()) tab.webContents.close()
             throw new BrowserRuntimeException(
                 "BROWSER_UNAVAILABLE",
                 error instanceof Error ? error.message : "Unable to initialize browser tab",
@@ -92,7 +99,8 @@ export class EmbeddedTabStore {
         const tab = this.tabs[index]
         const state = tabState(tab)
         if (this.attachedTabId === tabId) this.detach()
-        tab.view.webContents.close()
+        tab.closed = true
+        tab.webContents.close()
         this.tabs.splice(index, 1)
         if (this.activeTabId === tabId) {
             this.activeTabId = this.tabs[Math.min(index, this.tabs.length - 1)]?.id ?? null
@@ -110,7 +118,9 @@ export class EmbeddedTabStore {
     require(tabId?: string | null) {
         const tab = this.get(tabId)
         if (!tab) throw new BrowserRuntimeException("TAB_NOT_FOUND", `Browser tab not found: ${tabId ?? "active"}`)
-        if (tab.view.webContents.isDestroyed()) throw new BrowserRuntimeException("TAB_CLOSED", `Browser tab is closed: ${tab.id}`)
+        if (tab.closed || tab.webContents.isDestroyed()) {
+            throw new BrowserRuntimeException("TAB_CLOSED", `Browser tab is closed: ${tab.id}`)
+        }
         return tab
     }
 
@@ -148,6 +158,7 @@ export class EmbeddedTabStore {
     }
 
     changed(tab: EmbeddedTab, request?: BrowserCommandRequest) {
+        if (!this.tabs.includes(tab) || tab.closed || tab.webContents.isDestroyed()) return
         if (request) tab.lastTouchedAt = Date.now()
         this.syncView()
         this.publish("tab.updated", tab, request)
@@ -185,11 +196,11 @@ export class EmbeddedTabStore {
     }
 
     recordHistory(tab: EmbeddedTab) {
-        const url = tab.view.webContents.getURL()
+        const url = tab.webContents.getURL()
         if (!/^https?:/i.test(url)) return
         const entry = {
             dateVisited: new Date().toISOString(),
-            title: tab.view.webContents.getTitle() || undefined,
+            title: tab.webContents.getTitle() || undefined,
             url,
         }
         const previous = this.historyEntries[0]
@@ -242,7 +253,8 @@ export class EmbeddedTabStore {
         clearInterval(this.sweepTimer)
         this.detach()
         this.tabs.splice(0).forEach((tab) => {
-            tab.view.webContents.close()
+            tab.closed = true
+            if (!tab.webContents.isDestroyed()) tab.webContents.close()
         })
     }
 
@@ -265,7 +277,12 @@ export class EmbeddedTabStore {
     private syncView() {
         if (this.destroyed || this.window.isDestroyed()) return
         const active = this.get()
-        const shouldAttach = this.visible && active && !active.error && Boolean(active.view.webContents.getURL())
+        const shouldAttach = this.visible
+            && active
+            && !active.closed
+            && !active.webContents.isDestroyed()
+            && !active.error
+            && Boolean(active.webContents.getURL())
         if (this.attachedTabId && (!shouldAttach || this.attachedTabId !== active?.id)) this.detach()
         if (!shouldAttach || this.attachedTabId === active.id) return
         this.window.contentView.addChildView(active.view)
