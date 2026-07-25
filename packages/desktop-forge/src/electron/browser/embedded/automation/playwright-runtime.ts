@@ -1,24 +1,9 @@
-import { createRequire } from "node:module"
-import path from "node:path"
+import { source as injectedSource } from "opencode-playwright-injected-source"
+import * as locatorUtils from "opencode-playwright-locator-utils"
 import type { BrowserElementInfo, BrowserLocator } from "@opencode-ai/browser-protocol"
 import type { WebFrameMain } from "electron"
 import { BrowserRuntimeException } from "../../errors"
 import type { EmbeddedTab } from "../tab"
-
-const moduleRequire = createRequire(import.meta.url)
-const playwrightRoot = path.dirname(moduleRequire.resolve("playwright-core/package.json"))
-const injectedSource = (moduleRequire(
-    path.join(playwrightRoot, "lib/generated/injectedScriptSource.js"),
-) as { source: string }).source
-const locatorUtils = moduleRequire(
-    path.join(playwrightRoot, "lib/utils/isomorphic/locatorUtils.js"),
-) as {
-    getByLabelSelector(text: string, options?: { exact?: boolean }): string
-    getByPlaceholderSelector(text: string, options?: { exact?: boolean }): string
-    getByRoleSelector(role: string, options?: { exact?: boolean; name?: string }): string
-    getByTestIdSelector(attribute: string, value: string): string
-    getByTextSelector(text: string, options?: { exact?: boolean }): string
-}
 
 const runtimeKey = "__opencodePlaywrightInjected"
 const injectedFactorySource = `

@@ -13,6 +13,14 @@ export default defineConfig({
         "./src/electron/browser/embedded/automation/ws-utf8-validate.ts",
         import.meta.url,
       )),
+      "opencode-playwright-injected-source": fileURLToPath(new URL(
+        "./node_modules/playwright-core/lib/generated/injectedScriptSource.js",
+        import.meta.url,
+      )),
+      "opencode-playwright-locator-utils": fileURLToPath(new URL(
+        "./node_modules/playwright-core/lib/utils/isomorphic/locatorUtils.js",
+        import.meta.url,
+      )),
     },
   },
 })
