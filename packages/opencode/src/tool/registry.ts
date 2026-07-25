@@ -12,6 +12,7 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { SkillExecuteTool } from "./skill-execute"
 import { MediaInspectTool } from "./media"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -47,6 +48,7 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Bus } from "../bus"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
+import { trustedSkillsAvailable } from "../skill/runtime"
 import { Permission } from "@/permission"
 import { BrowserTool } from "./browser"
 import { DESKTOP_BROWSER_AVAILABLE } from "../browser/config"
@@ -118,6 +120,7 @@ export const layer: Layer.Layer<
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const skillExecuteTool = yield* SkillExecuteTool
     const mediatool = yield* MediaInspectTool
     const browsertool = yield* BrowserTool
     const agent = yield* Agent.Service
@@ -205,6 +208,7 @@ export const layer: Layer.Layer<
           search: Tool.init(websearch),
           code: Tool.init(codesearch),
           skill: Tool.init(skilltool),
+          skillExecute: Tool.init(skillExecuteTool),
           media: Tool.init(mediatool),
           browser: Tool.init(browsertool),
           patch: Tool.init(patchtool),
@@ -231,6 +235,7 @@ export const layer: Layer.Layer<
             tool.search,
             tool.code,
             tool.skill,
+            ...(DESKTOP_BROWSER_AVAILABLE && trustedSkillsAvailable() ? [tool.skillExecute] : []),
             tool.media,
             tool.patch,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),

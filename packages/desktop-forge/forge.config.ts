@@ -274,6 +274,7 @@ function copyPlatformResources(
 async function copyPlatformResourceFiles(buildPath: string, platform: string, arch: string) {
   await copyPlatformRuntime(buildPath, platform, arch)
   await copyOpencodeBinary(buildPath, platform, arch)
+  await copyTrustedSkills(buildPath, platform)
   await copyMacAppIcon(buildPath, platform)
 }
 
@@ -311,6 +312,14 @@ async function copyOpencodeBinary(buildPath: string, platform: string, arch: str
   await mkdir(path.dirname(destination), { recursive: true })
   await cp(source, destination, { force: true })
   if (platform !== "win32") await chmod(destination, 0o755)
+}
+
+async function copyTrustedSkills(buildPath: string, platform: string) {
+  const source = path.resolve(packageDir, "..", "desktop-lxz", "skills", "read-web-content")
+  await cp(source, path.join(resourcesPath(buildPath, platform), "skills", "read-web-content"), {
+    force: true,
+    recursive: true,
+  })
 }
 
 async function copyMacAppIcon(buildPath: string, platform: string) {

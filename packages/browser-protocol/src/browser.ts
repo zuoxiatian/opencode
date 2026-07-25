@@ -6,9 +6,9 @@ import type {
   BrowserDownload,
   BrowserFileChooser,
 } from "./files"
-import type { BrowserHistoryEntry, BrowserTabsContentResult } from "./tab"
+import type { BrowserHistoryEntry } from "./tab"
 
-export const BROWSER_PROTOCOL_VERSION = 1 as const
+export const BROWSER_PROTOCOL_VERSION = 2 as const
 export const DEFAULT_BROWSER_ID = "embedded"
 
 export interface BrowserBounds {
@@ -93,7 +93,6 @@ export interface BrowserCommandData {
   cdpEvents?: import("./automation").BrowserCdpEvents
   clipboardItems?: BrowserClipboardItem[]
   clipboardText?: string
-  contentResults?: BrowserTabsContentResult[]
   dialog?: BrowserDialog | null
   dom?: string
   download?: BrowserDownload
@@ -101,11 +100,10 @@ export interface BrowserCommandData {
   elements?: import("./automation").BrowserElementInfo[]
   fileChooser?: BrowserFileChooser
   history?: BrowserHistoryEntry[]
+  html?: string
   logs?: import("./automation").BrowserDevLogEntry[]
   navigation?: BrowserNavigationResult
-  path?: string | null
   screenshot?: import("./automation").BrowserScreenshot
-  snapshot?: import("./automation").BrowserSnapshot
   tab?: BrowserTabState
   tabs?: BrowserTabState[]
   userTabs?: BrowserUserTabInfo[]

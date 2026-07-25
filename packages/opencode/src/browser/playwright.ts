@@ -41,6 +41,14 @@ export class PlaywrightAPI {
     }).then((result) => requireBrowserResult(result.data.dom, "DOM snapshot"))
   }
 
+  html() {
+    return this.transport.command<BrowserCommandData>({
+      browserId: this.browserId,
+      command: { name: "tab.playwright.html" },
+      tabId: this.tabId,
+    }).then((result) => requireBrowserResult(result.data.html, "page HTML"))
+  }
+
   evaluate<TResult, TArg = unknown>(
     pageFunction: PageFunction<TArg, TResult>,
     arg?: TArg,

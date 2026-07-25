@@ -7,7 +7,7 @@ export interface BrowserCommandRequest {
   callId?: string
   command: BrowserCommand
   expectedOrigin?: string
-  protocolVersion: 1
+  protocolVersion: 2
   requestId: string
   sessionId: string
   tabId?: string
@@ -16,7 +16,7 @@ export interface BrowserCommandRequest {
 export interface BrowserCommandResponse<T = BrowserCommandData> {
   data: T
   events: BrowserEvent[]
-  protocolVersion: 1
+  protocolVersion: 2
   requestId: string
   state?: BrowserState
 }

@@ -32,6 +32,11 @@ export function bundledRuntimeDir() {
     return packageResourcePath("runtimes", `${process.platform}-${process.arch}`)
 }
 
+export function bundledSkillsDir() {
+    if (app.isPackaged) return join(process.resourcesPath, "skills")
+    return join(repoRoot(), "packages", "desktop-lxz", "skills")
+}
+
 export function packagedOpencodeBin() {
     return packageResourcePath("bin", process.platform === "win32" ? "opencode.exe" : "opencode")
 }

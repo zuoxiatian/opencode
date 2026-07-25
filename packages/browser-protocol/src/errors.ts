@@ -31,7 +31,7 @@ export interface BrowserRuntimeError {
 
 export interface BrowserErrorResponse {
   error: BrowserRuntimeError
-  protocolVersion: 1
+  protocolVersion: 2
   requestId?: string
 }
 

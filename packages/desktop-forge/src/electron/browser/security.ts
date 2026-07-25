@@ -14,7 +14,6 @@ const tablessCommands = new Set<BrowserCommand["name"]>([
     "browser.user.openTabs",
     "browser.viewport.reset",
     "browser.viewport.set",
-    "tabs.content",
     "tabs.finalize",
     "tabs.get",
     "tabs.list",
@@ -106,7 +105,6 @@ export class BrowserSecurityGate {
             }
         }
         if (request.command.name === "tab.goto") validateWebUrl(request.command.url)
-        if (request.command.name === "tabs.content") request.command.urls.forEach(validateWebUrl)
         if (request.command.name === "tab.screenshot" && request.command.clip) {
             if (
                 request.command.clip.width <= 0

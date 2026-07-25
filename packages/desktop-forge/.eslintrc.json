@@ -28,7 +28,16 @@
     }
   },
   "rules": {
-    "import/no-unresolved": ["error", { "ignore": ["^@tailwindcss/vite$"] }]
+    "import/no-unresolved": [
+      "error",
+      {
+        "ignore": [
+          "^@tailwindcss/vite$",
+          "^opencode-playwright-injected-source$",
+          "^opencode-playwright-locator-utils$"
+        ]
+      }
+    ]
   },
   "parser": "@typescript-eslint/parser"
 }

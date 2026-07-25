@@ -2,7 +2,6 @@ import type {
   BrowserCommandData,
   BrowserCapabilityInfo,
   BrowserFinalizeTabsInput,
-  BrowserTabsContentInput,
 } from "@opencode-ai/browser-protocol"
 import { TabHandle } from "./tab"
 import { requireBrowserResult } from "./result"
@@ -17,20 +16,6 @@ export class Tabs {
 
   capabilityInfo() {
     return Promise.resolve(this.capabilities.map((capability) => ({ ...capability })))
-  }
-
-  content(input: BrowserTabsContentInput) {
-    if (!Array.isArray(input.urls)) throw new Error("browser.tabs.content requires urls")
-    if (!input.urls.length) return Promise.resolve([])
-    return this.transport.command<BrowserCommandData>({
-      browserId: this.browserId,
-      command: {
-        contentType: input.contentType,
-        name: "tabs.content",
-        timeout: input.timeoutMs,
-        urls: input.urls,
-      },
-    }).then((result) => requireBrowserResult(result.data.contentResults, "tabs content"))
   }
 
   finalize(input: BrowserFinalizeTabsInput = {}) {

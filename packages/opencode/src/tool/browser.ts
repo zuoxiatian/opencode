@@ -1,7 +1,6 @@
 import type {
   BrowserClipboardItem,
   BrowserLocatorCommandName,
-  BrowserRuntimeError,
   BrowserScreenshot,
 } from "@opencode-ai/browser-protocol"
 import { BROWSER_COMMAND_NAMES } from "@opencode-ai/browser-protocol"
@@ -32,7 +31,7 @@ const Locator = Schema.Struct({
   text: Schema.optional(Schema.String),
 })
 
-const Parameters = Schema.Struct({
+export const BrowserParametersSchema = Schema.Struct({
   command: Schema.Literals(BROWSER_COMMAND_NAMES).annotate({
     description: "Namespaced browser command",
   }),
@@ -42,10 +41,6 @@ const Parameters = Schema.Struct({
   tabId: Schema.optional(Schema.String),
   targetTabId: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
-  urls: Schema.optional(Schema.Array(Schema.String)),
-  contentType: Schema.optional(Schema.Literals(["html", "text", "domSnapshot"])),
-  format: Schema.optional(Schema.Literals(["metadata", "text", "html"])),
-  exportFormat: Schema.optional(Schema.Literals(["csv", "docx", "md", "pdf", "pptx", "xlsx"])),
   historyFrom: Schema.optional(Schema.String),
   historyTo: Schema.optional(Schema.String),
   queries: Schema.optional(Schema.Array(Schema.String)),
@@ -153,7 +148,87 @@ const Parameters = Schema.Struct({
   limit: Schema.optional(Schema.Number),
 })
 
-type BrowserParameters = Schema.Schema.Type<typeof Parameters>
+export type BrowserParameters = Schema.Schema.Type<typeof BrowserParametersSchema>
+const decodeBrowserParameters = Schema.decodeUnknownSync(BrowserParametersSchema)
+
+export class BrowserCapabilityError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(`${code}: ${message}`)
+    this.name = "BrowserCapabilityError"
+  }
+}
+
+export const AuthorizedBrowserCapability = {
+  execute(input: BrowserParameters, ctx: Tool.Context) {
+    return Effect.gen(function* () {
+      const params = decodeBrowserParameters(input)
+      const options = transportOptions(ctx)
+      const initialClient = new BrowserClient(options)
+      const currentOrigin = yield* authorizeBrowserCommand(
+        params,
+        ctx,
+        () => resolveCurrentOrigin(initialClient, params),
+      )
+
+      const client = new BrowserClient({ ...options, expectedOrigin: currentOrigin })
+      const data = yield* Effect.promise(() =>
+        executeBrowserCommand(client, params, currentOrigin).catch((error: unknown) => {
+          throw browserToolError(error)
+        }),
+      )
+      return { data, events: client.events() }
+    })
+  },
+}
+
+export function authorizeBrowserCommand(
+  params: BrowserParameters,
+  ctx: Tool.Context,
+  resolveOrigin: () => Promise<string | undefined>,
+) {
+  return Effect.gen(function* () {
+    const targetUrl = navigationUrl(params)
+    if (targetUrl) {
+      yield* ctx.ask({
+        permission: "webfetch",
+        patterns: [targetUrl],
+        always: [`${new URL(targetUrl).origin}/*`],
+        metadata: { command: params.command, url: targetUrl },
+      })
+    }
+    if (params.command === "tab.fileChooser.setFiles") {
+      if (!params.filePaths?.length) throw new Error("tab.fileChooser.setFiles requires filePaths")
+      for (const filePath of params.filePaths) {
+        yield* ctx.ask({
+          permission: "read",
+          patterns: [filePath],
+          always: [filePath],
+          metadata: {},
+        })
+      }
+    }
+
+    const originRequired =
+      isMutating(params) || params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
+    if (!originRequired) return undefined
+
+    const currentOrigin = yield* Effect.promise(resolveOrigin)
+    if (!currentOrigin) throw new Error("The current browser tab does not have an HTTP or HTTPS origin")
+    yield* ctx.ask({
+      permission: params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
+        ? "browser_cdp"
+        : "browser_interaction",
+      patterns: [currentOrigin],
+      always: [currentOrigin],
+      metadata: { command: params.command, origin: currentOrigin },
+    })
+    return currentOrigin
+  })
+}
 
 export const BrowserTool = Tool.define(
   "browser",
@@ -185,73 +260,15 @@ export const BrowserTool = Tool.define(
         "tab.download.wait returns a download ID; use tab.download.get to refresh its state and obtain the completed path.",
         "Server-provided HTTP error pages remain visible; transport failures use the desktop error view.",
       ].join(" "),
-      parameters: Parameters,
+      parameters: BrowserParametersSchema,
       execute: (params: BrowserParameters, ctx: Tool.Context) =>
         Effect.gen(function* () {
           if (params.savePath && params.command !== "tab.screenshot") {
             throw new Error("savePath is only supported by tab.screenshot")
           }
-          const options = transportOptions(ctx)
-          const initialClient = new BrowserClient(options)
-          const targetUrl = navigationUrl(params)
-          if (targetUrl) {
-            yield* ctx.ask({
-              permission: "webfetch",
-              patterns: [targetUrl],
-              always: [`${new URL(targetUrl).origin}/*`],
-              metadata: { command: params.command, url: targetUrl },
-            })
-          }
-          if (params.command === "tabs.content") {
-            if (!params.urls?.length) throw new Error("tabs.content requires urls")
-            for (const input of params.urls) {
-              const url = normalizeUrl(input)
-              yield* ctx.ask({
-                permission: "webfetch",
-                patterns: [url],
-                always: [`${new URL(url).origin}/*`],
-                metadata: { command: params.command, url },
-              })
-            }
-          }
-
-          if (params.command === "tab.fileChooser.setFiles") {
-            if (!params.filePaths?.length) throw new Error("tab.fileChooser.setFiles requires filePaths")
-            for (const filePath of params.filePaths) {
-              yield* ctx.ask({
-                permission: "read",
-                patterns: [filePath],
-                always: [filePath],
-                metadata: {},
-              })
-            }
-          }
-
-          const mutating = isMutating(params)
-          const currentOrigin =
-            mutating || params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
-              ? yield* Effect.promise(() => resolveCurrentOrigin(initialClient, params))
-              : undefined
-          if (mutating || params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events") {
-            if (!currentOrigin) throw new Error("The current browser tab does not have an HTTP or HTTPS origin")
-            yield* ctx.ask({
-              permission: params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
-                ? "browser_cdp"
-                : "browser_interaction",
-              patterns: [currentOrigin],
-              always: [currentOrigin],
-              metadata: { command: params.command, origin: currentOrigin },
-            })
-          }
-
-          const client = new BrowserClient({ ...options, expectedOrigin: currentOrigin })
-          const result = yield* Effect.promise(() =>
-            executeBrowserCommand(client, params, currentOrigin).catch((error: unknown) => {
-              throw browserToolError(error)
-            }),
-          )
-          const response = client.events().length ? { data: result, events: client.events() } : result
-          const screenshot = findScreenshot(result)
+          const result = yield* AuthorizedBrowserCapability.execute(params, ctx)
+          const response = result.events.length ? { data: result.data, events: result.events } : result.data
+          const screenshot = findScreenshot(result.data)
           const savedPath = params.savePath
             ? yield* saveScreenshot(params.savePath, screenshot, ctx, fs, bus)
             : undefined
@@ -338,16 +355,6 @@ async function executeBrowserCommand(
     const tab = await browser.tabs.get(params.targetTabId)
     return { tabId: tab.id, state: await tab.state() }
   }
-  if (params.command === "tabs.content") {
-    if (!params.urls || !params.contentType) throw new Error("tabs.content requires urls and contentType")
-    return {
-      results: await browser.tabs.content({
-        contentType: params.contentType,
-        timeoutMs: params.timeout,
-        urls: [...params.urls].map(normalizeUrl),
-      }),
-    }
-  }
   if (params.command === "tabs.selected") {
     const tab = await browser.tabs.selected()
     return { tabId: tab?.id }
@@ -386,12 +393,6 @@ async function executeBrowserCommand(
   if (params.command === "tab.forward") return { navigation: await tab.forwardResult() }
   if (params.command === "tab.reload") return { navigation: await tab.reloadResult() }
   if (params.command === "tab.stop") return { tab: await tab.stop() }
-  if (params.command === "tab.content.read") return { snapshot: await tab.content.read(params.format) }
-  if (params.command === "tab.content.export") return { path: await tab.content.export() }
-  if (params.command === "tab.content.exportGsuite") {
-    if (!params.exportFormat) throw new Error("tab.content.exportGsuite requires exportFormat")
-    return { path: await tab.content.exportGsuite(params.exportFormat) }
-  }
   if (params.command === "tab.screenshot") {
     return {
       screenshot: await tab.screenshotResult({
@@ -403,6 +404,7 @@ async function executeBrowserCommand(
     }
   }
   if (params.command === "tab.playwright.domSnapshot") return { dom: await tab.playwright.domSnapshot() }
+  if (params.command === "tab.playwright.html") return { html: await tab.playwright.html() }
   if (params.command === "tab.playwright.evaluate") {
     if (!params.expression) throw new Error("tab.playwright.evaluate requires expression")
     return {
@@ -827,12 +829,10 @@ function saveScreenshot(
 }
 
 function browserToolError(error: unknown) {
-  if (error instanceof BrowserClientError) return new Error(formatBrowserError(error.browser))
+  if (error instanceof BrowserClientError) {
+    return new BrowserCapabilityError(error.browser.code, error.browser.message, error.browser.retryable)
+  }
   return error instanceof Error ? error : new Error(String(error))
-}
-
-function formatBrowserError(error: BrowserRuntimeError) {
-  return `${error.code}: ${error.message}`
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

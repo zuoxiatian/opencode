@@ -24,7 +24,7 @@
 
 - Browser Client 的对象层级。
 - Browser、Tabs 和 Tab 的句柄关系。
-- Playwright、DOM CUA、坐标 CUA、content、clipboard、dev 和 capabilities 的职责边界。
+- Playwright、DOM CUA、坐标 CUA、clipboard、dev 和 capabilities 的职责边界；业务内容读取见 `BROWSER_SKILL_MIGRATION_PLAN.md`。
 - 标签页 claim、finalize、deliverable 和 handoff 语义。
 - 命令安全检查、等待、截图、弹窗、文件选择和下载的接口语义。
 
@@ -168,7 +168,6 @@ packages/opencode/src/browser/
 ├── playwright.ts
 ├── dom-cua.ts
 ├── cua.ts
-├── content.ts
 ├── clipboard.ts
 ├── dev.ts
 ├── capabilities.ts
@@ -235,7 +234,6 @@ BrowserClient
                 ├── playwright
                 ├── domCua
                 ├── cua
-                ├── content
                 ├── clipboard
                 ├── dev
                 └── capabilities
@@ -271,7 +269,6 @@ class Tabs {
   selected(): Promise<TabHandle | undefined>
   get(tabId: string): Promise<TabHandle>
   new(): Promise<TabHandle>
-  content(input: TabsContentOptions): Promise<TabsContentResult[]>
   finalize(input: FinalizeTabsInput): Promise<void>
 }
 
@@ -280,7 +277,6 @@ class TabHandle {
   readonly playwright: PlaywrightAPI
   readonly dom_cua: DomCUAAPI
   readonly cua: CUAAPI
-  readonly content: ContentAPI
   readonly clipboard: TabClipboardAPI
   readonly dev: TabDevAPI
   readonly capabilities: CapabilityCollection
@@ -371,9 +367,8 @@ tab.close
 tab.mark
 tab.screenshot
 
-tab.content.read
-
 tab.playwright.domSnapshot
+tab.playwright.html
 tab.playwright.elementInfo
 tab.playwright.elementScreenshot
 tab.playwright.evaluate
@@ -441,7 +436,7 @@ HTTP 请求。
 
 ```ts
 interface BrowserCommandRequest {
-  protocolVersion: 1
+  protocolVersion: 2
   requestId: string
   sessionId: string
   callId?: string
@@ -464,7 +459,7 @@ interface BrowserCommandRequest {
 
 ```ts
 interface BrowserCommandResponse<T> {
-  protocolVersion: 1
+  protocolVersion: 2
   requestId: string
   data: T
   state?: BrowserState
@@ -476,7 +471,7 @@ interface BrowserCommandResponse<T> {
 
 ```ts
 interface BrowserErrorResponse {
-  protocolVersion: 1
+  protocolVersion: 2
   requestId?: string
   error: BrowserRuntimeError
 }

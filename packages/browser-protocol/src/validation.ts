@@ -20,9 +20,6 @@ export const BROWSER_COMMAND_NAMES = [
   "tab.clipboard.write",
   "tab.clipboard.writeText",
   "tab.close",
-  "tab.content.export",
-  "tab.content.exportGsuite",
-  "tab.content.read",
   "tab.cua.click",
   "tab.cua.downloadMedia",
   "tab.cua.doubleClick",
@@ -73,6 +70,7 @@ export const BROWSER_COMMAND_NAMES = [
   "tab.playwright.expectNavigation",
   "tab.playwright.evaluate",
   "tab.playwright.domSnapshot",
+  "tab.playwright.html",
   "tab.playwright.elementInfo",
   "tab.playwright.elementScreenshot",
   "tab.playwright.waitForLoadState",
@@ -83,7 +81,6 @@ export const BROWSER_COMMAND_NAMES = [
   "tab.state",
   "tab.stop",
   "tabs.finalize",
-  "tabs.content",
   "tabs.get",
   "tabs.list",
   "tabs.new",
@@ -185,15 +182,6 @@ function validateCommand(command: Record<string, unknown>, name: string) {
     readString(command.targetTabId, "command.targetTabId")
     return
   }
-  if (name === "tabs.content") {
-    const urls = readStringArray(command.urls, "command.urls")
-    if (!urls) throw new Error("command.urls is required")
-    if (command.contentType !== "domSnapshot" && command.contentType !== "html" && command.contentType !== "text") {
-      throw new Error("command.contentType is invalid")
-    }
-    readTimeout(command.timeout)
-    return
-  }
   if (name === "tabs.finalize") {
     if (command.keep === undefined) return
     if (!Array.isArray(command.keep)) throw new Error("command.keep must be an array")
@@ -216,16 +204,6 @@ function validateCommand(command: Record<string, unknown>, name: string) {
   }
   if (name === "tab.screenshot") {
     readScreenshot(command)
-    return
-  }
-  if (name === "tab.content.read") {
-    readFormat(command.format)
-    return
-  }
-  if (name === "tab.content.exportGsuite") {
-    if (!["csv", "docx", "md", "pdf", "pptx", "xlsx"].includes(String(command.format))) {
-      throw new Error("command.format is invalid")
-    }
     return
   }
   if (name === "tab.playwright.waitForURL") {
@@ -518,11 +496,6 @@ function readLoadState(input: unknown, name: string, allowCommit = false) {
   if (allowCommit && input === "commit") return input
   if (input === "domcontentloaded" || input === "load" || input === "networkidle") return input
   throw new Error(`${name} is invalid`)
-}
-
-function readFormat(input: unknown) {
-  if (input === undefined || input === "html" || input === "metadata" || input === "text") return
-  throw new Error("command.format is invalid")
 }
 
 function readButton(input: unknown) {

@@ -8,7 +8,6 @@ import type {
 } from "@opencode-ai/browser-protocol"
 import { CapabilityCollection, tabCapabilities } from "./capabilities"
 import { ClipboardAPI } from "./clipboard"
-import { ContentAPI } from "./content"
 import { CuaAPI } from "./cua"
 import { DevAPI } from "./dev"
 import { createDialog } from "./dialog"
@@ -20,7 +19,6 @@ import type { BrowserTransport } from "./transport"
 export class TabHandle {
   readonly capabilities: CapabilityCollection
   readonly clipboard: ClipboardAPI
-  readonly content: ContentAPI
   readonly cua: CuaAPI
   readonly dev: DevAPI
   readonly domCua: DomCuaAPI
@@ -44,7 +42,6 @@ export class TabHandle {
       ),
     )
     this.clipboard = new ClipboardAPI(transport, browserId, id)
-    this.content = new ContentAPI(transport, browserId, id)
     this.cua = new CuaAPI(transport, browserId, id)
     this.dev = new DevAPI(transport, browserId, id)
     this.domCua = new DomCuaAPI(transport, browserId, id)

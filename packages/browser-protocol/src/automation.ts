@@ -20,18 +20,6 @@ export interface BrowserScreenshot {
   width: number
 }
 
-export interface BrowserSnapshot {
-  account: string | null
-  canonicalUrl: string | null
-  description: string | null
-  html?: string
-  platform: string
-  publishedAt: string | null
-  text?: string
-  title: string
-  url: string
-}
-
 export interface BrowserFrameRef {
   frameId: string
   name?: string

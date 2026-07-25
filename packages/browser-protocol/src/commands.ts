@@ -11,8 +11,6 @@ import type { BrowserBounds } from "./browser"
 import type {
   BrowserFinalizeTabStatus,
   BrowserLoadState,
-  BrowserReadFormat,
-  BrowserTabsContentType,
   BrowserWaitUntil,
 } from "./tab"
 import type { BrowserClipboardItem } from "./files"
@@ -47,7 +45,6 @@ export type BrowserCommand =
   | { from?: string; limit?: number; name: "browser.user.history"; queries?: string[]; to?: string }
   | { name: "tabs.list" | "tabs.selected" }
   | { name: "tabs.get"; targetTabId: string }
-  | { contentType: BrowserTabsContentType; name: "tabs.content"; timeout?: number; urls: string[] }
   | { name: "tabs.new" }
   | {
       keep?: Array<{ status: BrowserFinalizeTabStatus; tabId: string }>
@@ -69,10 +66,8 @@ export type BrowserCommand =
     }
   | { name: "tab.goto"; url: string }
   | ({ name: "tab.screenshot" } & BrowserScreenshotInput)
-  | { format?: BrowserReadFormat; name: "tab.content.read" }
-  | { name: "tab.content.export" }
-  | { format: "csv" | "docx" | "md" | "pdf" | "pptx" | "xlsx"; name: "tab.content.exportGsuite" }
   | { name: "tab.playwright.domSnapshot" }
+  | { name: "tab.playwright.html" }
   | { includeNonInteractable?: boolean; name: "tab.playwright.elementInfo"; x: number; y: number }
   | { includeNonInteractable?: boolean; name: "tab.playwright.elementScreenshot"; x: number; y: number }
   | { arg?: unknown; expression: string; name: "tab.playwright.evaluate"; timeout?: number }

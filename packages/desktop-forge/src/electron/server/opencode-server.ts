@@ -32,6 +32,11 @@ export async function startServer(state: MainState, opencodeConfig: unknown): Pr
                 OPENCODE_DESKTOP_BROWSER_TOKEN: browserTransport.token,
                 OPENCODE_DESKTOP_BROWSER_URL: browserTransport.url,
                 OPENCODE_DISABLE_GLOBAL_CONFIG: "true",
+                OPENCODE_TRUSTED_SKILLS_DIR: join(
+                    process.env.OPENCODE_TEST_HOME ?? homedir(),
+                    ".lxz",
+                    "skills",
+                ),
                 OPENCODE_SERVER_PASSWORD: password,
                 NO_PROXY: noProxy,
                 no_proxy: noProxy,

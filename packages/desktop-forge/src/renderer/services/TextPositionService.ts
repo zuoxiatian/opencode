@@ -37,7 +37,9 @@ export interface SearchOptions {
 export class TextPositionService {
     private static instance: TextPositionService | null = null
 
-    private constructor() { }
+    private constructor() {
+        // Enforce singleton construction through getInstance().
+    }
 
     /**
      * 获取单例实例
@@ -170,7 +172,7 @@ export class TextPositionService {
             if (options.normalizeWhitespace) {
                 str = this.normalizeText(str)
             }
-            let normalizedStr = options.caseSensitive ? str : str.toLowerCase()
+            const normalizedStr = options.caseSensitive ? str : str.toLowerCase()
 
             let index = normalizedStr.indexOf(normalizedSearch)
             while (index !== -1) {
@@ -425,7 +427,7 @@ export class TextPositionService {
     /**
      * 合并相邻的文本矩形
      */
-    mergeAdjacentRects(rects: TextRect[], threshold: number = 5): TextRect[] {
+    mergeAdjacentRects(rects: TextRect[], threshold = 5): TextRect[] {
         if (rects.length === 0) return []
 
         const sorted = [...rects].sort((a, b) => a.y1 - b.y1 || a.x1 - b.x1)
@@ -457,7 +459,7 @@ export class TextPositionService {
     calculateScrollOffset(
         rect: TextRect,
         containerHeight: number,
-        padding: number = 100
+        padding = 100
     ): number {
         return Math.max(0, rect.y1 - padding)
     }

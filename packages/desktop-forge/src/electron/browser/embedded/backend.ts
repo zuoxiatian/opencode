@@ -1,5 +1,6 @@
 import { session, type BrowserWindow } from "electron"
 import {
+    BROWSER_PROTOCOL_VERSION,
     DEFAULT_BROWSER_ID,
     type BrowserBounds,
     type BrowserCommand,
@@ -33,10 +34,8 @@ import {
     writeClipboard,
     writeClipboardText,
 } from "./clipboard"
-import { readPage } from "./content"
 import { DialogService } from "./dialogs"
 import { DownloadService } from "./downloads"
-import { exportGsuitePage, exportPage } from "./export"
 import { FileChooserService } from "./file-chooser"
 import { NavigationService, browserOrigin } from "./navigation"
 import { configureBrowserPermissions } from "./permissions"
@@ -276,42 +275,6 @@ export function createEmbeddedBrowserBackend(
                     }
                     return { tab: tabState(tab) }
                 }
-                if (request.command.name === "tabs.content") {
-                    const command = request.command
-                    return {
-                        contentResults: await Promise.all(command.urls.map(async (url) => {
-                            const tab = tabs.create(ownershipFor(request, "temporary"), request, false)
-                            return navigation.goto(
-                                tab,
-                                url,
-                                request,
-                                context.signal,
-                                false,
-                                command.timeout,
-                            )
-                                .then(async (result) => {
-                                    if (result.status !== "committed" || tab.error) {
-                                        return { content: null, title: null, url: result.finalUrl || url }
-                                    }
-                                    const content = command.contentType === "domSnapshot"
-                                        ? await playwright.domSnapshot(tab)
-                                        : await readPage(
-                                            tab,
-                                            command.contentType === "html" ? "html" : "text",
-                                        ).then((snapshot) => command.contentType === "html"
-                                            ? snapshot.html ?? null
-                                            : snapshot.text ?? null)
-                                    return {
-                                        content,
-                                        title: tab.view.webContents.getTitle() || null,
-                                        url: tab.view.webContents.getURL() || url,
-                                    }
-                                })
-                                .catch(() => ({ content: null, title: null, url }))
-                                .finally(() => tabs.get(tab.id) && tabs.close(tab.id, request))
-                        })),
-                    }
-                }
                 if (request.command.name === "tabs.new") {
                     const tab = tabs.create(ownershipFor(request), request)
                     tabs.show(request)
@@ -404,21 +367,6 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             tab: tabState(tab),
         }
     }
-    if (command.name === "tab.content.read") {
-        return { snapshot: await readPage(tab, command.format) }
-    }
-    if (command.name === "tab.content.export") {
-        return { path: await exportPage(tab) }
-    }
-    if (command.name === "tab.content.exportGsuite") {
-        return {
-            path: await exportGsuitePage(
-                session.fromPartition("persist:desktop-forge-browser"),
-                tab,
-                command.format,
-            ),
-        }
-    }
     if (command.name === "tab.screenshot") {
         if (tab.error) {
             const state = services.tabs.getState()
@@ -446,6 +394,9 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.playwright.domSnapshot") {
         return { dom: await services.playwright.domSnapshot(tab) }
+    }
+    if (command.name === "tab.playwright.html") {
+        return { html: await services.playwright.html(tab) }
     }
     if (command.name === "tab.playwright.evaluate") {
         return {
@@ -811,11 +762,12 @@ async function readCdpEvents(
             truncated: after < firstSequence - 1,
         }
     }
-    while (true) {
-        const result = read()
-        if (result.events.length || Date.now() >= deadline) return result
+    let result = read()
+    while (!result.events.length && Date.now() < deadline) {
         await waitForTimeout(Math.min(25, deadline - Date.now()), signal)
+        result = read()
     }
+    return result
 }
 
 async function triggeredWait<T>(
@@ -870,7 +822,7 @@ function internalRequest(tabId: string, sessionId = "renderer"): BrowserCommandR
     return {
         browserId: DEFAULT_BROWSER_ID,
         command: { name: "tab.state" },
-        protocolVersion: 1,
+        protocolVersion: BROWSER_PROTOCOL_VERSION,
         requestId: crypto.randomUUID(),
         sessionId,
         tabId,

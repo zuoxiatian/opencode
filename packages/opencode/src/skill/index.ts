@@ -18,6 +18,7 @@ import { ConfigMarkdown } from "@/config/markdown"
 import { Glob } from "@opencode-ai/core/util/glob"
 import * as Log from "@opencode-ai/core/util/log"
 import { Discovery } from "./discovery"
+import { trustedSkillRoot } from "./runtime"
 
 const log = Log.create({ service: "skill" })
 const EXTERNAL_SKILL_ROOT = path.join(Global.Path.root, "skills")
@@ -97,12 +98,14 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
   const parsed = z.object({ name: z.string(), description: z.string() }).safeParse(md.data)
   if (!parsed.success) return
 
-  if (state.skills[parsed.data.name]) {
+  const existing = state.skills[parsed.data.name]
+  if (existing) {
     log.warn("duplicate skill name", {
       name: parsed.data.name,
-      existing: state.skills[parsed.data.name].location,
+      existing: existing.location,
       duplicate: match,
     })
+    if (isTrustedSkillPath(existing.location) && !isTrustedSkillPath(match)) return
   }
 
   state.dirs.add(path.dirname(match))
@@ -191,6 +194,11 @@ const discoverSkills = Effect.fnUntraced(function* (
     }
   }
 
+  const trusted = trustedSkillRoot()
+  if (trusted && (yield* fsys.isDir(trusted))) {
+    yield* scan(state, trusted, SKILL_PATTERN, { dot: true, scope: "trusted" })
+  }
+
   return {
     matches: Array.from(state.matches),
     dirs: Array.from(state.dirs),
@@ -259,6 +267,13 @@ export const defaultLayer = layer.pipe(
   Layer.provide(Bus.layer),
   Layer.provide(AppFileSystem.defaultLayer),
 )
+
+function isTrustedSkillPath(input: string) {
+  const root = trustedSkillRoot()
+  if (!root) return false
+  const relative = path.relative(path.resolve(root), path.resolve(input))
+  return !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)
+}
 
 export function fmt(list: Info[], opts: { verbose: boolean }) {
   if (list.length === 0) return "No skills are currently available."
