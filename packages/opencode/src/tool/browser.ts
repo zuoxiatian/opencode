@@ -87,7 +87,10 @@ export const BrowserParametersSchema = Schema.Struct({
   value: Schema.optional(Schema.String),
   arg: Schema.optional(Schema.Unknown),
   checked: Schema.optional(Schema.Boolean),
-  expression: Schema.optional(Schema.String),
+  expression: Schema.optional(Schema.String.annotate({
+    description:
+      "Used only by tab.playwright.evaluate and tab.playwright.locator.evaluate. Must be a function expression or arrow function source, such as () => document.title or (element) => element.textContent.",
+  })),
   force: Schema.optional(Schema.Boolean),
   loadState: Schema.optional(Schema.Literals(["domcontentloaded", "load", "networkidle"]).annotate({
     description: "Load state used only by tab.playwright.waitForLoadState",
@@ -248,6 +251,7 @@ export const BrowserTool = Tool.define(
         "After a locator timeout, strict-mode error, or selector error, take a fresh DOM snapshot and rebuild the locator; never retry the same stale locator.",
         "Prefer data-testid, stable data attributes or href, then scoped role/name or text, then scoped CSS.",
         "Use one bounded read-only evaluate for targeted bulk DOM reads; it runs against a detached page copy and cannot mutate the live page.",
+        "For tab.playwright.evaluate and tab.playwright.locator.evaluate, expression must be a function expression or arrow function source, for example () => document.title; do not pass a bare expression like document.title.",
         "Do not use networkidle; the official Browser runtime does not support it.",
         "tab.goto accepts url only; never pass waitUntil. Any legacy waitUntil field on tab.goto is ignored.",
         "Do not call waitForLoadState after routine goto; goto already waits for navigation readiness.",

@@ -23,7 +23,7 @@ export class NavigationService {
         tab.webContents.on("did-start-navigation", (_event, url, inPlace, isMainFrame) => {
             if (!isMainFrame || !isWebUrl(url)) return
             if (inPlace) {
-                tab.generation += 1
+                if (!tab.pendingUrl) tab.generation += 1
                 this.events.publish("navigation.started", eventInput(tab, { url }))
                 this.tabs.changed(tab)
                 return
