@@ -20,6 +20,37 @@ export interface BrowserScreenshot {
   width: number
 }
 
+export type BrowserAutomationTarget =
+  | { ref: string; snapshotId: string }
+  | { exact?: boolean; name?: string; role: string }
+  | { exact?: boolean; label: string }
+  | { exact?: boolean; placeholder: string }
+  | { exact?: boolean; text: string }
+  | { testId: string }
+  | { advanced: true; css: string }
+
+export interface BrowserAutomationSnapshot {
+  content: string
+  createdAt: string
+  interactiveOnly: boolean
+  snapshotId: string
+  tabGeneration: number
+  tabId: string
+  truncated?: boolean
+}
+
+export interface BrowserAutomationBox {
+  height: number
+  width: number
+  x: number
+  y: number
+}
+
+export type BrowserAutomationWait =
+  | { target: BrowserAutomationTarget }
+  | { text: string }
+  | { url: string }
+
 export interface BrowserFrameRef {
   frameId: string
   name?: string
@@ -54,29 +85,6 @@ export interface BrowserDomSnapshot {
   url: string
 }
 
-export interface BrowserElementInfoRect {
-  height: number
-  width: number
-  x: number
-  y: number
-}
-
-export interface BrowserElementInfo {
-  ariaName?: string | null
-  boundingBox?: BrowserElementInfoRect | null
-  nodeId?: number | null
-  preview: string
-  role?: string | null
-  selector: {
-    candidates: string[]
-    frameSelectors?: string[]
-    primary?: string | null
-  }
-  tagName: string
-  testId?: string | null
-  visibleText?: string | null
-}
-
 export interface BrowserDevLogEntry {
   level: "debug" | "error" | "info" | "log" | "warn"
   message: string
@@ -105,44 +113,6 @@ export interface BrowserCdpEvents {
   events: BrowserCdpEvent[]
   hasMore: boolean
   truncated: boolean
-}
-
-export interface BrowserLocator {
-  css?: string
-  exact?: boolean
-  frameId?: string
-  frameSelectors?: readonly string[]
-  href?: string
-  label?: string
-  name?: string
-  placeholder?: string
-  role?: string
-  selector?: string
-  testId?: string
-  text?: string
-}
-
-export interface BrowserSelectOption {
-  index?: number
-  label?: string
-  value?: string
-}
-
-export interface BrowserElementInput {
-  arg?: unknown
-  attribute?: string
-  button?: BrowserMouseButton
-  checked?: boolean
-  expression?: string
-  filePaths?: string[]
-  force?: boolean
-  key?: string
-  locator: BrowserLocator
-  modifiers?: readonly BrowserKeyModifier[]
-  options?: readonly BrowserSelectOption[]
-  state?: "attached" | "detached" | "hidden" | "visible"
-  timeout?: number
-  value?: string
 }
 
 export interface BrowserNodeInput {

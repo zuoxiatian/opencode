@@ -1,6 +1,6 @@
 import type {
+  BrowserAutomationTarget,
   BrowserClipboardItem,
-  BrowserLocatorCommandName,
   BrowserScreenshot,
 } from "@opencode-ai/browser-protocol"
 import { BROWSER_COMMAND_NAMES } from "@opencode-ai/browser-protocol"
@@ -16,20 +16,44 @@ import { Instance } from "../project/instance"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import * as Tool from "./tool"
 
-const Locator = Schema.Struct({
-  css: Schema.optional(Schema.String),
-  exact: Schema.optional(Schema.Boolean),
-  frameId: Schema.optional(Schema.String),
-  frameSelectors: Schema.optional(Schema.Array(Schema.String)),
-  href: Schema.optional(Schema.String),
-  label: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  placeholder: Schema.optional(Schema.String),
-  role: Schema.optional(Schema.String),
-  selector: Schema.optional(Schema.String),
-  testId: Schema.optional(Schema.String),
-  text: Schema.optional(Schema.String),
-})
+const AutomationTarget = Schema.Union([
+  Schema.Struct({
+    ref: Schema.String
+      .check(Schema.isPattern(/^e[0-9]+$/))
+      .annotate({
+        description: "Exact e<number> ref copied from the latest tab.automation.snapshot content; never use a tag, CSS selector, role, or tab ID",
+      }),
+    snapshotId: Schema.String.annotate({
+      description: "Exact snapshot.snapshotId returned by the same latest tab.automation.snapshot call; this is not tabId",
+    }),
+  }),
+  Schema.Struct({
+    exact: Schema.optional(Schema.Boolean),
+    name: Schema.optional(Schema.String),
+    role: Schema.String,
+  }),
+  Schema.Struct({
+    exact: Schema.optional(Schema.Boolean),
+    label: Schema.String,
+  }),
+  Schema.Struct({
+    exact: Schema.optional(Schema.Boolean),
+    placeholder: Schema.String,
+  }),
+  Schema.Struct({
+    exact: Schema.optional(Schema.Boolean),
+    text: Schema.String,
+  }),
+  Schema.Struct({
+    testId: Schema.String,
+  }),
+  Schema.Struct({
+    advanced: Schema.Literal(true),
+    css: Schema.String.annotate({
+      description: "Advanced CSS selector fallback, for example html or h1.article-title; do not put CSS in ref",
+    }),
+  }),
+])
 
 export const BrowserParametersSchema = Schema.Struct({
   command: Schema.Literals(BROWSER_COMMAND_NAMES).annotate({
@@ -44,13 +68,9 @@ export const BrowserParametersSchema = Schema.Struct({
   historyFrom: Schema.optional(Schema.String),
   historyTo: Schema.optional(Schema.String),
   queries: Schema.optional(Schema.Array(Schema.String)),
-  waitUntil: Schema.optional(
-    Schema.Literals(["commit", "domcontentloaded", "load", "networkidle"]).annotate({
-      description:
-        "Used only by tab.playwright.expectNavigation and tab.playwright.waitForURL; never pass it to tab.goto",
-    }),
-  ),
-  timeout: Schema.optional(Schema.Number),
+  timeout: Schema.optional(Schema.Number).annotate({
+    description: "Top-level browser command timeout in milliseconds",
+  }),
   disposition: Schema.optional(Schema.Literals(["temporary", "deliverable", "handoff"])),
   keep: Schema.optional(Schema.Array(Schema.Struct({
     status: Schema.Literals(["deliverable", "handoff"]),
@@ -67,7 +87,6 @@ export const BrowserParametersSchema = Schema.Struct({
   imageFormat: Schema.optional(Schema.Literals(["png", "jpeg"])),
   quality: Schema.optional(Schema.Number),
   fullPage: Schema.optional(Schema.Boolean),
-  includeNonInteractable: Schema.optional(Schema.Boolean),
   savePath: Schema.optional(
     Schema.String.annotate({
       description: "Absolute path or workspace-relative path where tab.screenshot should save the PNG or JPEG",
@@ -81,28 +100,15 @@ export const BrowserParametersSchema = Schema.Struct({
       y: Schema.Number,
     }),
   ),
-  locator: Schema.optional(Locator),
-  snapshotId: Schema.optional(Schema.String),
+  target: Schema.optional(AutomationTarget),
+  sourceTarget: Schema.optional(AutomationTarget),
+  interactiveOnly: Schema.optional(Schema.Boolean),
+  snapshotId: Schema.optional(Schema.String).annotate({
+    description: "Legacy DOM-CUA snapshot ID used with nodeId; automation ref targets must put snapshotId inside target",
+  }),
   nodeId: Schema.optional(Schema.String),
   value: Schema.optional(Schema.String),
-  arg: Schema.optional(Schema.Unknown),
-  checked: Schema.optional(Schema.Boolean),
-  expression: Schema.optional(Schema.String.annotate({
-    description:
-      "Used only by tab.playwright.evaluate and tab.playwright.locator.evaluate. Must be a function expression or arrow function source, such as () => document.title or (element) => element.textContent.",
-  })),
-  force: Schema.optional(Schema.Boolean),
-  loadState: Schema.optional(Schema.Literals(["domcontentloaded", "load", "networkidle"]).annotate({
-    description: "Load state used only by tab.playwright.waitForLoadState",
-  })),
-  locatorState: Schema.optional(Schema.Literals(["attached", "detached", "hidden", "visible"]).annotate({
-    description: "Element state used only by tab.playwright.locator.waitFor",
-  })),
-  options: Schema.optional(Schema.Array(Schema.Struct({
-    index: Schema.optional(Schema.Number),
-    label: Schema.optional(Schema.String),
-    value: Schema.optional(Schema.String),
-  }))),
+  values: Schema.optional(Schema.Array(Schema.String)),
   attribute: Schema.optional(Schema.String),
   key: Schema.optional(Schema.String),
   keys: Schema.optional(Schema.Array(Schema.String)),
@@ -126,7 +132,6 @@ export const BrowserParametersSchema = Schema.Struct({
     x: Schema.Number,
     y: Schema.Number,
   }))),
-  button: Schema.optional(Schema.Literals(["left", "middle", "right"])),
   cuaButton: Schema.optional(Schema.Number.annotate({
     description: "CUA mouse button: 1-left, 2-middle, 3-right, 4-back, or 5-forward",
   })),
@@ -140,8 +145,12 @@ export const BrowserParametersSchema = Schema.Struct({
     presentationStyle: Schema.optional(Schema.Literals(["attachment", "inline", "unspecified"])),
   }))),
   modifiers: Schema.optional(Schema.Array(Schema.Literals(["alt", "control", "meta", "shift"]))),
-  method: Schema.optional(Schema.String),
-  params: Schema.optional(Schema.Unknown),
+  method: Schema.optional(Schema.String).annotate({
+    description: "Required top-level Chrome DevTools Protocol method for tab.dev.cdp, for example Runtime.evaluate",
+  }),
+  params: Schema.optional(Schema.Unknown).annotate({
+    description: "Chrome DevTools Protocol method parameters; for Runtime.evaluate put expression and returnByValue here",
+  }),
   targetId: Schema.optional(Schema.String),
   targetSessionId: Schema.optional(Schema.String),
   afterSequence: Schema.optional(Schema.Number),
@@ -194,6 +203,9 @@ export function authorizeBrowserCommand(
   resolveOrigin: () => Promise<string | undefined>,
 ) {
   return Effect.gen(function* () {
+    if (params.command === "tab.dev.cdp" && !params.method?.trim()) {
+      throw new Error("tab.dev.cdp requires a top-level method such as Runtime.evaluate")
+    }
     const targetUrl = navigationUrl(params)
     if (targetUrl) {
       yield* ctx.ask({
@@ -215,20 +227,40 @@ export function authorizeBrowserCommand(
       }
     }
 
+    const automation = params.command.startsWith("tab.automation.")
+    const devCdp = params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
     const originRequired =
-      isMutating(params) || params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
+      automation
+      || isMutating(params)
+      || devCdp
     if (!originRequired) return undefined
 
     const currentOrigin = yield* Effect.promise(resolveOrigin)
     if (!currentOrigin) throw new Error("The current browser tab does not have an HTTP or HTTPS origin")
-    yield* ctx.ask({
-      permission: params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
-        ? "browser_cdp"
-        : "browser_interaction",
-      patterns: [currentOrigin],
-      always: [currentOrigin],
-      metadata: { command: params.command, origin: currentOrigin },
-    })
+    if (automation || devCdp) {
+      yield* ctx.ask({
+        permission: "browser_origin",
+        patterns: [currentOrigin],
+        always: [currentOrigin],
+        metadata: {
+          command: params.command,
+          origin: currentOrigin,
+          ...(params.command === "tab.dev.cdp" && params.method ? { method: params.method } : {}),
+        },
+      })
+    }
+    if (!automation || isMutating(params)) {
+      yield* ctx.ask({
+        permission: devCdp ? "browser_cdp" : "browser_interaction",
+        patterns: [currentOrigin],
+        always: [currentOrigin],
+        metadata: {
+          command: params.command,
+          origin: currentOrigin,
+          ...(params.command === "tab.dev.cdp" && params.method ? { method: params.method } : {}),
+        },
+      })
+    }
     return currentOrigin
   })
 }
@@ -244,14 +276,14 @@ export const BrowserTool = Tool.define(
         "For screenshot requests, call tab.screenshot once: it returns an image attachment rendered directly in chat.",
         "To also save a screenshot, pass savePath to the same tab.screenshot call; the tool writes the image directly and returns savedPath.",
         "Do not use shell commands, curl, temporary files, tab.dev.cdp, or the screenshot asset reference to retrieve or save screenshots.",
-        "Before every click, fill, press, check, or select action, use the latest relevant tab.playwright.domSnapshot as locator ground truth.",
-        "A DOM snapshot reference such as [ref=e36] must be used as selector aria-ref=e36 (the compatibility form [ref=e36] is also accepted); it is not a CSS attribute.",
-        "Do not guess selectors, labels, roles, or accessible names that are absent from the latest snapshot.",
-        "If locator uniqueness is not obvious, call count first and act only when it is exactly 1.",
-        "After a locator timeout, strict-mode error, or selector error, take a fresh DOM snapshot and rebuild the locator; never retry the same stale locator.",
-        "Prefer data-testid, stable data attributes or href, then scoped role/name or text, then scoped CSS.",
-        "Use one bounded read-only evaluate for targeted bulk DOM reads; it runs against a detached page copy and cannot mutate the live page.",
-        "For tab.playwright.evaluate and tab.playwright.locator.evaluate, expression must be a function expression or arrow function source, for example () => document.title; do not pass a bare expression like document.title.",
+        "Before every semantic action, call tab.automation.snapshot and use its latest ref with snapshotId whenever possible.",
+        "A snapshot ref is only the exact e<number> token shown in the latest snapshot content, and target.snapshotId is the latest snapshot.snapshotId; neither an HTML tag such as html nor tabId is a ref or snapshotId.",
+        "After navigation or any state-changing action, take a fresh automation snapshot; never retry a STALE_REF.",
+        "Prefer snapshot refs, then role/label/placeholder/text/testId targets. CSS is an advanced fallback and requires { css, advanced: true }.",
+        "Do not guess locators absent from the latest snapshot, and do not retry an unchanged failed CSS target.",
+        "Use tab.automation.getBox/getHtml/getText/getValue/getAttribute for ordinary live-page reads.",
+        "Developer-only arbitrary JavaScript must use tab.dev.cdp with Runtime.evaluate; it requires browser_origin and browser_cdp approval, forces returnByValue: true, and must return bounded JSON-safe data.",
+        "For tab.dev.cdp, method is a required top-level field, for example { command: \"tab.dev.cdp\", method: \"Runtime.evaluate\", params: { expression: \"document.title\", returnByValue: true }, timeout: 10000 }; never put method inside params.",
         "Do not use networkidle; the official Browser runtime does not support it.",
         "tab.goto accepts url only; never pass waitUntil. Any legacy waitUntil field on tab.goto is ignored.",
         "Do not call waitForLoadState after routine goto; goto already waits for navigation readiness.",
@@ -260,7 +292,7 @@ export const BrowserTool = Tool.define(
         "Use browser.user.openTabs followed by browser.user.claimTab to take over an existing user tab; never pass a user-tab claim ID as tabId.",
         "Agent-created tabs are temporary unless marked deliverable or handoff.",
         "Call tabs.finalize after the browser task to close temporary tabs and release claimed user tabs.",
-        "For navigation, dialog, file chooser, or download waits, pass the triggering locator so waiting and clicking are atomic.",
+        "For dialog, file chooser, or download waits, pass the triggering target so waiting and clicking are atomic.",
         "tab.download.wait returns a download ID; use tab.download.get to refresh its state and obtain the completed path.",
         "Server-provided HTTP error pages remain visible; transport failures use the desktop error view.",
       ].join(" "),
@@ -407,84 +439,91 @@ async function executeBrowserCommand(
       }),
     }
   }
-  if (params.command === "tab.playwright.domSnapshot") return { dom: await tab.playwright.domSnapshot() }
-  if (params.command === "tab.playwright.html") return { html: await tab.playwright.html() }
-  if (params.command === "tab.playwright.evaluate") {
-    if (!params.expression) throw new Error("tab.playwright.evaluate requires expression")
+  if (params.command === "tab.automation.snapshot") {
     return {
-      value: await tab.playwright.evaluate(params.expression, params.arg, {
-        timeoutMs: params.timeout,
+      snapshot: await tab.automation.snapshot({
+        interactiveOnly: params.interactiveOnly,
       }),
     }
   }
-  if (params.command === "tab.playwright.elementInfo") {
-    requirePoint(params)
-    return {
-      elements: await tab.playwright.elementInfo({
-        includeNonInteractable: params.includeNonInteractable,
-        x: params.x!,
-        y: params.y!,
-      }),
+  if (params.command === "tab.automation.waitFor") {
+    const wait = params.target
+      ? { target: automationTarget(params.target) }
+      : params.text !== undefined
+        ? { text: params.text }
+        : params.url !== undefined
+          ? { url: params.url }
+          : undefined
+    if (!wait) throw new Error("tab.automation.waitFor requires target, text, or url")
+    await tab.automation.waitFor(wait, { timeoutMs: params.timeout })
+    return { value: true }
+  }
+  if (params.command === "tab.automation.drag") {
+    if (!params.target || !params.sourceTarget) {
+      throw new Error("tab.automation.drag requires sourceTarget and target")
     }
+    await tab.automation.drag(
+      automationTarget(params.sourceTarget),
+      automationTarget(params.target),
+      { timeoutMs: params.timeout },
+    )
+    return { value: true }
   }
-  if (params.command === "tab.playwright.elementScreenshot") {
-    requirePoint(params)
-    return {
-      screenshot: await tab.playwright.elementScreenshotResult({
-        includeNonInteractable: params.includeNonInteractable,
-        x: params.x!,
-        y: params.y!,
-      }),
-    }
-  }
-  if (params.command === "tab.playwright.expectNavigation") {
-    return {
-      navigation: await tab.playwright.expectNavigationResult({
-        timeoutMs: params.timeout,
-        trigger: params.locator,
-        url: params.url,
-        waitUntil: params.waitUntil,
-      }),
-    }
-  }
-  if (params.command === "tab.playwright.waitForURL") {
-    if (!params.url) throw new Error("tab.playwright.waitForURL requires url")
-    return {
-      value: await tab.playwright.waitForURL(params.url, {
-        timeoutMs: params.timeout,
-        waitUntil: params.waitUntil,
-      }),
-    }
-  }
-  if (params.command === "tab.playwright.waitForLoadState") {
-    return {
-      value: await tab.playwright.waitForLoadState({
-        state: params.loadState,
-        timeoutMs: params.timeout,
-      }),
-    }
-  }
-  if (params.command === "tab.playwright.waitForTimeout") {
-    if (params.timeout === undefined) throw new Error("tab.playwright.waitForTimeout requires timeout")
-    return { value: await tab.playwright.waitForTimeout(params.timeout) }
-  }
-  if (params.command.startsWith("tab.playwright.locator.")) {
-    if (!params.locator) throw new Error(`${params.command} requires locator`)
-    return tab.playwright.locator(params.locator).run(params.command as BrowserLocatorCommandName, {
-      arg: params.arg,
-      attribute: params.attribute,
-      button: params.button,
-      checked: params.checked,
-      expression: params.expression,
-      filePaths: params.filePaths ? [...params.filePaths] : undefined,
-      force: params.force,
-      key: params.key,
-      modifiers: params.modifiers ? [...params.modifiers] : undefined,
-      options: params.options ? params.options.map((option) => ({ ...option })) : undefined,
-      state: params.locatorState,
-      timeout: params.timeout,
-      value: params.value ?? params.text,
+  if (params.command === "tab.automation.press") {
+    if (!params.key) throw new Error("tab.automation.press requires key")
+    await tab.automation.press(params.key, {
+      target: params.target ? automationTarget(params.target) : undefined,
+      timeoutMs: params.timeout,
     })
+    return { value: true }
+  }
+  if (params.command.startsWith("tab.automation.")) {
+    if (!params.target) throw new Error(`${params.command} requires target`)
+    const target = automationTarget(params.target)
+    const options = { timeoutMs: params.timeout }
+    if (params.command === "tab.automation.click") await tab.automation.click(target, options)
+    else if (params.command === "tab.automation.dblclick") await tab.automation.dblclick(target, options)
+    else if (params.command === "tab.automation.focus") await tab.automation.focus(target, options)
+    else if (params.command === "tab.automation.fill") {
+      if (params.value === undefined) throw new Error("tab.automation.fill requires value")
+      await tab.automation.fill(target, params.value, options)
+    } else if (params.command === "tab.automation.type") {
+      if (params.value === undefined) throw new Error("tab.automation.type requires value")
+      await tab.automation.type(target, params.value, options)
+    } else if (params.command === "tab.automation.hover") await tab.automation.hover(target, options)
+    else if (params.command === "tab.automation.select") {
+      const values = params.values ?? (params.value === undefined ? [] : [params.value])
+      if (!values.length) throw new Error("tab.automation.select requires values")
+      await tab.automation.select(target, [...values], options)
+    } else if (params.command === "tab.automation.check") await tab.automation.check(target, options)
+    else if (params.command === "tab.automation.uncheck") await tab.automation.uncheck(target, options)
+    else if (params.command === "tab.automation.scrollIntoView") {
+      await tab.automation.scrollIntoView(target, options)
+    } else if (params.command === "tab.automation.getText") {
+      return tab.automation.getTextResult(target, options)
+    } else if (params.command === "tab.automation.getHtml") {
+      return tab.automation.getHtmlResult(target, options)
+    } else if (params.command === "tab.automation.getValue") {
+      return { value: await tab.automation.getValue(target, options) }
+    } else if (params.command === "tab.automation.getAttribute") {
+      if (!params.attribute) throw new Error("tab.automation.getAttribute requires attribute")
+      return { value: await tab.automation.getAttribute(target, params.attribute, options) }
+    } else if (params.command === "tab.automation.getBox") {
+      return { box: await tab.automation.getBox(target, options) }
+    } else if (params.command === "tab.automation.getStyles") {
+      return { styles: await tab.automation.getStyles(target, options) }
+    } else if (params.command === "tab.automation.count") {
+      return { count: await tab.automation.count(target, options) }
+    } else if (params.command === "tab.automation.isVisible") {
+      return { value: await tab.automation.isVisible(target, options) }
+    } else if (params.command === "tab.automation.isEnabled") {
+      return { value: await tab.automation.isEnabled(target, options) }
+    } else if (params.command === "tab.automation.isChecked") {
+      return { value: await tab.automation.isChecked(target, options) }
+    } else {
+      throw new Error(`Unsupported browser automation command: ${params.command}`)
+    }
+    return { value: true }
   }
   if (params.command.startsWith("tab.domCua.")) {
     if (params.command === "tab.domCua.getVisibleDom") return { dom: await tab.dom_cua.get_visible_dom() }
@@ -601,7 +640,7 @@ async function executeBrowserCommand(
   }
   if (params.command === "tab.dialog.get") return { dialog: await tab.dialog() }
   if (params.command === "tab.dialog.wait") {
-    return { dialog: await tab.waitForDialog(params.timeout, params.locator) }
+    return { dialog: await tab.waitForDialog(params.timeout, params.target ? automationTarget(params.target) : undefined) }
   }
   if (params.command === "tab.dialog.handle") {
     if (!params.dialogId || params.accept === undefined) {
@@ -611,7 +650,12 @@ async function executeBrowserCommand(
     return { handled: true }
   }
   if (params.command === "tab.fileChooser.wait") {
-    return { fileChooser: await tab.waitForFileChooser(params.timeout, params.locator) }
+    return {
+      fileChooser: await tab.waitForFileChooser(
+        params.timeout,
+        params.target ? automationTarget(params.target) : undefined,
+      ),
+    }
   }
   if (params.command === "tab.fileChooser.setFiles") {
     if (!params.chooserId || !params.filePaths?.length) {
@@ -620,7 +664,12 @@ async function executeBrowserCommand(
     return { value: await tab.setFiles(params.chooserId, [...params.filePaths]) }
   }
   if (params.command === "tab.download.wait") {
-    return { download: await tab.waitForDownload(params.timeout, params.locator) }
+    return {
+      download: await tab.waitForDownload(
+        params.timeout,
+        params.target ? automationTarget(params.target) : undefined,
+      ),
+    }
   }
   if (params.command === "tab.download.get") {
     if (!params.downloadId) throw new Error("tab.download.get requires downloadId")
@@ -642,7 +691,8 @@ async function executeBrowserCommand(
     return { written: true }
   }
   if (params.command === "tab.dev.cdp") {
-    if (!params.method || !approvedOrigin) throw new Error("tab.dev.cdp requires method and an approved origin")
+    if (!params.method) throw new Error("tab.dev.cdp requires a top-level method such as Runtime.evaluate")
+    if (!approvedOrigin) throw new Error("tab.dev.cdp requires an approved origin")
     const capability = await tab.capabilities.get("cdp")
     if (!(capability instanceof CdpCapability)) throw new Error("The current browser tab does not support CDP")
     return {
@@ -718,6 +768,22 @@ async function resolveCurrentOrigin(client: BrowserClient, params: BrowserParame
 
 function isMutating(params: BrowserParameters) {
   const command = params.command
+  if (command.startsWith("tab.automation.")) {
+    return ![
+      "tab.automation.count",
+      "tab.automation.getAttribute",
+      "tab.automation.getBox",
+      "tab.automation.getHtml",
+      "tab.automation.getStyles",
+      "tab.automation.getText",
+      "tab.automation.getValue",
+      "tab.automation.isChecked",
+      "tab.automation.isEnabled",
+      "tab.automation.isVisible",
+      "tab.automation.snapshot",
+      "tab.automation.waitFor",
+    ].includes(command)
+  }
   if (command.startsWith("tab.cua.")) return true
   if (command.startsWith("tab.domCua.")) return command !== "tab.domCua.getVisibleDom"
   if (
@@ -730,32 +796,25 @@ function isMutating(params: BrowserParameters) {
     command === "tab.dialog.handle" ||
     command === "tab.forward" ||
     command === "tab.reload" ||
-    (command === "tab.dialog.wait" && params.locator) ||
+    (command === "tab.dialog.wait" && params.target) ||
     command === "tab.fileChooser.setFiles" ||
-    (command === "tab.fileChooser.wait" && params.locator) ||
-    (command === "tab.download.wait" && params.locator) ||
-    (command === "tab.playwright.expectNavigation" && params.locator)
+    (command === "tab.fileChooser.wait" && params.target) ||
+    (command === "tab.download.wait" && params.target)
   ) {
     return true
   }
-  if (!command.startsWith("tab.playwright.locator.")) return false
-  return ![
-    "tab.playwright.locator.count",
-    "tab.playwright.locator.allTextContents",
-    "tab.playwright.locator.evaluate",
-    "tab.playwright.locator.getAttribute",
-    "tab.playwright.locator.innerText",
-    "tab.playwright.locator.isEnabled",
-    "tab.playwright.locator.isVisible",
-    "tab.playwright.locator.textContent",
-    "tab.playwright.locator.waitFor",
-  ].includes(command)
+  return false
 }
 
 function requirePoint(params: BrowserParameters) {
   if (params.x === undefined || params.y === undefined) {
     throw new Error(`${params.command} requires x and y`)
   }
+}
+
+function automationTarget(target: BrowserParameters["target"]): BrowserAutomationTarget {
+  if (!target) throw new Error("Browser automation target is required")
+  return target as BrowserAutomationTarget
 }
 
 function findScreenshot(input: unknown): BrowserScreenshot | undefined {

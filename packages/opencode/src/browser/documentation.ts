@@ -7,7 +7,7 @@ const DOCUMENTS: Record<string, string> = {
   "api-use-behavior": [
     "# API use",
     "",
-    "Prefer Playwright locators grounded in a current DOM snapshot. Use CUA only when geometry matters, and collect only the cheapest state check needed after an action.",
+    "Prefer automation refs grounded in a current semantic snapshot. Use CUA only when geometry matters, and collect only the cheapest state check needed after an action.",
   ].join("\n"),
   "browser-control-interruption": [
     "# Browser control interruption",
@@ -32,12 +32,12 @@ const DOCUMENTS: Record<string, string> = {
   "file-uploads": [
     "# File uploads",
     "",
-    "Arm `tab.playwright.waitForEvent(\"filechooser\")`, trigger the chooser, then call `setFiles()` with explicit file paths.",
+    "Pass an automation target to `waitForFileChooser()`, then call `setFiles()` with explicit file paths.",
   ].join("\n"),
-  playwright: [
-    "# Playwright",
+  automation: [
+    "# Automation",
     "",
-    "Use `tab.playwright.domSnapshot()` before semantic interaction and reuse snapshot refs as `aria-ref=eN` selectors.",
+    "Use `tab.automation.snapshot()` before semantic interaction and reuse refs with their snapshotId.",
     "Routine `tab.goto()` already waits for navigation readiness; do not add `networkidle` waits.",
   ].join("\n"),
   screenshots: [
@@ -76,7 +76,7 @@ export class BrowserDocumentation {
       "# Browser API",
       "",
       "`agent.browsers` selects a browser. A selected browser exposes `tabs`, `user`, `capabilities`, `documentation()`, and `nameSession()`.",
-      "A tab exposes `playwright`, `dom_cua`, `cua`, `content`, `clipboard`, `dev`, and `capabilities`, plus navigation, screenshot, dialog, title, URL, and lifecycle methods.",
+      "A tab exposes `automation`, `dom_cua`, `cua`, `clipboard`, `dev`, and `capabilities`, plus navigation, screenshot, dialog, title, URL, and lifecycle methods.",
     ].join("\n")
   }
 
@@ -93,7 +93,7 @@ export class BrowserDocumentation {
       DOCUMENTS["all-tabs-cleanup"],
       DOCUMENTS["browser-control-interruption"],
       DOCUMENTS["api-use-behavior"],
-      DOCUMENTS.playwright,
+      DOCUMENTS.automation,
     ]
   }
 

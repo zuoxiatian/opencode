@@ -19,29 +19,8 @@ export class AriaSnapshotService {
             await send("Accessibility.enable")
             const snapshotId = crypto.randomUUID()
             const main = readAxNodes(await send("Accessibility.getFullAXTree"))
-            const targets = readTargetInfos(await send("Target.getTargets"))
-            const frameIds = readFrameIds(await send("Page.getFrameTree"))
             const inaccessibleFrames: BrowserFrameRef[] = []
             const frames: Array<{ nodes: Record<string, unknown>[]; targetId?: string }> = [{ nodes: main }]
-
-            for (const target of targets.filter((item) => item.type === "iframe" && frameIds.has(item.targetId))) {
-                const attached = await send("Target.attachToTarget", { flatten: true, targetId: target.targetId })
-                    .then(asRecord)
-                    .catch((): Record<string, unknown> => ({}))
-                if (typeof attached.sessionId !== "string") {
-                    inaccessibleFrames.push({ frameId: target.targetId, url: target.url })
-                    continue
-                }
-                const nodes = await send("Accessibility.getFullAXTree", {}, attached.sessionId)
-                    .then(readAxNodes)
-                    .catch(() => undefined)
-                await send("Target.detachFromTarget", { sessionId: attached.sessionId }).catch(() => undefined)
-                if (!nodes) {
-                    inaccessibleFrames.push({ frameId: target.targetId, url: target.url })
-                    continue
-                }
-                frames.push({ nodes, targetId: target.targetId })
-            }
 
             const compact = frames.flatMap((frame) => frame.nodes.map((node) => ({ frame, node })))
                 .filter(({ node }) => includeAxNode(node))
@@ -131,32 +110,6 @@ function readAxNodes(input: unknown) {
     return Array.isArray(result.nodes)
         ? result.nodes.filter((node): node is Record<string, unknown> => typeof node === "object" && node !== null)
         : []
-}
-
-function readFrameIds(input: unknown) {
-    const ids = new Set<string>()
-    const visit = (value: unknown) => {
-        const tree = asRecord(value)
-        const frame = asRecord(tree.frame)
-        if (typeof frame.id === "string") ids.add(frame.id)
-        if (Array.isArray(tree.childFrames)) tree.childFrames.forEach(visit)
-    }
-    visit(asRecord(input).frameTree)
-    return ids
-}
-
-function readTargetInfos(input: unknown) {
-    const result = asRecord(input)
-    if (!Array.isArray(result.targetInfos)) return []
-    return result.targetInfos.flatMap((value) => {
-        const target = asRecord(value)
-        if (
-            typeof target.targetId !== "string"
-            || typeof target.type !== "string"
-            || typeof target.url !== "string"
-        ) return []
-        return [{ targetId: target.targetId, type: target.type, url: target.url }]
-    })
 }
 
 function includeAxNode(node: Record<string, unknown>) {

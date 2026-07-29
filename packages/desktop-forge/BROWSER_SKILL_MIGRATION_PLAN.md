@@ -1,5 +1,9 @@
 # Browser Read Skill 化执行方案
 
+> 历史文档：其中 Browser Protocol v2、只读 evaluate 与 `tab.playwright.*`
+> 设计已由 `AGENT_BROWSER_TARGET_ARCHITECTURE.md` 的 Protocol v3 typed getter
+> 架构取代，不再作为当前实现或验收依据。
+
 ## 1. 结论
 
 Browser Core 只提供通用浏览器能力，不再提供文章、账号、发布时间、平台识别或批量内容读取等业务接口。

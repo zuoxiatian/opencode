@@ -1,29 +1,29 @@
 import type {
   BrowserCommandData,
+  BrowserAutomationTarget,
   BrowserCapabilityInfo,
-  BrowserLocator,
   BrowserScreenshotInput,
   BrowserTabCapabilityId,
   BrowserTabState,
 } from "@opencode-ai/browser-protocol"
 import { CapabilityCollection, tabCapabilities } from "./capabilities"
+import { AutomationAPI } from "./automation"
 import { ClipboardAPI } from "./clipboard"
 import { CuaAPI } from "./cua"
 import { DevAPI } from "./dev"
 import { createDialog } from "./dialog"
 import { DomCuaAPI } from "./dom-cua"
-import { PlaywrightAPI } from "./playwright"
 import { requireBrowserResult } from "./result"
 import type { BrowserTransport } from "./transport"
 
 export class TabHandle {
+  readonly automation: AutomationAPI
   readonly capabilities: CapabilityCollection
   readonly clipboard: ClipboardAPI
   readonly cua: CuaAPI
   readonly dev: DevAPI
   readonly domCua: DomCuaAPI
   readonly dom_cua: DomCuaAPI
-  readonly playwright: PlaywrightAPI
 
   constructor(
     private readonly transport: BrowserTransport,
@@ -41,12 +41,12 @@ export class TabHandle {
           : capability,
       ),
     )
+    this.automation = new AutomationAPI(transport, browserId, id)
     this.clipboard = new ClipboardAPI(transport, browserId, id)
     this.cua = new CuaAPI(transport, browserId, id)
     this.dev = new DevAPI(transport, browserId, id)
     this.domCua = new DomCuaAPI(transport, browserId, id)
     this.dom_cua = this.domCua
-    this.playwright = new PlaywrightAPI(transport, browserId, id)
   }
 
   activate() {
@@ -158,7 +158,7 @@ export class TabHandle {
       : undefined)
   }
 
-  waitForDialog(timeout?: number, trigger?: BrowserLocator) {
+  waitForDialog(timeout?: number, trigger?: BrowserAutomationTarget) {
     return this.transport.command<BrowserCommandData>({
       browserId: this.browserId,
       command: { name: "tab.dialog.wait", timeout, trigger },
@@ -178,7 +178,7 @@ export class TabHandle {
     }).then(() => undefined)
   }
 
-  waitForFileChooser(timeout?: number, trigger?: BrowserLocator) {
+  waitForFileChooser(timeout?: number, trigger?: BrowserAutomationTarget) {
     return this.transport.command<BrowserCommandData>({
       browserId: this.browserId,
       command: { name: "tab.fileChooser.wait", timeout, trigger },
@@ -194,7 +194,7 @@ export class TabHandle {
     }).then((result) => requireBrowserResult(result.data.value, "file chooser result"))
   }
 
-  waitForDownload(timeout?: number, trigger?: BrowserLocator) {
+  waitForDownload(timeout?: number, trigger?: BrowserAutomationTarget) {
     return this.transport.command<BrowserCommandData>({
       browserId: this.browserId,
       command: { name: "tab.download.wait", timeout, trigger },

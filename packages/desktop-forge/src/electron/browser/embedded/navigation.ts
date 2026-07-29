@@ -4,7 +4,6 @@ import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import type { EmbeddedTab } from "./tab"
 import type { EmbeddedTabStore } from "./tab-store"
-import { onDebuggerMessage } from "./automation/cdp"
 import { expectNavigation } from "./automation/waits"
 
 export class NavigationService {
@@ -425,7 +424,7 @@ function navigationCompletion<T>(tab: EmbeddedTab, promise: Promise<T>, signal?:
             cleanup()
             reject(error)
         }
-        const dialog = (_event: Electron.Event, method: string) => {
+        const dialog = (method: string) => {
             if (method !== "Page.javascriptDialogOpening") return
             cleanup()
             reject(new BrowserRuntimeException("DIALOG_REQUIRED", "Navigation is waiting for a dialog"))
@@ -443,7 +442,7 @@ function navigationCompletion<T>(tab: EmbeddedTab, promise: Promise<T>, signal?:
             webContents.removeListener("destroyed", closed)
             signal?.removeEventListener("abort", cancel)
         }
-        removeDebuggerListener = onDebuggerMessage(webContents, dialog, () => !tab.closed)
+        removeDebuggerListener = tab.debuggerTransport.onMessage(dialog)
         webContents.once("destroyed", closed)
         signal?.addEventListener("abort", cancel, { once: true })
         if (signal?.aborted) {

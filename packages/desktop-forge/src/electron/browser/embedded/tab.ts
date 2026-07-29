@@ -7,12 +7,13 @@ import type {
     BrowserLoadError,
     BrowserTabOwnership,
 } from "@opencode-ai/browser-protocol"
+import type { TabDebuggerTransport } from "../agent-browser/debugger-transport"
 
 export interface EmbeddedTab {
     cdpEvents: BrowserCdpEvent[]
     cdpSequence: number
-    cdpSessions: Set<string>
     closed: boolean
+    debuggerTransport: TabDebuggerTransport
     debuggerQueue: Promise<void>
     debuggerReady: Promise<void>
     dialog: BrowserDialog | null

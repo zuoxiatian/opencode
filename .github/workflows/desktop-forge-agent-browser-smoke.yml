@@ -1,0 +1,76 @@
+name: desktop-forge agent-browser packaged smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-forge-agent-browser-smoke.yml"
+      - "bun.lock"
+      - "packages/browser-protocol/**"
+      - "packages/desktop-forge/**"
+      - "packages/opencode/src/browser/**"
+      - "packages/opencode/src/tool/browser.ts"
+      - "packages/sdk/js/src/v2/gen/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  packaged-smoke:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-15
+            target: darwin-arm64
+            platform: darwin
+            arch: arm64
+          - host: macos-15-intel
+            target: darwin-x64
+            platform: darwin
+            arch: x64
+          - host: windows-2025
+            target: win32-x64
+            platform: win32
+            arch: x64
+          - host: ubuntu-24.04
+            target: linux-x64
+            platform: linux
+            arch: x64
+    runs-on: ${{ matrix.host }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/desktop-forge
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Install Linux display runner
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+      - name: Prepare pinned agent-browser
+        run: bun run agent-browser:prepare -- ${{ matrix.target }}
+
+      - name: Package application
+        run: bun run package:prepared -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+        env:
+          DESKTOP_FORGE_AD_HOC_SIGNING: ${{ runner.os == 'macOS' && '1' || '' }}
+          DESKTOP_FORGE_SKIP_NOTARIZATION: ${{ runner.os == 'macOS' && '1' || '' }}
+
+      - name: Run native packaged smoke
+        if: runner.os != 'Linux'
+        run: bun run packaged:smoke -- --target ${{ matrix.target }}
+
+      - name: Run native packaged smoke with Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum bun run packaged:smoke -- --target ${{ matrix.target }}

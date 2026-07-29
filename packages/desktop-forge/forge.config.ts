@@ -29,6 +29,13 @@ loadLocalSigningEnv()
 
 const config: ForgeConfig = {
   outDir: "release",
+  hooks: {
+    postPackage: async (_forgeConfig, result) => {
+      if (result.platform !== "darwin") return
+      await Promise.all(result.outputPaths.map((outputPath) =>
+        verifyPackagedMacAgentBrowser(outputPath, result.arch)))
+    },
+  },
   packagerConfig: {
     appBundleId: APP_ID,
     appCategoryType: "public.app-category.productivity",
@@ -134,6 +141,8 @@ const config: ForgeConfig = {
 export default config
 
 function macSignOptions() {
+  if (process.env.DESKTOP_FORGE_AD_HOC_SIGNING === "1") return false
+
   const identity = process.env.CSC_NAME
   const keychain = process.env.CSC_KEYCHAIN
 
@@ -164,6 +173,9 @@ function isMacCodeSignTarget(filePath: string) {
   if (resourcePath.includes(".app/Contents/MacOS/")) return true
   if (resourcePath.includes(".app/Contents/Frameworks/")) return path.extname(filePath) === ""
   if (resourcePath.includes(".app/Contents/Resources/bin/")) return path.extname(filePath) === ""
+  if (resourcePath.includes(".app/Contents/Resources/agent-browser/")) {
+    return path.extname(filePath) === ""
+  }
   if (!resourcePath.includes(".app/Contents/Resources/runtimes/")) return false
 
   return resourcePath.includes("/bin/")
@@ -209,6 +221,8 @@ function parseEnvLine(line: string): [string, string] {
 }
 
 function macNotarizeOptions(): NotaryToolCredentials | undefined {
+  if (process.env.DESKTOP_FORGE_SKIP_NOTARIZATION === "1") return undefined
+
   const keychainProfile = process.env.APPLE_KEYCHAIN_PROFILE
   if (keychainProfile) {
     return process.env.APPLE_KEYCHAIN
@@ -274,7 +288,28 @@ function copyPlatformResources(
 async function copyPlatformResourceFiles(buildPath: string, platform: string, arch: string) {
   await copyPlatformRuntime(buildPath, platform, arch)
   await copyOpencodeBinary(buildPath, platform, arch)
+  await copyAgentBrowser(buildPath, platform, arch)
   await copyMacAppIcon(buildPath, platform)
+}
+
+async function copyAgentBrowser(buildPath: string, platform: string, arch: string) {
+  const key = `${platform}-${arch}`
+  const source = path.resolve(packageDir, "resources", "agent-browser", key)
+  if (!existsSync(source)) throw new Error(`Missing prepared agent-browser resources: ${source}`)
+  const destination = path.join(resourcesPath(buildPath, platform), "agent-browser", key)
+  await mkdir(path.dirname(destination), { recursive: true })
+  await cp(source, destination, { force: true, recursive: true })
+  await cp(
+    path.resolve(packageDir, "resources", "agent-browser", "manifest.json"),
+    path.join(resourcesPath(buildPath, platform), "agent-browser", "manifest.json"),
+    { force: true },
+  )
+  if (platform !== "win32") {
+    await Promise.all([
+      chmod(path.join(destination, "agent-browser"), 0o755),
+      chmod(path.join(destination, "desktop-forge-agent-browser-provider"), 0o755),
+    ])
+  }
 }
 
 async function copyPlatformRuntime(buildPath: string, platform: string, arch: string) {
@@ -341,4 +376,53 @@ function opencodeBinarySource(platform: string, arch: string) {
 function resourcesPath(buildPath: string, platform: string) {
   if (platform === "darwin") return path.join(buildPath, `${APP_NAME}.app`, "Contents", "Resources")
   return path.join(buildPath, "resources")
+}
+
+async function verifyPackagedMacAgentBrowser(outputPath: string, arch: string) {
+  const appPath = outputPath.endsWith(".app")
+    ? outputPath
+    : path.join(outputPath, `${APP_NAME}.app`)
+  const directory = path.join(
+    appPath,
+    "Contents",
+    "Resources",
+    "agent-browser",
+    `darwin-${arch}`,
+  )
+  if (process.env.DESKTOP_FORGE_AD_HOC_SIGNING === "1") {
+    await Promise.all(
+      ["agent-browser", "desktop-forge-agent-browser-provider"].map((name) =>
+        execFileAsync("codesign", [
+          "--force",
+          "--sign",
+          "-",
+          "--entitlements",
+          macEntitlementsInherit,
+          path.join(directory, name),
+        ])),
+    )
+    await execFileAsync("codesign", [
+      "--force",
+      "--deep",
+      "--sign",
+      "-",
+      "--entitlements",
+      macEntitlements,
+      appPath,
+    ])
+  }
+  // A freshly used Keychain identity can remain trusted briefly even when its
+  // certificate/private-key association is broken. Re-verify after that cache
+  // window so a package cannot pass the hook and fail immediately afterward.
+  await new Promise((resolve) => setTimeout(resolve, 1_000))
+  await Promise.all([
+    execFileAsync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]),
+    ...["agent-browser", "desktop-forge-agent-browser-provider"].map((name) =>
+      execFileAsync("codesign", [
+        "--verify",
+        "--strict",
+        "--verbose=2",
+        path.join(directory, name),
+      ])),
+  ])
 }

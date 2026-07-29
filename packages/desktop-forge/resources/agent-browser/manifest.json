@@ -1,0 +1,30 @@
+{
+  "version": "0.33.0",
+  "npm": {
+    "integrity": "sha512-1N5asChiJ8VeqBa8vw/b7g/mw5qelWuowKB6/PNI8CRBLFtNPqgdmzRZyzbRJgajsoB9sBTC1ORpPmIay1ulzQ==",
+    "sha256": "65d732a7a0c52ee4f59025ef057ef3b64d86aaa76262ba64f48ac1178889cf83",
+    "url": "https://registry.npmjs.org/agent-browser/-/agent-browser-0.33.0.tgz"
+  },
+  "artifacts": {
+    "darwin-arm64": {
+      "file": "agent-browser-darwin-arm64",
+      "sha256": "093d270fd59249ff7afa9dd7b61bc3daa5305201cb53fc577921dfaa7f315d08"
+    },
+    "darwin-x64": {
+      "file": "agent-browser-darwin-x64",
+      "sha256": "91dcc13b0c0631d7552ae2b40b8562bb6afd5dd3e6d8ad47eefdd0f62bb9bca9"
+    },
+    "linux-arm64": {
+      "file": "agent-browser-linux-arm64",
+      "sha256": "032318b9ee5338d6ced6658f40f1a2c257bce994614218db3165c0fd28e55eed"
+    },
+    "linux-x64": {
+      "file": "agent-browser-linux-x64",
+      "sha256": "d6b8b5ac3e9f87c68704cc4f74a02b28c9c8097e24d44399e9d0d1ccb5703ab9"
+    },
+    "win32-x64": {
+      "file": "agent-browser-win32-x64.exe",
+      "sha256": "7d83932915ac53808c5b3057162204c2736bccf819c0f53cc8e5d36f480a908d"
+    }
+  }
+}

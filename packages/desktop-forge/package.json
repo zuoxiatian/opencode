@@ -7,6 +7,7 @@
   "private": true,
   "scripts": {
     "start": "electron-forge start",
+    "agent-browser:prepare": "bun run script/prepare-agent-browser.ts",
     "runtime:install": "bun run script/install-runtimes.ts",
     "assets:prepare": "bun run script/prepare-assets.ts all",
     "assets:opencode": "bun run script/prepare-assets.ts opencode",
@@ -18,6 +19,8 @@
     "assets:linux": "bun run script/prepare-assets.ts linux",
     "dmg:native": "bun run script/prepare-dmg-native.ts",
     "package": "bun run assets:prepare && electron-forge package",
+    "package:prepared": "electron-forge package",
+    "packaged:smoke": "bun run script/smoke-packaged.ts",
     "make": "bun run assets:prepare && electron-forge make",
     "make:all": "bun run script/prepare-assets.ts all && bun run dmg:native && electron-forge make --platform darwin --arch x64 --targets dmg && electron-forge make --platform darwin --arch arm64 --targets dmg && electron-forge make --platform win32 --arch x64 --targets squirrel,zip && electron-forge make --platform linux --arch x64",
     "make:win": "bun run script/prepare-assets.ts win && electron-forge make --platform win32 --arch x64 --targets squirrel,zip",
@@ -50,6 +53,7 @@
     "@tailwindcss/vite": "^4.0.0",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/node": "catalog:",
+    "@types/ws": "8.18.1",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
     "electron": "42.3.2",
@@ -65,13 +69,11 @@
     "@opencode-ai/browser-protocol": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
-    "acorn": "8.16.0",
     "electron-squirrel-startup": "^1.0.1",
     "extract-zip": "^2.0.1",
-    "happy-dom": "20.9.0",
     "lucide-solid": "1.14.0",
     "pdfjs-dist": "5.4.530",
-    "playwright-core": "1.59.1",
-    "solid-js": "^1.9.13"
+    "solid-js": "^1.9.13",
+    "ws": "8.18.0"
   }
 }

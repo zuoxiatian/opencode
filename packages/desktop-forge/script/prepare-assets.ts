@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { bun, opencodeDir, packageDir } from "./lib/paths.ts"
 import { copyOpencodeBinaries } from "./lib/opencode-binaries.ts"
+import { prepareAgentBrowser } from "./lib/agent-browser.ts"
 import { run } from "./lib/run.ts"
 import { isPrepareTarget, packageTargetIds, type PrepareTarget } from "./lib/targets.ts"
 
@@ -65,6 +66,7 @@ async function prepareAssets(target: PrepareTarget) {
   }
 
   await copyOpencodeBinaries(packageTargetIds[target], options.skipOpencode)
+  await prepareAgentBrowser(packageTargetIds[target])
 
   if (target === "opencode" || options.skipRuntimes) return
 

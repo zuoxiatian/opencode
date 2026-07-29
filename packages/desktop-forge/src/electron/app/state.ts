@@ -20,6 +20,7 @@ export type ResolvedTheme = Exclude<ThemeMode, "system">
 
 export interface MainState {
     browserRuntime: BrowserRuntime | null
+    browserRuntimeDestroy: Promise<void> | null
     browserTransport: BrowserTransportServer | null
     cachedShellEnv: NodeJS.ProcessEnv | null
     closeDirectoryWatcher: (watcherID: string) => void
@@ -37,6 +38,7 @@ export function createMainState(): MainState {
 
     return {
         browserRuntime: null,
+        browserRuntimeDestroy: null,
         browserTransport: null,
         cachedShellEnv: null,
         closeDirectoryWatcher: (watcherID) => {

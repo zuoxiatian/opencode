@@ -59,12 +59,21 @@ export async function createMainWindow(state: MainState) {
     window.on("ready-to-show", () => window.show())
     window.on("closed", () => {
         state.closeDirectoryWatchers()
-        void state.browserRuntime?.destroy()
+        const destroy = state.browserRuntime?.destroy()
         state.browserRuntime = null
+        if (destroy) {
+            state.browserRuntimeDestroy = destroy
+            const clearDestroy = () => {
+                if (state.browserRuntimeDestroy === destroy) state.browserRuntimeDestroy = null
+            }
+            void destroy.then(clearDestroy, clearDestroy)
+        }
         if (state.window === window) state.window = null
     })
 
+    await state.browserRuntimeDestroy?.catch(() => undefined)
     await state.browserRuntime?.destroy()
+    state.browserRuntimeDestroy = null
     state.browserRuntime = createBrowserRuntime(window)
     state.browserTransport ??= await startBrowserTransportServer(() => state.browserRuntime)
     window.webContents.setWindowOpenHandler(({ url }) => {

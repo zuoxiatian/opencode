@@ -3,7 +3,7 @@ import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import type { EmbeddedTab } from "./tab"
 import type { EmbeddedTabStore } from "./tab-store"
-import { onDebuggerMessage, withDebugger } from "./automation/cdp"
+import { withDebugger } from "./automation/cdp"
 
 interface PendingChooser extends BrowserFileChooser {
     backendNodeId: number
@@ -53,14 +53,11 @@ export class FileChooserService {
         }
         const generation = tab.generation
         return new Promise<BrowserFileChooser>((resolve, reject) => {
-            const browserDebugger = webContents.debugger
-            const attached = browserDebugger.isAttached()
-            if (!attached) browserDebugger.attach("1.3")
+            tab.debuggerTransport.ensureAttached()
             let removeDebuggerListener: () => void = () => undefined
             const sender = (method: string, params?: Record<string, unknown>) =>
-                browserDebugger.sendCommand(method, params)
+                tab.debuggerTransport.sendCommand(method, params)
             const message = (
-                _event: Electron.Event,
                 method: string,
                 params: Record<string, unknown>,
             ) => {
@@ -124,11 +121,8 @@ export class FileChooserService {
                 if (disable && !webContents.isDestroyed()) {
                     void sender("Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => undefined)
                 }
-                if (!attached && !webContents.isDestroyed() && browserDebugger.isAttached()) {
-                    browserDebugger.detach()
-                }
             }
-            removeDebuggerListener = onDebuggerMessage(webContents, message, () => !tab.closed)
+            removeDebuggerListener = tab.debuggerTransport.onMessage(message)
             webContents.once("destroyed", closed)
             webContents.on("did-start-navigation", replaced)
             signal?.addEventListener("abort", cancel, { once: true })

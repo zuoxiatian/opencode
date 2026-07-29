@@ -14,6 +14,30 @@ export const BROWSER_COMMAND_NAMES = [
   "browser.viewport.reset",
   "browser.viewport.set",
   "tab.activate",
+  "tab.automation.check",
+  "tab.automation.click",
+  "tab.automation.count",
+  "tab.automation.dblclick",
+  "tab.automation.drag",
+  "tab.automation.fill",
+  "tab.automation.focus",
+  "tab.automation.getAttribute",
+  "tab.automation.getBox",
+  "tab.automation.getHtml",
+  "tab.automation.getStyles",
+  "tab.automation.getText",
+  "tab.automation.getValue",
+  "tab.automation.hover",
+  "tab.automation.isChecked",
+  "tab.automation.isEnabled",
+  "tab.automation.isVisible",
+  "tab.automation.press",
+  "tab.automation.scrollIntoView",
+  "tab.automation.select",
+  "tab.automation.snapshot",
+  "tab.automation.type",
+  "tab.automation.uncheck",
+  "tab.automation.waitFor",
   "tab.back",
   "tab.clipboard.read",
   "tab.clipboard.readText",
@@ -48,34 +72,6 @@ export const BROWSER_COMMAND_NAMES = [
   "tab.forward",
   "tab.goto",
   "tab.mark",
-  "tab.playwright.locator.allTextContents",
-  "tab.playwright.locator.check",
-  "tab.playwright.locator.click",
-  "tab.playwright.locator.count",
-  "tab.playwright.locator.dblclick",
-  "tab.playwright.locator.downloadMedia",
-  "tab.playwright.locator.evaluate",
-  "tab.playwright.locator.fill",
-  "tab.playwright.locator.getAttribute",
-  "tab.playwright.locator.innerText",
-  "tab.playwright.locator.isEnabled",
-  "tab.playwright.locator.isVisible",
-  "tab.playwright.locator.press",
-  "tab.playwright.locator.selectOption",
-  "tab.playwright.locator.setChecked",
-  "tab.playwright.locator.textContent",
-  "tab.playwright.locator.type",
-  "tab.playwright.locator.uncheck",
-  "tab.playwright.locator.waitFor",
-  "tab.playwright.expectNavigation",
-  "tab.playwright.evaluate",
-  "tab.playwright.domSnapshot",
-  "tab.playwright.html",
-  "tab.playwright.elementInfo",
-  "tab.playwright.elementScreenshot",
-  "tab.playwright.waitForLoadState",
-  "tab.playwright.waitForTimeout",
-  "tab.playwright.waitForURL",
   "tab.reload",
   "tab.screenshot",
   "tab.state",
@@ -206,96 +202,52 @@ function validateCommand(command: Record<string, unknown>, name: string) {
     readScreenshot(command)
     return
   }
-  if (name === "tab.playwright.waitForURL") {
-    readString(command.url, "command.url")
-    readLoadState(command.waitUntil, "command.waitUntil", true)
-    readTimeout(command.timeout)
-    return
-  }
-  if (name === "tab.playwright.evaluate") {
-    readString(command.expression, "command.expression")
-    readTimeout(command.timeout)
-    return
-  }
-  if (name === "tab.playwright.elementInfo" || name === "tab.playwright.elementScreenshot") {
-    readNumber(command.x, "command.x")
-    readNumber(command.y, "command.y")
-    if (command.includeNonInteractable !== undefined) {
-      readBoolean(command.includeNonInteractable, "command.includeNonInteractable")
+  if (name === "tab.automation.snapshot") {
+    if (command.interactiveOnly !== undefined) {
+      readBoolean(command.interactiveOnly, "command.interactiveOnly")
     }
     return
   }
-  if (name === "tab.playwright.expectNavigation") {
+  if (name.startsWith("tab.automation.")) {
     readTimeout(command.timeout)
-    readOptionalString(command.url, "command.url")
-    readLoadState(command.waitUntil, "command.waitUntil", true)
-    if (command.trigger !== undefined) readLocator(command.trigger)
-    return
-  }
-  if (name === "tab.playwright.waitForLoadState") {
-    if (!readLoadState(command.state, "command.state")) throw new Error("command.state is required")
-    readTimeout(command.timeout)
-    return
-  }
-  if (name === "tab.playwright.waitForTimeout") {
-    if (command.timeout === undefined) throw new Error("command.timeout is required")
-    readTimeout(command.timeout)
-    return
-  }
-  if (name.startsWith("tab.playwright.locator.")) {
-    readLocator(command.locator)
-    readTimeout(command.timeout)
-    readOptionalString(command.attribute, "command.attribute")
-    readOptionalString(command.expression, "command.expression")
-    readStringArray(command.filePaths, "command.filePaths")
-    readButton(command.button)
-    if (command.force !== undefined) readBoolean(command.force, "command.force")
-    readOptionalString(command.key, "command.key")
-    const modifiers = readStringArray(command.modifiers, "command.modifiers")
-    if (modifiers?.some((modifier) => !["alt", "control", "meta", "shift"].includes(modifier))) {
-      throw new Error("command.modifiers contains an unsupported key")
-    }
-    if (command.options !== undefined) {
-      if (!Array.isArray(command.options) || !command.options.length || command.options.length > 100) {
-        throw new Error("command.options must contain between 1 and 100 items")
+    if (name === "tab.automation.waitFor") {
+      if (typeof command.timeout === "number" && command.timeout > 120_000) {
+        throw new Error("command.timeout must not exceed 120000 milliseconds for automation waits")
       }
-      command.options.forEach((input, index) => {
-        const option = readRecord(input, `command.options[${index}]`)
-        const label = readOptionalString(option.label, `command.options[${index}].label`)
-        const value = readOptionalString(option.value, `command.options[${index}].value`)
-        const optionIndex = readOptionalNumber(option.index, `command.options[${index}].index`)
-        if (optionIndex !== undefined && (!Number.isInteger(optionIndex) || optionIndex < 0)) {
-          throw new Error(`command.options[${index}].index must be a non-negative integer`)
-        }
-        if (label === undefined && value === undefined && optionIndex === undefined) {
-          throw new Error(`command.options[${index}] requires value, label, or index`)
-        }
-      })
+      if ([
+        command.target !== undefined,
+        command.text !== undefined,
+        command.url !== undefined,
+      ].filter(Boolean).length !== 1) {
+        throw new Error("command requires exactly one of target, text, or url")
+      }
+      if (command.target !== undefined) readAutomationTarget(command.target)
+      if (command.text !== undefined) readString(command.text, "command.text")
+      if (command.url !== undefined) readString(command.url, "command.url")
+      return
     }
-    if (command.checked !== undefined) readBoolean(command.checked, "command.checked")
-    if (
-      command.state !== undefined
-      && command.state !== "attached"
-      && command.state !== "detached"
-      && command.state !== "hidden"
-      && command.state !== "visible"
-    ) {
-      throw new Error("command.state is invalid")
+    if (name === "tab.automation.press") {
+      readString(command.key, "command.key")
+      if (command.target !== undefined) readAutomationTarget(command.target)
+      return
     }
-    if (command.value !== undefined && typeof command.value !== "string") {
-      throw new Error("command.value must be a string")
+    if (name === "tab.automation.drag") {
+      readAutomationTarget(command.source, "command.source")
+      readAutomationTarget(command.target)
+      return
     }
-    if (name === "tab.playwright.locator.getAttribute") {
+    readAutomationTarget(command.target)
+    if (name === "tab.automation.fill" || name === "tab.automation.type") {
+      readStringAllowEmpty(command.value, "command.value")
+    }
+    if (name === "tab.automation.select") {
+      const values = readStringArray(command.values, "command.values")
+      if (!values?.length || values.length > 100) {
+        throw new Error("command.values must contain between 1 and 100 values")
+      }
+    }
+    if (name === "tab.automation.getAttribute") {
       readString(command.attribute, "command.attribute")
-    }
-    if (name === "tab.playwright.locator.evaluate") {
-      readString(command.expression, "command.expression")
-    }
-    if (name === "tab.playwright.locator.setChecked") {
-      readBoolean(command.checked, "command.checked")
-    }
-    if (name === "tab.playwright.locator.waitFor" && command.state === undefined) {
-      throw new Error("command.state is required")
     }
     return
   }
@@ -388,7 +340,7 @@ function validateCommand(command: Record<string, unknown>, name: string) {
   }
   if (name === "tab.dialog.wait" || name === "tab.fileChooser.wait" || name === "tab.download.wait") {
     readTimeout(command.timeout)
-    if (command.trigger !== undefined) readLocator(command.trigger)
+    if (command.trigger !== undefined) readAutomationTarget(command.trigger, "command.trigger")
     return
   }
   if (name === "tab.fileChooser.setFiles") {
@@ -439,13 +391,36 @@ function validateCommand(command: Record<string, unknown>, name: string) {
   }
 }
 
-function readLocator(input: unknown) {
-  const locator = readRecord(input, "command.locator")
-  const values = ["css", "frameId", "href", "label", "name", "placeholder", "role", "selector", "testId", "text"]
-    .map((key) => readOptionalString(locator[key], `command.locator.${key}`))
-  readStringArray(locator.frameSelectors, "command.locator.frameSelectors")
-  if (!values.some(Boolean)) throw new Error("command.locator requires at least one locator field")
-  if (locator.exact !== undefined) readBoolean(locator.exact, "command.locator.exact")
+function readAutomationTarget(input: unknown, name = "command.target") {
+  const target = readRecord(input, name)
+  const keys = ["ref", "role", "label", "placeholder", "text", "testId", "css"]
+    .filter((key) => target[key] !== undefined)
+  if (keys.length !== 1) throw new Error(`${name} requires exactly one locator kind`)
+  const key = keys[0]
+  const value = readString(target[key], `${name}.${key}`)
+  if (key === "ref" && !/^@?e[0-9]+$/.test(value)) {
+    throw new Error(`${name}.ref must be an e<number> ref copied from the latest automation snapshot`)
+  }
+  if (key === "ref") readString(target.snapshotId, `${name}.snapshotId`)
+  if (key !== "ref" && target.snapshotId !== undefined) {
+    throw new Error(`${name}.snapshotId is only supported for ref`)
+  }
+  if (key === "css" && target.advanced !== true) {
+    throw new Error(`${name}.css requires advanced: true`)
+  }
+  if (key !== "css" && target.advanced !== undefined) {
+    throw new Error(`${name}.advanced is only supported for css`)
+  }
+  if (target.exact !== undefined) {
+    if (!["role", "label", "placeholder", "text"].includes(key)) {
+      throw new Error(`${name}.exact is not supported for ${key}`)
+    }
+    readBoolean(target.exact, `${name}.exact`)
+  }
+  if (key === "role") readOptionalString(target.name, `${name}.name`)
+  if (key !== "role" && target.name !== undefined) {
+    throw new Error(`${name}.name is only supported for role`)
+  }
 }
 
 function readScreenshot(command: Record<string, unknown>) {
@@ -489,18 +464,6 @@ function readDisposition(input: unknown) {
   if (input === undefined) return undefined
   if (input === "deliverable" || input === "handoff" || input === "temporary") return input
   throw new Error("command.disposition is invalid")
-}
-
-function readLoadState(input: unknown, name: string, allowCommit = false) {
-  if (input === undefined) return undefined
-  if (allowCommit && input === "commit") return input
-  if (input === "domcontentloaded" || input === "load" || input === "networkidle") return input
-  throw new Error(`${name} is invalid`)
-}
-
-function readButton(input: unknown) {
-  if (input === undefined || input === "left" || input === "middle" || input === "right") return
-  throw new Error("command.button is invalid")
 }
 
 function readModifiers(input: unknown) {

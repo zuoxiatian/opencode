@@ -2,6 +2,7 @@ import { session, type BrowserWindow } from "electron"
 import {
     BROWSER_PROTOCOL_VERSION,
     DEFAULT_BROWSER_ID,
+    type BrowserAutomationTarget,
     type BrowserBounds,
     type BrowserCommand,
     type BrowserCommandData,
@@ -12,8 +13,11 @@ import type { BrowserBackend, BrowserDispatchContext } from "../backend"
 import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import { BrowserLifecycle } from "../lifecycle"
+import { AgentBrowserCommandAdapter } from "../agent-browser/adapter"
+import type { AgentBrowserTabController } from "../agent-browser/controller"
+import { createAgentBrowserTabController } from "../agent-browser/runtime"
 import { AriaSnapshotService } from "./automation/aria-snapshot"
-import { executeRawCdp, onDebuggerMessage, withDebugger } from "./automation/cdp"
+import { executeRawCdp, withDebugger } from "./automation/cdp"
 import {
     coordinateClick,
     coordinateDrag,
@@ -22,12 +26,9 @@ import {
     keypressKeys,
     textInput,
 } from "./automation/input"
-import { LocatorService } from "./automation/locator"
 import { NodeActionService } from "./automation/node-action"
-import { PlaywrightRuntime } from "./automation/playwright-runtime"
-import { ReadonlyEvaluationService } from "./automation/readonly-evaluate"
 import { captureErrorScreenshot, captureScreenshot } from "./automation/screenshot"
-import { expectNavigation, waitForLoadState, waitForTimeout, waitForURL } from "./automation/waits"
+import { waitForTimeout } from "./automation/waits"
 import {
     readClipboard,
     readClipboardText,
@@ -71,43 +72,40 @@ export function createEmbeddedBrowserBackend(
     events: BrowserEventStore,
 ): BrowserBackend {
     const browserSession = session.fromPartition("persist:desktop-forge-browser")
-    let registerTab = (_tab: EmbeddedTab) => undefined
+    let registerTab: (tab: EmbeddedTab) => void = () => undefined
     const tabs = new EmbeddedTabStore(window, events, (tab) => registerTab(tab))
     const navigation = new NavigationService(browserSession, tabs, events)
     const dialogs = new DialogService(tabs, events)
     const aria = new AriaSnapshotService()
     const nodes = new NodeActionService(aria)
-    const playwright = new PlaywrightRuntime()
-    const locators = new LocatorService(playwright)
-    const readonlyEvaluation = new ReadonlyEvaluationService()
     const downloads = new DownloadService(browserSession, tabs, events)
     const fileChoosers = new FileChooserService(tabs, events)
     const lifecycle = new BrowserLifecycle(tabs)
+    const agentBrowser = createAgentBrowserTabController()
+    const automation = new AgentBrowserCommandAdapter(agentBrowser)
     const userTabs = new BrowserUserTabs(tabs)
     const sessionNames = new Map<string, string>()
     const clearClosedTab = events.subscribe((event) => {
         if (event.type !== "tab.closed" || !event.tabId) return
         aria.clear(event.tabId)
-        playwright.clear(event.tabId)
         downloads.clearTab(event.tabId)
         userTabs.clear(event.tabId)
+        void agentBrowser.closeTab(event.tabId)
     })
 
     registerTab = (tab) => {
         navigation.register(tab)
         dialogs.register(tab)
         fileChoosers.register(tab)
-        if (!tab.webContents.debugger.isAttached()) {
-            tab.webContents.debugger.attach("1.3")
-        }
+        tab.debuggerTransport.ensureAttached()
         const documentRequests = new Set<string>()
         let debuggerStarted = false
         const initializeDebugger = () => {
             if (debuggerStarted) return
             debuggerStarted = true
             const ready = Promise.all([
-                tab.webContents.debugger.sendCommand("Network.enable"),
-                tab.webContents.debugger.sendCommand("Page.enable"),
+                tab.debuggerTransport.sendCommand("Network.enable"),
+                tab.debuggerTransport.sendCommand("Page.enable"),
             ]).then(() => undefined)
                 .catch((error: unknown) => {
                     debuggerStarted = false
@@ -118,6 +116,7 @@ export function createEmbeddedBrowserBackend(
         }
         tab.webContents.on("did-start-loading", () => {
             documentRequests.clear()
+            agentBrowser.invalidateSnapshot(tab.id)
             initializeDebugger()
         })
         tab.webContents.on("did-stop-loading", () => {
@@ -133,8 +132,7 @@ export function createEmbeddedBrowserBackend(
             })
             if (tab.logs.length > 1_000) tab.logs.splice(0, tab.logs.length - 1_000)
         })
-        onDebuggerMessage(tab.webContents, (_event, method, params, sessionId) => {
-            if (sessionId) tab.cdpSessions.add(sessionId)
+        tab.debuggerTransport.onMessage((method, params, sessionId) => {
             tab.cdpSequence += 1
             tab.cdpEvents.push({
                 method,
@@ -166,7 +164,7 @@ export function createEmbeddedBrowserBackend(
                 documentRequests.delete(requestId)
                 tab.networkRequests.delete(requestId)
             }
-        }, () => !tab.closed)
+        })
         tab.webContents.setWindowOpenHandler(({ url }) => {
             if (isWebUrl(url)) {
                 const ownership = {
@@ -210,6 +208,7 @@ export function createEmbeddedBrowserBackend(
             clearPermissions()
             downloads.destroy()
             fileChoosers.destroy()
+            await agentBrowser.destroy()
             await tabs.destroy()
         },
         dispatch: async (request, context) => {
@@ -281,6 +280,7 @@ export function createEmbeddedBrowserBackend(
                     return { tab: tabState(tab) }
                 }
                 if (request.command.name === "tabs.finalize") {
+                    await agentBrowser.closeOwner(request.sessionId)
                     lifecycle.finalize(request as BrowserCommandRequest & {
                         command: Extract<BrowserCommand, { name: "tabs.finalize" }>
                     })
@@ -290,17 +290,16 @@ export function createEmbeddedBrowserBackend(
                 const tab = tabs.require(request.tabId)
                 tabs.touch(tab)
                 return await dispatchTabCommand({
+                    agentBrowser,
                     aria,
+                    automation,
                     context,
                     dialogs,
                     downloads,
                     fileChoosers,
                     lifecycle,
-                    locators,
                     navigation,
                     nodes,
-                    playwright,
-                    readonlyEvaluation,
                     request,
                     tab,
                     tabs,
@@ -313,17 +312,16 @@ export function createEmbeddedBrowserBackend(
 }
 
 interface TabCommandServices {
+    agentBrowser: AgentBrowserTabController
     aria: AriaSnapshotService
+    automation: AgentBrowserCommandAdapter
     context: BrowserDispatchContext
     dialogs: DialogService
     downloads: DownloadService
     fileChoosers: FileChooserService
     lifecycle: BrowserLifecycle
-    locators: LocatorService
     navigation: NavigationService
     nodes: NodeActionService
-    playwright: PlaywrightRuntime
-    readonlyEvaluation: ReadonlyEvaluationService
     request: BrowserCommandRequest
     tab: EmbeddedTab
     tabs: EmbeddedTabStore
@@ -334,6 +332,15 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     const command = services.request.command
     const tab = services.tab
 
+    if (command.name.startsWith("tab.automation.")) {
+        return services.automation.run(
+            tab,
+            services.request.sessionId,
+            command as Extract<BrowserCommand, { name: `tab.automation.${string}` }>,
+            services.context.signal,
+            services.request.expectedOrigin,
+        )
+    }
     if (command.name === "tab.state") return { tab: tabState(tab) }
     if (command.name === "tab.activate") {
         services.tabs.activate(tab.id, services.request)
@@ -341,6 +348,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.close") {
         services.aria.clear(tab.id)
+        await services.agentBrowser.closeTab(tab.id)
         services.tabs.close(tab.id, services.request)
         return {}
     }
@@ -392,156 +400,8 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             && (!command.filter || entry.message.includes(command.filter)))
         return { logs: logs.slice(-(command.limit ?? 100)) }
     }
-    if (command.name === "tab.playwright.domSnapshot") {
-        return { dom: await services.playwright.domSnapshot(tab) }
-    }
-    if (command.name === "tab.playwright.html") {
-        return { html: await services.playwright.html(tab) }
-    }
-    if (command.name === "tab.playwright.evaluate") {
-        return {
-            value: services.readonlyEvaluation.evaluate({
-                arg: command.arg,
-                expression: command.expression,
-                html: await services.playwright.html(tab),
-                url: tab.webContents.getURL(),
-            }),
-        }
-    }
-    if (command.name === "tab.playwright.elementInfo") {
-        return {
-            elements: await services.playwright.elementInfo(
-                tab,
-                command.x,
-                command.y,
-                command.includeNonInteractable,
-            ),
-        }
-    }
-    if (command.name === "tab.playwright.elementScreenshot") {
-        const elements = await services.playwright.elementInfo(
-            tab,
-            command.x,
-            command.y,
-            command.includeNonInteractable,
-        )
-        return {
-            elements,
-            screenshot: await withDebugger(tab, async (send) => {
-                const rect = elements.find((element) => element.boundingBox)?.boundingBox
-                if (!rect) return captureScreenshot(send, {})
-                await send("Overlay.enable")
-                await send("Overlay.highlightRect", {
-                    color: { a: 0.25, b: 255, g: 120, r: 30 },
-                    outlineColor: { a: 1, b: 255, g: 120, r: 30 },
-                    ...rect,
-                })
-                try {
-                    return await captureScreenshot(send, {})
-                } finally {
-                    await send("Overlay.hideHighlight").catch(() => undefined)
-                    await send("Overlay.disable").catch(() => undefined)
-                }
-            }),
-        }
-    }
     if (command.name === "tab.domCua.getVisibleDom") {
         return { visibleDom: await services.aria.snapshot(tab) }
-    }
-    if (command.name === "tab.playwright.expectNavigation") {
-        await tab.debuggerReady
-        const navigation = await triggeredWait(
-            services.context.signal,
-            async (signal) => {
-                const url = await expectNavigation(tab.webContents, command.timeout, signal, command.url)
-                if (command.waitUntil && command.waitUntil !== "commit") {
-                    await waitForLoadState(
-                        tab.webContents,
-                        command.waitUntil,
-                        command.timeout,
-                        signal,
-                    )
-                }
-                return {
-                    finalUrl: url,
-                    generation: tab.generation,
-                    status: "committed" as const,
-                }
-            },
-            command.trigger
-                ? () => services.locators.run(tab, {
-                    locator: command.trigger!,
-                    name: "tab.playwright.locator.click",
-                }, services.context.signal)
-                : undefined,
-        )
-        return { navigation }
-    }
-    if (command.name === "tab.playwright.waitForURL") {
-        return {
-            value: await waitForURL(
-                tab.webContents,
-                command.url,
-                command.timeout,
-                services.context.signal,
-                command.waitUntil,
-            ),
-        }
-    }
-    if (command.name === "tab.playwright.waitForLoadState") {
-        await tab.debuggerReady
-        const generation = tab.generation
-        await waitForLoadState(
-            tab.webContents,
-            command.state,
-            command.timeout,
-            services.context.signal,
-        )
-        ensureGeneration(tab, generation, "Page changed while waiting for its load state")
-        return { value: true }
-    }
-    if (command.name === "tab.playwright.waitForTimeout") {
-        await waitForTimeout(command.timeout, services.context.signal)
-        return { value: true }
-    }
-    if (command.name.startsWith("tab.playwright.locator.")) {
-        if (command.name === "tab.playwright.locator.evaluate") {
-            if (!command.expression) {
-                throw new BrowserRuntimeException("INVALID_COMMAND", "Locator evaluate requires an expression")
-            }
-            return {
-                value: services.readonlyEvaluation.evaluate({
-                    arg: command.arg,
-                    elementHtml: await services.playwright.locatorHtml(tab, command.locator),
-                    expression: command.expression,
-                    html: await services.playwright.html(tab, command.locator.frameSelectors),
-                    url: tab.webContents.getURL(),
-                }),
-            }
-        }
-        if (command.name === "tab.playwright.locator.downloadMedia") {
-            return {
-                download: await triggeredWait(
-                    services.context.signal,
-                    (signal) => services.downloads.wait(
-                        tab.id,
-                        services.request,
-                        command.timeout,
-                        signal,
-                        false,
-                    ),
-                    () => services.locators.run(tab, {
-                        locator: command.locator,
-                        name: "tab.playwright.locator.click",
-                        timeout: command.timeout,
-                    }, services.context.signal),
-                ),
-            }
-        }
-        return services.locators.run(tab, command as Extract<
-            BrowserCommand,
-            { name: `tab.playwright.locator.${string}` }
-        >, services.context.signal)
     }
     if (
         command.name === "tab.domCua.click"
@@ -649,12 +509,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             dialog: await triggeredWait(
                 services.context.signal,
                 (signal) => services.dialogs.wait(tab, command.timeout, signal),
-                command.trigger
-                    ? () => services.locators.run(tab, {
-                        locator: command.trigger!,
-                        name: "tab.playwright.locator.click",
-                    }, services.context.signal)
-                    : undefined,
+                automationClickTrigger(services, command.trigger, command.timeout),
                 false,
             ),
         }
@@ -672,12 +527,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
                 tab,
                 command.timeout,
                 services.context.signal,
-                command.trigger
-                    ? () => services.locators.run(tab, {
-                        locator: command.trigger!,
-                        name: "tab.playwright.locator.click",
-                    }, services.context.signal)
-                    : undefined,
+                automationClickTrigger(services, command.trigger, command.timeout),
             ),
         }
     }
@@ -696,12 +546,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
                     signal,
                     !command.trigger,
                 ),
-                command.trigger
-                    ? () => services.locators.run(tab, {
-                        locator: command.trigger!,
-                        name: "tab.playwright.locator.click",
-                    }, services.context.signal)
-                    : undefined,
+                automationClickTrigger(services, command.trigger, command.timeout),
             ),
         }
     }
@@ -729,7 +574,13 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
         }
         return {
             cdp: await withDebugger(tab, (send) =>
-                executeRawCdp(send, command.method, command.params, command.target, tab.cdpSessions)),
+                executeRawCdp(
+                    send,
+                    command.method,
+                    command.params,
+                    command.target,
+                    tab.debuggerTransport.childSessions,
+                )),
         }
     }
     if (command.name === "tab.dev.cdp.events") {
@@ -770,6 +621,32 @@ async function readCdpEvents(
     return result
 }
 
+function triggerAutomationClick(
+    services: TabCommandServices,
+    target: BrowserAutomationTarget,
+    timeout?: number,
+) {
+    return services.automation.run(
+        services.tab,
+        services.request.sessionId,
+        {
+            name: "tab.automation.click",
+            target,
+            timeout,
+        },
+        services.context.signal,
+        services.request.expectedOrigin,
+    )
+}
+
+function automationClickTrigger(
+    services: TabCommandServices,
+    target: BrowserAutomationTarget | undefined,
+    timeout?: number,
+) {
+    return target ? () => triggerAutomationClick(services, target, timeout) : undefined
+}
+
 async function triggeredWait<T>(
     signal: AbortSignal | undefined,
     wait: (signal: AbortSignal) => Promise<T>,
@@ -785,14 +662,6 @@ async function triggeredWait<T>(
         ? Promise.all([waiting, triggered]).then(([result]) => result)
         : Promise.race([waiting, triggered.then(() => waiting)]))
         .finally(() => controller.abort())
-}
-
-function ensureGeneration(tab: EmbeddedTab, generation: number, message: string) {
-    if (tab.webContents.isDestroyed()) {
-        throw new BrowserRuntimeException("TAB_CLOSED", "Browser tab closed during the command")
-    }
-    if (tab.generation === generation) return
-    throw new BrowserRuntimeException("NAVIGATION_REPLACED", message, true)
 }
 
 function visibleToSession(tab: EmbeddedTab, sessionId: string) {

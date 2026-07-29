@@ -17,7 +17,7 @@ export function waitForLoadState(
     if (state === "networkidle") {
         return Promise.reject(new BrowserRuntimeException(
             "CAPABILITY_UNAVAILABLE",
-            "playwright_wait_for_load_state does not support networkidle",
+            "Browser load-state waits do not support networkidle",
         ))
     }
 

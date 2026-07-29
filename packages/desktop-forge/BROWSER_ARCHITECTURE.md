@@ -1,5 +1,9 @@
 # 内置浏览器整体替换执行方案
 
+> 历史文档：其中 Browser Protocol v2 与 `tab.playwright.*` 设计已由
+> `AGENT_BROWSER_TARGET_ARCHITECTURE.md` 的 Protocol v3 direct-page 架构取代，
+> 不再作为当前实现或验收依据。
+
 ## 1. 文档结论
 
 本次改造采用一次性整体替换，不做分阶段上线，也不让新旧浏览器运行时长期并存。

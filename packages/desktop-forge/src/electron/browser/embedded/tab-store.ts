@@ -9,6 +9,7 @@ import type {
 } from "@opencode-ai/browser-protocol"
 import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
+import { TabDebuggerTransport } from "../agent-browser/debugger-transport"
 import { browserState, EMPTY_BOUNDS, sanitizeBounds, tabState } from "./state"
 import type { EmbeddedTab } from "./tab"
 
@@ -46,8 +47,8 @@ export class EmbeddedTabStore {
         const tab: EmbeddedTab = {
             cdpEvents: [],
             cdpSequence: 0,
-            cdpSessions: new Set(),
             closed: false,
+            debuggerTransport: new TabDebuggerTransport(view.webContents),
             debuggerQueue: Promise.resolve(),
             debuggerReady: Promise.resolve(),
             dialog: null,
@@ -100,6 +101,7 @@ export class EmbeddedTabStore {
         const state = tabState(tab)
         if (this.attachedTabId === tabId) this.detach()
         tab.closed = true
+        tab.debuggerTransport.destroy()
         tab.webContents.close()
         this.tabs.splice(index, 1)
         if (this.activeTabId === tabId) {
@@ -254,6 +256,7 @@ export class EmbeddedTabStore {
         this.detach()
         this.tabs.splice(0).forEach((tab) => {
             tab.closed = true
+            tab.debuggerTransport.destroy()
             if (!tab.webContents.isDestroyed()) tab.webContents.close()
         })
     }

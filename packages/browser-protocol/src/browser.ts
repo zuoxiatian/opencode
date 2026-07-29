@@ -8,7 +8,7 @@ import type {
 } from "./files"
 import type { BrowserHistoryEntry } from "./tab"
 
-export const BROWSER_PROTOCOL_VERSION = 2 as const
+export const BROWSER_PROTOCOL_VERSION = 3 as const
 export const DEFAULT_BROWSER_ID = "embedded"
 
 export interface BrowserBounds {
@@ -88,24 +88,28 @@ export interface BrowserNavigationResult {
 }
 
 export interface BrowserCommandData {
+  automationSnapshot?: import("./automation").BrowserAutomationSnapshot
+  box?: import("./automation").BrowserAutomationBox | null
   browsers?: BrowserInfo[]
   cdp?: unknown
   cdpEvents?: import("./automation").BrowserCdpEvents
   clipboardItems?: BrowserClipboardItem[]
   clipboardText?: string
+  count?: number
   dialog?: BrowserDialog | null
   dom?: string
   download?: BrowserDownload
   downloads?: BrowserDownload[]
-  elements?: import("./automation").BrowserElementInfo[]
   fileChooser?: BrowserFileChooser
   history?: BrowserHistoryEntry[]
   html?: string
   logs?: import("./automation").BrowserDevLogEntry[]
   navigation?: BrowserNavigationResult
+  styles?: Record<string, string>
   screenshot?: import("./automation").BrowserScreenshot
   tab?: BrowserTabState
   tabs?: BrowserTabState[]
+  truncated?: boolean
   userTabs?: BrowserUserTabInfo[]
   value?: unknown
   visibleDom?: import("./automation").BrowserDomSnapshot

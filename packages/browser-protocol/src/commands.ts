@@ -1,40 +1,14 @@
 import type {
+  BrowserAutomationTarget,
+  BrowserAutomationWait,
   BrowserCdpTarget,
-  BrowserElementInput,
   BrowserKeyModifier,
-  BrowserLocator,
-  BrowserMouseButton,
   BrowserNodeInput,
   BrowserScreenshotInput,
 } from "./automation"
 import type { BrowserBounds } from "./browser"
-import type {
-  BrowserFinalizeTabStatus,
-  BrowserLoadState,
-  BrowserWaitUntil,
-} from "./tab"
+import type { BrowserFinalizeTabStatus } from "./tab"
 import type { BrowserClipboardItem } from "./files"
-
-export type BrowserLocatorCommandName =
-  | "tab.playwright.locator.allTextContents"
-  | "tab.playwright.locator.check"
-  | "tab.playwright.locator.click"
-  | "tab.playwright.locator.count"
-  | "tab.playwright.locator.dblclick"
-  | "tab.playwright.locator.downloadMedia"
-  | "tab.playwright.locator.evaluate"
-  | "tab.playwright.locator.fill"
-  | "tab.playwright.locator.getAttribute"
-  | "tab.playwright.locator.innerText"
-  | "tab.playwright.locator.isEnabled"
-  | "tab.playwright.locator.isVisible"
-  | "tab.playwright.locator.press"
-  | "tab.playwright.locator.selectOption"
-  | "tab.playwright.locator.setChecked"
-  | "tab.playwright.locator.textContent"
-  | "tab.playwright.locator.type"
-  | "tab.playwright.locator.uncheck"
-  | "tab.playwright.locator.waitFor"
 
 export type BrowserCommand =
   | { name: "browser.list" | "browser.state" | "browser.show" | "browser.hide" | "browser.viewport.reset" }
@@ -66,23 +40,65 @@ export type BrowserCommand =
     }
   | { name: "tab.goto"; url: string }
   | ({ name: "tab.screenshot" } & BrowserScreenshotInput)
-  | { name: "tab.playwright.domSnapshot" }
-  | { name: "tab.playwright.html" }
-  | { includeNonInteractable?: boolean; name: "tab.playwright.elementInfo"; x: number; y: number }
-  | { includeNonInteractable?: boolean; name: "tab.playwright.elementScreenshot"; x: number; y: number }
-  | { arg?: unknown; expression: string; name: "tab.playwright.evaluate"; timeout?: number }
-  | { name: "tab.domCua.getVisibleDom" }
+  | { interactiveOnly?: boolean; name: "tab.automation.snapshot" }
   | {
-      name: "tab.playwright.expectNavigation"
+      name:
+        | "tab.automation.click"
+        | "tab.automation.dblclick"
+        | "tab.automation.focus"
+        | "tab.automation.hover"
+        | "tab.automation.check"
+        | "tab.automation.uncheck"
+        | "tab.automation.scrollIntoView"
+      target: BrowserAutomationTarget
       timeout?: number
-      trigger?: BrowserLocator
-      url?: string
-      waitUntil?: BrowserWaitUntil
     }
-  | { name: "tab.playwright.waitForURL"; timeout?: number; url: string; waitUntil?: BrowserWaitUntil }
-  | { name: "tab.playwright.waitForLoadState"; state: BrowserLoadState; timeout?: number }
-  | { name: "tab.playwright.waitForTimeout"; timeout: number }
-  | ({ name: BrowserLocatorCommandName } & BrowserElementInput)
+  | {
+      name: "tab.automation.fill" | "tab.automation.type"
+      target: BrowserAutomationTarget
+      timeout?: number
+      value: string
+    }
+  | {
+      key: string
+      name: "tab.automation.press"
+      target?: BrowserAutomationTarget
+      timeout?: number
+    }
+  | {
+      name: "tab.automation.select"
+      target: BrowserAutomationTarget
+      timeout?: number
+      values: string[]
+    }
+  | {
+      name: "tab.automation.drag"
+      source: BrowserAutomationTarget
+      target: BrowserAutomationTarget
+      timeout?: number
+    }
+  | ({ name: "tab.automation.waitFor"; timeout?: number } & BrowserAutomationWait)
+  | {
+      name:
+        | "tab.automation.getText"
+        | "tab.automation.getHtml"
+        | "tab.automation.getValue"
+        | "tab.automation.getBox"
+        | "tab.automation.getStyles"
+        | "tab.automation.count"
+        | "tab.automation.isVisible"
+        | "tab.automation.isEnabled"
+        | "tab.automation.isChecked"
+      target: BrowserAutomationTarget
+      timeout?: number
+    }
+  | {
+      attribute: string
+      name: "tab.automation.getAttribute"
+      target: BrowserAutomationTarget
+      timeout?: number
+    }
+  | { name: "tab.domCua.getVisibleDom" }
   | ({ name: "tab.domCua.click" | "tab.domCua.doubleClick" } & BrowserNodeInput)
   | {
       deltaX: number
@@ -125,11 +141,11 @@ export type BrowserCommand =
   | { keys: string[]; name: "tab.cua.keypress" }
   | { name: "tab.cua.downloadMedia"; timeout?: number; x: number; y: number }
   | { name: "tab.dialog.get" }
-  | { name: "tab.dialog.wait"; timeout?: number; trigger?: BrowserLocator }
+  | { name: "tab.dialog.wait"; timeout?: number; trigger?: BrowserAutomationTarget }
   | { accept: boolean; dialogId: string; name: "tab.dialog.handle"; promptText?: string }
-  | { name: "tab.fileChooser.wait"; timeout?: number; trigger?: BrowserLocator }
+  | { name: "tab.fileChooser.wait"; timeout?: number; trigger?: BrowserAutomationTarget }
   | { chooserId: string; filePaths: string[]; name: "tab.fileChooser.setFiles"; timeout?: number }
-  | { name: "tab.download.wait"; timeout?: number; trigger?: BrowserLocator }
+  | { name: "tab.download.wait"; timeout?: number; trigger?: BrowserAutomationTarget }
   | { downloadId: string; name: "tab.download.get" }
   | { name: "tab.clipboard.read" | "tab.clipboard.readText" }
   | { name: "tab.clipboard.write"; items: BrowserClipboardItem[] }

@@ -1,5 +1,7 @@
 import { app } from "electron"
 import started from "electron-squirrel-startup"
+import { writeFile } from "node:fs/promises"
+import path from "node:path"
 import { APP_ID, APP_NAME } from "./electron/constants"
 import { createMainState } from "./electron/app/state"
 import { registerIpcHandlers } from "./electron/ipc"
@@ -29,6 +31,18 @@ async function bootstrap() {
 
     await app.whenReady()
     await openWindow()
+    if (!app.isPackaged || !process.argv.includes("--desktop-forge-packaged-smoke")) return
+
+    await writeFile(
+        path.join(app.getPath("userData"), "desktop-forge-packaged-smoke.json"),
+        `${JSON.stringify({
+            browserRuntime: state.browserRuntime !== null,
+            browserTransport: state.browserTransport !== null,
+            ready: true,
+        })}\n`,
+    )
+    state.window?.hide()
+    app.quit()
 }
 
 function registerAppLifecycle() {
@@ -50,13 +64,31 @@ function registerAppLifecycle() {
         if (process.platform !== "darwin") app.quit()
     })
 
-    app.on("before-quit", () => {
+    app.on("before-quit", (event) => {
         state.closeDirectoryWatchers()
         stopServer(state)
-        void state.browserRuntime?.destroy()
+        const runtime = state.browserRuntime
+        const pending = state.browserRuntimeDestroy
+        if (!runtime && !pending) {
+            state.browserTransport?.close()
+            state.browserTransport = null
+            return
+        }
+
+        event.preventDefault()
         state.browserRuntime = null
+        state.browserRuntimeDestroy = null
         state.browserTransport?.close()
         state.browserTransport = null
+        const finish = () => {
+            state.browserRuntimeDestroy = null
+            app.quit()
+        }
+        state.browserRuntimeDestroy = Promise.all([
+            pending ?? Promise.resolve(),
+            runtime?.destroy() ?? Promise.resolve(),
+        ]).then(() => undefined)
+        void state.browserRuntimeDestroy.then(finish, finish)
     })
 }
 
