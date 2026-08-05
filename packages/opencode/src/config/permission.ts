@@ -35,7 +35,6 @@ const InputObject = Schema.StructWithRest(
     question: Schema.optional(Action),
     browser_cdp: Schema.optional(Rule),
     browser_interaction: Schema.optional(Rule),
-    browser_origin: Schema.optional(Rule),
     webfetch: Schema.optional(Action),
     websearch: Schema.optional(Action),
     codesearch: Schema.optional(Action),

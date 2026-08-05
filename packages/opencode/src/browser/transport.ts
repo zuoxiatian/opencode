@@ -60,7 +60,7 @@ export class BrowserTransport {
       }
       const result = parsed as BrowserCommandResponse<T>
       this.events = result.events
-      await hydrateScreenshot(result, this.options)
+      await hydrateAssets(result, this.options)
       return result
     }).catch((error: unknown) => {
       if (error instanceof BrowserClientError) throw error
@@ -79,26 +79,29 @@ export class BrowserTransport {
   }
 }
 
-async function hydrateScreenshot<T>(
+async function hydrateAssets<T>(
   response: BrowserCommandResponse<T>,
   options: BrowserTransportOptions,
 ) {
   const data = isRecord(response.data) ? response.data : undefined
-  const screenshot = data && isRecord(data.screenshot) ? data.screenshot : undefined
-  if (!screenshot || typeof screenshot.reference !== "string" || typeof screenshot.data === "string") return
-  if (!screenshot.reference.startsWith("/v1/browser/assets/")) {
-    throw new BrowserClientError(browserError("BROWSER_UNAVAILABLE", "Browser returned an invalid asset reference", true))
-  }
-  const asset = await fetch(`${options.endpoint}${screenshot.reference}`, {
-    headers: { Authorization: `Bearer ${options.token}` },
-    signal: AbortSignal.any([options.abort, AbortSignal.timeout(60_000)]),
-  })
-  if (!asset.ok) throw new BrowserClientError(browserError(
-    "BROWSER_UNAVAILABLE",
-    `Browser screenshot asset failed with status ${asset.status}`,
-    true,
-  ))
-  screenshot.data = Buffer.from(await asset.arrayBuffer()).toString("base64")
+  if (!data) return
+  await Promise.all(["pdf", "screenshot"].map(async (key) => {
+    const value = isRecord(data[key]) ? data[key] : undefined
+    if (!value || typeof value.reference !== "string" || typeof value.data === "string") return
+    if (!value.reference.startsWith("/v1/browser/assets/")) {
+      throw new BrowserClientError(browserError("BROWSER_UNAVAILABLE", "Browser returned an invalid asset reference", true))
+    }
+    const asset = await fetch(`${options.endpoint}${value.reference}`, {
+      headers: { Authorization: `Bearer ${options.token}` },
+      signal: AbortSignal.any([options.abort, AbortSignal.timeout(60_000)]),
+    })
+    if (!asset.ok) throw new BrowserClientError(browserError(
+      "BROWSER_UNAVAILABLE",
+      `Browser ${key} asset failed with status ${asset.status}`,
+      true,
+    ))
+    value.data = Buffer.from(await asset.arrayBuffer()).toString("base64")
+  }))
 }
 
 function parseResponse(body: string, requestId: string): BrowserCommandResponse | BrowserErrorResponse {

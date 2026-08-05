@@ -78,7 +78,7 @@ export function startBrowserTransportServer(runtime: () => BrowserRuntime | null
                 if (!current) throw new Error("Desktop browser window is not available")
                 return current.dispatch(command, controller.signal)
             })
-            .then((result) => send(response, 200, storeScreenshot(result, assets)))
+            .then((result) => send(response, 200, storeAssets(result, assets)))
             .catch((error: unknown) => send(response, statusFor(error), {
                 error: runtimeError(error),
                 protocolVersion: BROWSER_PROTOCOL_VERSION,
@@ -99,30 +99,34 @@ export function startBrowserTransportServer(runtime: () => BrowserRuntime | null
     })
 }
 
-function storeScreenshot(
+function storeAssets(
     response: import("@opencode-ai/browser-protocol").BrowserCommandResponse,
     assets: Map<string, { data: Buffer; mimeType: string }>,
 ) {
     const data = isRecord(response.data) ? response.data : undefined
-    const screenshot = data && isRecord(data.screenshot) ? data.screenshot : undefined
-    if (!screenshot || typeof screenshot.data !== "string" || typeof screenshot.mimeType !== "string") return response
-    const id = crypto.randomUUID()
-    assets.set(id, {
-        data: Buffer.from(screenshot.data, "base64"),
-        mimeType: screenshot.mimeType,
-    })
-    const expiry = setTimeout(() => assets.delete(id), 2 * 60_000)
-    expiry.unref()
-    return {
-        ...response,
-        data: {
-            ...response.data,
-            screenshot: {
-                ...screenshot,
+    if (!data) return response
+    const stored = ["pdf", "screenshot"].reduce<Record<string, unknown>>((result, key) => {
+        const asset = isRecord(data[key]) ? data[key] : undefined
+        if (!asset || typeof asset.data !== "string" || typeof asset.mimeType !== "string") return result
+        const id = crypto.randomUUID()
+        assets.set(id, {
+            data: Buffer.from(asset.data, "base64"),
+            mimeType: asset.mimeType,
+        })
+        const expiry = setTimeout(() => assets.delete(id), 2 * 60_000)
+        expiry.unref()
+        return {
+            ...result,
+            [key]: {
+                ...asset,
                 data: undefined,
                 reference: `/v1/browser/assets/${id}`,
             },
-        },
+        }
+    }, data)
+    return {
+        ...response,
+        data: stored,
     }
 }
 

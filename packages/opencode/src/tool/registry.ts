@@ -50,7 +50,15 @@ import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
 import { trustedSkillsAvailable } from "../skill/runtime"
 import { Permission } from "@/permission"
-import { BrowserTool } from "./browser"
+import {
+  BrowserActionTool,
+  BrowserCdpTool,
+  BrowserNavigateTool,
+  BrowserReadTool,
+  BrowserSnapshotTool,
+  BrowserTabsTool,
+  BrowserWaitTool,
+} from "./browser"
 import { DESKTOP_BROWSER_AVAILABLE } from "../browser/config"
 
 const log = Log.create({ service: "tool.registry" })
@@ -122,7 +130,15 @@ export const layer: Layer.Layer<
     const skilltool = yield* SkillTool
     const skillExecuteTool = yield* SkillExecuteTool
     const mediatool = yield* MediaInspectTool
-    const browsertool = yield* BrowserTool
+    const browsertools = yield* Effect.all({
+      action: BrowserActionTool,
+      cdp: BrowserCdpTool,
+      navigate: BrowserNavigateTool,
+      read: BrowserReadTool,
+      snapshot: BrowserSnapshotTool,
+      tabs: BrowserTabsTool,
+      wait: BrowserWaitTool,
+    })
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -210,7 +226,13 @@ export const layer: Layer.Layer<
           skill: Tool.init(skilltool),
           skillExecute: Tool.init(skillExecuteTool),
           media: Tool.init(mediatool),
-          browser: Tool.init(browsertool),
+          browserAction: Tool.init(browsertools.action),
+          browserCdp: Tool.init(browsertools.cdp),
+          browserNavigate: Tool.init(browsertools.navigate),
+          browserRead: Tool.init(browsertools.read),
+          browserSnapshot: Tool.init(browsertools.snapshot),
+          browserTabs: Tool.init(browsertools.tabs),
+          browserWait: Tool.init(browsertools.wait),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -230,7 +252,17 @@ export const layer: Layer.Layer<
             tool.write,
             tool.task,
             tool.fetch,
-            ...(DESKTOP_BROWSER_AVAILABLE ? [tool.browser] : []),
+            ...(DESKTOP_BROWSER_AVAILABLE
+              ? [
+                  tool.browserTabs,
+                  tool.browserNavigate,
+                  tool.browserSnapshot,
+                  tool.browserRead,
+                  tool.browserAction,
+                  tool.browserWait,
+                  tool.browserCdp,
+                ]
+              : []),
             tool.todo,
             tool.search,
             tool.code,

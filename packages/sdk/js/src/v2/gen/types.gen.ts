@@ -1227,7 +1227,6 @@ export type PermissionConfig =
       question?: PermissionActionConfig
       browser_cdp?: PermissionRuleConfig
       browser_interaction?: PermissionRuleConfig
-      browser_origin?: PermissionRuleConfig
       webfetch?: PermissionActionConfig
       websearch?: PermissionActionConfig
       codesearch?: PermissionActionConfig

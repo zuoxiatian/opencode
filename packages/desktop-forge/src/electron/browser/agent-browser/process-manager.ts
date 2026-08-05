@@ -118,6 +118,7 @@ export class AgentBrowserProcessManager {
         await this.prepare()
         if (input.signal?.aborted) {
             throw new BrowserRuntimeException("CANCELLED", "Browser automation command was cancelled", true, {
+                causeCategory: "process_cancelled",
                 operation: input.operation,
             })
         }
@@ -136,11 +137,13 @@ export class AgentBrowserProcessManager {
         )
         if (result.reason === "cancelled") {
             throw new BrowserRuntimeException("CANCELLED", "Browser automation command was cancelled", true, {
+                causeCategory: "process_cancelled",
                 operation: input.operation,
             })
         }
         if (result.reason === "timeout") {
             throw new BrowserRuntimeException("TIMEOUT", "Browser automation command timed out", true, {
+                causeCategory: "process_timeout",
                 operation: input.operation,
             })
         }
@@ -172,43 +175,17 @@ export class AgentBrowserProcessManager {
             await cleanupDaemonFiles(base)
             return
         }
-        const pid = Number.parseInt(pidText, 10)
-        const currentPid = await readFile(`${base}.pid`, "utf8").catch(() => "")
-        if (
-            !Number.isSafeInteger(pid)
-            || pid <= 1
-            || pid === process.pid
-            || currentPid.trim() !== pidText.trim()
-        ) {
-            if (await daemonSidecarsActive(base)) {
-                throw new BrowserRuntimeException(
-                    "AGENT_SESSION_FAILED",
-                    "Browser automation daemon could not be identified for shutdown",
-                    true,
-                    { causeCategory: "daemon_shutdown" },
-                )
-            }
-            await cleanupDaemonFiles(base)
-            return
-        }
-        if (!await processAlive(pid)) {
-            await cleanupDaemonFiles(base)
-            return
-        }
-        await signalProcess(pid, "SIGTERM")
-        if (!await waitForDaemonExit(base, pidText, 1_000)) {
-            await signalProcess(pid, "SIGKILL")
-            await waitForDaemonExit(base, pidText, 1_000)
-        }
-        if (await processAlive(pid)) {
-            throw new BrowserRuntimeException(
-                "AGENT_SESSION_FAILED",
-                "Browser automation daemon did not stop",
-                true,
-                { causeCategory: "daemon_shutdown" },
-            )
-        }
-        await cleanupDaemonFiles(base)
+        await terminateDaemon(base, pidText)
+    }
+
+    async terminate(input: AgentBrowserStopInput) {
+        await this.prepare()
+        const base = path.join(this.daemonDir(), input.session)
+        await terminateDaemon(
+            base,
+            await readFile(`${base}.pid`, "utf8").catch(() => ""),
+            true,
+        )
     }
 
     private async prepareRuntime() {
@@ -313,6 +290,46 @@ export class AgentBrowserProcessManager {
     private daemonDir() {
         return path.join(this.socketDir(), "namespaces", "desktop-forge", "run")
     }
+}
+
+async function terminateDaemon(base: string, pidText: string, force = false) {
+    const pid = Number.parseInt(pidText, 10)
+    const currentPid = await readFile(`${base}.pid`, "utf8").catch(() => "")
+    if (
+        !Number.isSafeInteger(pid)
+        || pid <= 1
+        || pid === process.pid
+        || currentPid.trim() !== pidText.trim()
+    ) {
+        if (await daemonSidecarsActive(base)) {
+            throw new BrowserRuntimeException(
+                "AGENT_SESSION_FAILED",
+                "Browser automation daemon could not be identified for shutdown",
+                true,
+                { causeCategory: "daemon_shutdown" },
+            )
+        }
+        await cleanupDaemonFiles(base)
+        return
+    }
+    if (!await processAlive(pid)) {
+        await cleanupDaemonFiles(base)
+        return
+    }
+    await signalProcess(pid, force ? "SIGKILL" : "SIGTERM")
+    if (!force && !await waitForProcessExit(pid, 1_000)) {
+        await signalProcess(pid, "SIGKILL")
+    }
+    await waitForProcessExit(pid, 1_000)
+    if (await processAlive(pid)) {
+        throw new BrowserRuntimeException(
+            "AGENT_SESSION_FAILED",
+            "Browser automation daemon did not stop",
+            true,
+            { causeCategory: "daemon_shutdown" },
+        )
+    }
+    await cleanupDaemonFiles(base)
 }
 
 export function agentBrowserPlatformKey(
@@ -591,6 +608,15 @@ async function waitForDaemonExit(base: string, pidText: string, timeout: number)
             Number.isSafeInteger(pid) && pid > 1 ? processAlive(pid) : false,
         ])
         if (!active.some(Boolean)) return true
+        await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return false
+}
+
+async function waitForProcessExit(pid: number, timeout: number) {
+    const deadline = Date.now() + Math.max(1, timeout)
+    while (Date.now() < deadline) {
+        if (!await processAlive(pid)) return true
         await new Promise((resolve) => setTimeout(resolve, 25))
     }
     return false

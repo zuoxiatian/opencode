@@ -8,7 +8,7 @@
 | 开发基线 | Git 分支 `2.0` |
 | 基线提交 | `fc12cfff8ab8e04385fce486c0b7fe3fc2e79799` |
 | 决策日期 | 2026-07-28 |
-| 主要范围 | `packages/desktop-forge`、`packages/browser-protocol`、`packages/opencode/src/browser`、`packages/opencode/src/tool/browser.ts` |
+| 主要范围 | `packages/desktop-forge`、`packages/browser-protocol`、`packages/opencode/src/browser`、`packages/opencode/src/tool/browser/` |
 | 上游 | [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) |
 
 本文档是 desktop-forge 内置浏览器迁移到 agent-browser 的最新目标定义和唯一实施基线。
@@ -29,7 +29,7 @@ agent-browser 不启动 Chrome，不创建 headless/headed 浏览器，不使用
 最终链路：
 
 ```text
-OpenCode Browser Tool
+OpenCode capability-scoped Browser Tools
 → Browser Runtime / Security Gate
 → AgentBrowserTabController
 → agent-browser CLI / daemon
@@ -596,7 +596,7 @@ sequenceDiagram
     participant Tab as WebContents debugger
 
     Tool->>Runtime: automation command(tabId)
-    Runtime->>Runtime: ownership + origin permission
+    Runtime->>Runtime: ownership + expectedOrigin binding
     Runtime->>Controller: ensureSession(tabId)
     Controller->>Gateway: create one-time lease
     Controller->>AB: --session S --provider desktop-forge open --json
@@ -677,7 +677,8 @@ agent-browser close 不得关闭 Electron tab。即使上游行为发生变化�
 | download wait/get/path | Electron |
 | file chooser wait/setFiles | Electron |
 | clipboard | Electron |
-| screenshot | Electron CDP screenshot service |
+| plain screenshot/clip | Electron CDP screenshot service |
+| PDF | Electron `webContents.printToPDF`（公开接口保持 agent-browser `pdf` 语义） |
 | coordinate CUA | Electron input service |
 | ownership/claim/finalize | Electron |
 | raw dev CDP | Electron security gate + debugger transport |
@@ -687,18 +688,21 @@ agent-browser close 不得关闭 Electron tab。即使上游行为发生变化�
 | 最终中性能力 | agent-browser |
 | --- | --- |
 | automation snapshot | `snapshot --json` |
-| click/double click | `click` / `dblclick` |
+| semantic click/fill/check/hover/text | 原生 `find` |
+| ref/CSS click/double click | `click` / `dblclick` |
 | fill/type/focus | `fill` / `type` / `focus` |
-| press/keydown/keyup | 对应 keyboard command |
+| press/keydown/keyup/type/insertText | 对应 keyboard command |
 | hover | `hover` |
 | select/check/uncheck | 对应 element action |
 | scroll into view | `scrollintoview` |
+| directional scroll | `scroll [direction] [amount] [--selector]` |
 | drag | `drag` |
 | wait selector/text/function | `wait` 的受控子集 |
 | text/html/value/attribute | `get text/html/value/attr` |
 | count/box/styles | `get count/box/styles` |
 | visible/enabled/checked | `is visible/enabled/checked` |
 | readable rendered DOM | `read` 或 snapshot 的受控结果 |
+| selector/annotated screenshot | `screenshot [selector] [path] [--annotate]` |
 
 ### 10.3 不暴露的 agent-browser 能力
 
@@ -745,7 +749,12 @@ tab.automation.focus
 tab.automation.fill
 tab.automation.type
 tab.automation.press
+tab.automation.keydown
+tab.automation.keyup
+tab.automation.keyboard.type
+tab.automation.keyboard.insertText
 tab.automation.hover
+tab.automation.scroll
 tab.automation.select
 tab.automation.check
 tab.automation.uncheck
@@ -760,6 +769,8 @@ tab.automation.count
 tab.automation.isVisible
 tab.automation.isEnabled
 tab.automation.isChecked
+tab.automation.read
+tab.pdf
 ```
 
 Browser Client 最终从：
@@ -779,21 +790,32 @@ tab.automation
 默认 action locator：
 
 ```ts
-type BrowserAutomationTarget =
+type BrowserAutomationSelector =
   | { ref: string; snapshotId: string }
+  | { css: string; advanced: true }
+
+type BrowserAutomationTarget =
+  | BrowserAutomationSelector
   | { role: string; name?: string; exact?: boolean }
   | { label: string; exact?: boolean }
   | { placeholder: string; exact?: boolean }
   | { text: string; exact?: boolean }
+  | { alt: string; exact?: boolean }
+  | { title: string; exact?: boolean }
   | { testId: string }
-  | { css: string; advanced: true }
+  | { first: string; advanced: true }
+  | { last: string; advanced: true }
+  | { nth: number; selector: string; advanced: true }
 ```
 
 规则：
 
 - snapshot ref 是第一选择。
-- role/label/placeholder/text/testId 是第二选择。
+- role/label/placeholder/text/alt/title/testId/first/last/nth 只在 agent-browser 原生
+  `find` 支持的 click/fill/check/hover/getText 上使用。
+- 其他 element action、getter、wait、drag、scroll target 使用 snapshot ref 或 advanced CSS。
 - CSS 只能显式标记为 advanced fallback。
+- semantic locator 不做 `get count` preflight，避免检查与动作之间的 DOM 竞态；未找到和歧义错误由原生 `find` 返回。
 - 不允许模型把 `[ref=e12]` 当 CSS attribute。
 - 不允许无 snapshot 依据重复提交同一个失败 CSS。
 
@@ -852,9 +874,8 @@ tab.dev.cdp Runtime.evaluate
 
 该能力要求：
 
-- `browser_origin`。
 - `browser_cdp`。
-- exact `expectedOrigin`。
+- 从当前 tab 捕获 HTTP/HTTPS origin 并写入 exact `expectedOrigin`。
 - 高风险 metadata。
 - Gateway 当前 tab 限定。
 
@@ -974,11 +995,11 @@ agent-browser 通过 Gateway 收到 Page/Network event，并自动观察导航�
 
 等待优先级：
 
-1. Electron 导航命令自身的完成语义。
-2. agent-browser 的 selector/text/URL/function wait。
+1. Electron 导航命令负责等待导航提交。
+2. 需要页面生命周期完成时，使用 agent-browser 的 `wait --load load`；需要业务就绪时，再使用 selector/text/URL/function wait。
 3. 最短必要的固定 timeout，只用于没有可观察信号的 UI 动画。
 
-禁止把 `networkidle` 作为默认完成条件。
+`networkidle` 必须透传给 agent-browser，并且只在任务明确要求网络空闲时使用，不得作为默认完成条件。
 
 ### 13.3 触发动作与等待
 
@@ -1017,13 +1038,12 @@ agent-browser 通过 Gateway 收到 Page/Network event，并自动观察导航�
 2. 验证 tab 存在。
 3. 验证 owner session。
 4. 读取当前 URL。
-5. 请求或复用 `browser_origin` 权限。
-6. 把获批 origin 写入 `expectedOrigin`。
-7. Runtime 再次比较实际 origin。
-8. 只有一致时才调用 agent-browser。
-9. 高风险文件、下载、CDP 再叠加专项权限。
+5. 从当前 URL 捕获 HTTP/HTTPS origin 并写入 `expectedOrigin`，不单独请求 origin 权限。
+6. Runtime 再次比较实际 origin。
+7. 只有一致时才调用 agent-browser。
+8. 页面交互、文件、下载、CDP 再叠加对应专项权限。
 
-页面在授权后换源时必须返回 `ORIGIN_CHANGED`。
+页面在 origin 捕获后换源时必须返回 `ORIGIN_CHANGED`。
 
 ### 14.3 Gateway 隔离
 
@@ -1248,11 +1268,52 @@ Electron 文档说明：对已 attach debugger 的 `WebContents` 打开 DevTools
 - DevTools 关闭后，下一次命令可以重新建立 session。
 - 主应用自身 DevTools 不得通过 Gateway 获得被控 tab 权限。
 
-## 20. Browser Tool 和 Skill 边界
+## 20. Browser Tools 和 Skill 边界
 
-### 20.1 Browser Tool
+### 20.1 Browser Tools
 
-模型只看到 typed Browser Tool，不看到：
+模型只看到 7 个 typed、按能力分组的 Browser Tool：
+
+- `browser_tabs`。
+- `browser_navigate`。
+- `browser_snapshot`。
+- `browser_read`。
+- `browser_action`。
+- `browser_wait`。
+- `browser_cdp`。
+
+每个 Tool 的参数根节点保持 object，并在 `operation` 字段中使用按 `command` 区分的联合；它们共用同一个 Authorized Browser Capability 和 Browser Protocol 翻译层。旧的宽泛 `browser` Tool 不再向模型注册。
+
+代码结构：
+
+```text
+packages/opencode/src/tool/browser/
+├── common.ts
+├── tabs.ts
+├── navigate.ts
+├── snapshot.ts
+├── read.ts
+├── action.ts
+├── wait.ts
+├── cdp.ts
+└── index.ts
+```
+
+例如：
+
+```json
+{
+  "operation": {
+    "command": "tab.automation.getText",
+    "target": {
+      "ref": "e12",
+      "snapshotId": "snapshot-id"
+    }
+  }
+}
+```
+
+模型看不到：
 
 - agent-browser CLI。
 - agent-browser provider。
@@ -1280,7 +1341,7 @@ Skill 不得：
 - 读取 provider 配置。
 - 连接 Gateway。
 - 读取 transport token。
-- 绕过 origin permission。
+- 绕过 `expectedOrigin` 同源绑定或专项权限。
 
 旧 `read-web-content` Skill 中的 `tab.playwright.html` 调用迁移到 `tab.automation.getHtml` 或新的 page HTML getter。
 
@@ -1588,7 +1649,7 @@ CDP 暴露范围：
 WebContentsView 直接展示，不使用 stream
 
 模型入口：
-typed Browser Tool / Authorized Browser Capability
+7 个 capability-scoped typed Browser Tools / Authorized Browser Capability
 
 普通读取：
 snapshot + typed getter

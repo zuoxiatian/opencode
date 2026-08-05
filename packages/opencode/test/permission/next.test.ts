@@ -481,6 +481,21 @@ test("disabled - disables edit/write/apply_patch when edit denied", () => {
   expect(result.has("bash")).toBe(false)
 })
 
+test("disabled - legacy browser permission controls capability browser tools", () => {
+  const result = Permission.disabled(
+    ["browser_tabs", "browser_action", "browser_cdp", "read"],
+    [
+      { permission: "*", pattern: "*", action: "allow" },
+      { permission: "browser", pattern: "*", action: "deny" },
+      { permission: "browser_cdp", pattern: "*", action: "allow" },
+    ],
+  )
+  expect(result.has("browser_tabs")).toBe(true)
+  expect(result.has("browser_action")).toBe(true)
+  expect(result.has("browser_cdp")).toBe(false)
+  expect(result.has("read")).toBe(false)
+})
+
 test("disabled - does not disable when partially denied", () => {
   const result = Permission.disabled(
     ["bash"],

@@ -113,7 +113,7 @@ export class TabHandle {
     return this.navigationCommand("tab.reload")
   }
 
-  screenshot(input: Pick<BrowserScreenshotInput, "clip" | "fullPage"> = {}) {
+  screenshot(input: BrowserScreenshotInput = {}) {
     return this.screenshotResult(input).then((screenshot) => {
       if (!screenshot.data) throw new Error("Browser screenshot did not include image data")
       return Uint8Array.from(Buffer.from(screenshot.data, "base64"))
@@ -126,6 +126,21 @@ export class TabHandle {
       command: { name: "tab.screenshot", ...input },
       tabId: this.id,
     }).then((result) => requireBrowserResult(result.data.screenshot, "screenshot"))
+  }
+
+  pdf() {
+    return this.pdfResult().then((pdf) => {
+      if (!pdf.data) throw new Error("Browser PDF did not include data")
+      return Uint8Array.from(Buffer.from(pdf.data, "base64"))
+    })
+  }
+
+  pdfResult() {
+    return this.transport.command<BrowserCommandData>({
+      browserId: this.browserId,
+      command: { name: "tab.pdf" },
+      tabId: this.id,
+    }).then((result) => requireBrowserResult(result.data.pdf, "PDF"))
   }
 
   state() {

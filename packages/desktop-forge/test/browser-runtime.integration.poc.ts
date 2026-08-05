@@ -67,6 +67,7 @@ async function runPoc() {
             <label for="query">Query</label>
             <input id="query" placeholder="Search">
             <button id="dialog">Open dialog</button>
+            <button id="state-target">State target</button>
             <input data-testid="upload" type="file">
             <a id="download" href="/download" download>Download file</a>
             <iframe title="Cross frame" src="http://localhost:${frame.port}/frame"></iframe>
@@ -145,9 +146,87 @@ async function runPoc() {
         const searchRef = snapshot.content.match(/textbox "Query" \[ref=(e\d+)\]/)?.[1]
         const frameRef = snapshot.content.match(/textbox "Frame query" \[ref=(e\d+)\]/)?.[1]
         const dialogRef = snapshot.content.match(/button "Open dialog" \[ref=(e\d+)\]/)?.[1]
+        const stateRef = snapshot.content.match(/button "State target" \[ref=(e\d+)\]/)?.[1]
         assert.ok(searchRef)
         assert.ok(frameRef)
         assert.ok(dialogRef)
+        assert.ok(stateRef)
+
+        step("element-state-waits-and-ref-count")
+        const stateTarget = { ref: stateRef, snapshotId: snapshot.snapshotId }
+        await command(runtime, {
+            command: {
+                name: "tab.automation.waitFor",
+                state: "attached",
+                target: stateTarget,
+                timeout: 2_000,
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        await command(runtime, {
+            command: {
+                name: "tab.automation.waitFor",
+                state: "visible",
+                target: stateTarget,
+                timeout: 2_000,
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        assert.equal((await command(runtime, {
+            command: { name: "tab.automation.count", target: stateTarget },
+            expectedOrigin: origin,
+            tabId,
+        })).data.count, 1)
+        await command(runtime, {
+            command: {
+                expression: "(() => { document.querySelector('#state-target').style.display = 'none'; return true })()",
+                name: "tab.automation.waitFor",
+                timeout: 2_000,
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        await command(runtime, {
+            command: {
+                name: "tab.automation.waitFor",
+                state: "hidden",
+                target: stateTarget,
+                timeout: 2_000,
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        assert.equal((await command(runtime, {
+            command: { name: "tab.automation.count", target: stateTarget },
+            expectedOrigin: origin,
+            tabId,
+        })).data.count, 1)
+        await command(runtime, {
+            command: {
+                expression: "(() => { document.querySelector('#state-target').remove(); return true })()",
+                name: "tab.automation.waitFor",
+                timeout: 2_000,
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        await command(runtime, {
+            command: {
+                name: "tab.automation.waitFor",
+                state: "detached",
+                target: stateTarget,
+                timeout: 2_000,
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        assert.equal((await command(runtime, {
+            command: { name: "tab.automation.count", target: stateTarget },
+            expectedOrigin: origin,
+            tabId,
+        })).data.count, 0)
         await command(runtime, {
             command: {
                 name: "tab.automation.fill",
@@ -160,11 +239,35 @@ async function runPoc() {
         assert.equal((await command(runtime, {
             command: {
                 name: "tab.automation.getValue",
-                target: { name: "Query", role: "textbox" },
+                target: { ref: searchRef, snapshotId: snapshot.snapshotId },
             },
             expectedOrigin: origin,
             tabId,
         })).data.value, "semantic-role")
+        await command(runtime, {
+            command: {
+                name: "tab.automation.focus",
+                target: { ref: searchRef, snapshotId: snapshot.snapshotId },
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        await command(runtime, {
+            command: {
+                name: "tab.automation.keyboard.insertText",
+                text: "-keyboard",
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
+        assert.equal((await command(runtime, {
+            command: {
+                name: "tab.automation.getValue",
+                target: { ref: searchRef, snapshotId: snapshot.snapshotId },
+            },
+            expectedOrigin: origin,
+            tabId,
+        })).data.value, "semantic-role-keyboard")
         step("oopif-fill")
         await command(runtime, {
             command: {
@@ -217,12 +320,54 @@ async function runPoc() {
         assert.ok(screenshot)
         assert.equal(screenshot.mimeType, "image/png")
         assert.ok(screenshot.width > 0 && screenshot.height > 0)
+        const elementScreenshot = (await command(runtime, {
+            command: {
+                name: "tab.screenshot",
+                target: { advanced: true, css: "#query" },
+            },
+            expectedOrigin: origin,
+            tabId,
+        })).data.screenshot
+        assert.ok(elementScreenshot?.data)
+        assert.ok(elementScreenshot.width > 0 && elementScreenshot.height > 0)
+        const annotated = (await command(runtime, {
+            command: { annotate: true, name: "tab.screenshot" },
+            expectedOrigin: origin,
+            tabId,
+        })).data.screenshot
+        assert.ok(annotated?.data)
+        assert.ok(annotated.snapshotId)
+        const annotatedDialogRef = annotated.annotations
+            ?.find((annotation) => annotation.name === "Open dialog")?.ref
+        assert.ok(annotatedDialogRef)
+        const pdf = (await command(runtime, {
+            command: { name: "tab.pdf" },
+            expectedOrigin: origin,
+            tabId,
+        })).data.pdf
+        assert.equal(pdf?.mimeType, "application/pdf")
+        assert.ok(pdf?.data)
+        const readable = (await command(runtime, {
+            command: { name: "tab.automation.read" },
+            expectedOrigin: origin,
+            tabId,
+        })).data.readable
+        assert.match(readable?.content ?? "", /Query/)
+        await command(runtime, {
+            command: {
+                amount: 100,
+                direction: "down",
+                name: "tab.automation.scroll",
+            },
+            expectedOrigin: origin,
+            tabId,
+        })
 
         const dialogResult = await command(runtime, {
             command: {
                 name: "tab.dialog.wait",
                 timeout: 15_000,
-                trigger: { ref: dialogRef, snapshotId: snapshot.snapshotId },
+                trigger: { ref: annotatedDialogRef, snapshotId: annotated.snapshotId },
             },
             expectedOrigin: origin,
             tabId,
@@ -306,7 +451,7 @@ async function runPoc() {
         assert.match(String((await command(runtime, {
             command: {
                 name: "tab.automation.getValue",
-                target: { testId: "upload" },
+                target: { advanced: true, css: "[data-testid=upload]" },
             },
             expectedOrigin: origin,
             tabId,
@@ -421,6 +566,25 @@ async function runPoc() {
             tabId: isolatedTabId,
         })
 
+        step("daemon-timeout-termination")
+        const timeoutStarted = Date.now()
+        const timedOut = await command(runtime, {
+            command: {
+                milliseconds: 30_000,
+                name: "tab.automation.waitFor",
+                timeout: 100,
+            },
+            expectedOrigin: origin,
+            tabId,
+        }).catch((error: unknown) => error)
+        assert.equal(browserCode(timedOut), "TIMEOUT")
+        assert.match((await command(runtime, {
+            command: { name: "tab.automation.snapshot" },
+            expectedOrigin: origin,
+            tabId,
+        })).data.automationSnapshot?.content ?? "", /Query/)
+        assert.ok(Date.now() - timeoutStarted < 5_000)
+
         step("navigation-and-stale-ref")
         await command(runtime, {
             command: { name: "tab.goto", url: `http://127.0.0.1:${main.port}/page-2` },
@@ -509,8 +673,10 @@ async function runPoc() {
         )
         process.stdout.write(JSON.stringify({
             concurrentTabs: true,
+            daemonTimeoutTermination: true,
             debuggerReconnect: true,
             directPage: true,
+            elementStateWaits: true,
             oopif: true,
             runtime: true,
             success: true,

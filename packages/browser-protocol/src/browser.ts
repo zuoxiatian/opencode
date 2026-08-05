@@ -105,6 +105,8 @@ export interface BrowserCommandData {
   html?: string
   logs?: import("./automation").BrowserDevLogEntry[]
   navigation?: BrowserNavigationResult
+  pdf?: import("./automation").BrowserPdf
+  readable?: import("./automation").BrowserReadableContent
   styles?: Record<string, string>
   screenshot?: import("./automation").BrowserScreenshot
   tab?: BrowserTabState

@@ -1,32 +1,45 @@
 import type {
+  BrowserAutomationSelector,
   BrowserAutomationTarget,
+  BrowserAutomationWait,
   BrowserClipboardItem,
+  BrowserPdf,
   BrowserScreenshot,
 } from "@opencode-ai/browser-protocol"
 import { BROWSER_COMMAND_NAMES } from "@opencode-ai/browser-protocol"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Effect, Schema } from "effect"
 import path from "path"
-import { BrowserClient, BrowserClientError, CdpCapability, type BrowserTransportOptions } from "../browser"
-import { desktopBrowserConnection } from "../browser/config"
-import { Bus } from "../bus"
-import { File } from "../file"
-import { FileWatcher } from "../file/watcher"
-import { Instance } from "../project/instance"
-import { assertExternalDirectoryEffect } from "./external-directory"
-import * as Tool from "./tool"
+import { BrowserClient, BrowserClientError, CdpCapability, type BrowserTransportOptions } from "../../browser"
+import { desktopBrowserConnection } from "../../browser/config"
+import { Bus } from "../../bus"
+import { File } from "../../file"
+import { FileWatcher } from "../../file/watcher"
+import { Instance } from "../../project/instance"
+import { assertExternalDirectoryEffect } from "../external-directory"
+import * as Tool from "../tool"
 
-const AutomationTarget = Schema.Union([
+export const AutomationSelector = Schema.Union([
   Schema.Struct({
-    ref: Schema.String
-      .check(Schema.isPattern(/^e[0-9]+$/))
-      .annotate({
-        description: "Exact e<number> ref copied from the latest tab.automation.snapshot content; never use a tag, CSS selector, role, or tab ID",
-      }),
+    ref: Schema.String.check(Schema.isPattern(/^e[0-9]+$/)).annotate({
+      description:
+        "Exact e<number> ref copied from the latest tab.automation.snapshot content; never use a tag, CSS selector, role, or tab ID",
+    }),
     snapshotId: Schema.String.annotate({
-      description: "Exact snapshot.snapshotId returned by the same latest tab.automation.snapshot call; this is not tabId",
+      description:
+        "Exact snapshot.snapshotId returned by the same latest tab.automation.snapshot call; this is not tabId",
     }),
   }),
+  Schema.Struct({
+    advanced: Schema.Literal(true),
+    css: Schema.String.annotate({
+      description: "Advanced CSS selector fallback, for example html or h1.article-title; do not put CSS in ref",
+    }),
+  }),
+])
+
+export const AutomationTarget = Schema.Union([
+  AutomationSelector,
   Schema.Struct({
     exact: Schema.optional(Schema.Boolean),
     name: Schema.optional(Schema.String),
@@ -45,15 +58,35 @@ const AutomationTarget = Schema.Union([
     text: Schema.String,
   }),
   Schema.Struct({
+    alt: Schema.String,
+    exact: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    exact: Schema.optional(Schema.Boolean),
+    title: Schema.String,
+  }),
+  Schema.Struct({
     testId: Schema.String,
   }),
   Schema.Struct({
     advanced: Schema.Literal(true),
-    css: Schema.String.annotate({
-      description: "Advanced CSS selector fallback, for example html or h1.article-title; do not put CSS in ref",
-    }),
+    first: Schema.String,
+  }),
+  Schema.Struct({
+    advanced: Schema.Literal(true),
+    last: Schema.String,
+  }),
+  Schema.Struct({
+    advanced: Schema.Literal(true),
+    nth: Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+    selector: Schema.String,
   }),
 ])
+
+const TimeoutValue = Schema.Number.check(Schema.isInt()).check(Schema.isBetween({
+  minimum: 1,
+  maximum: 600_000,
+}))
 
 export const BrowserParametersSchema = Schema.Struct({
   command: Schema.Literals(BROWSER_COMMAND_NAMES).annotate({
@@ -68,14 +101,22 @@ export const BrowserParametersSchema = Schema.Struct({
   historyFrom: Schema.optional(Schema.String),
   historyTo: Schema.optional(Schema.String),
   queries: Schema.optional(Schema.Array(Schema.String)),
-  timeout: Schema.optional(Schema.Number).annotate({
+  timeout: Schema.optional(TimeoutValue).annotate({
     description: "Top-level browser command timeout in milliseconds",
   }),
+  expression: Schema.optional(Schema.String),
+  loadState: Schema.optional(Schema.Literals(["domcontentloaded", "load", "networkidle"])),
+  milliseconds: Schema.optional(Schema.Number),
+  state: Schema.optional(Schema.Literals(["attached", "detached", "hidden", "visible"])),
   disposition: Schema.optional(Schema.Literals(["temporary", "deliverable", "handoff"])),
-  keep: Schema.optional(Schema.Array(Schema.Struct({
-    status: Schema.Literals(["deliverable", "handoff"]),
-    tabId: Schema.String,
-  }))),
+  keep: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        status: Schema.Literals(["deliverable", "handoff"]),
+        tabId: Schema.String,
+      }),
+    ),
+  ),
   bounds: Schema.optional(
     Schema.Struct({
       height: Schema.Number,
@@ -87,9 +128,10 @@ export const BrowserParametersSchema = Schema.Struct({
   imageFormat: Schema.optional(Schema.Literals(["png", "jpeg"])),
   quality: Schema.optional(Schema.Number),
   fullPage: Schema.optional(Schema.Boolean),
+  annotate: Schema.optional(Schema.Boolean),
   savePath: Schema.optional(
     Schema.String.annotate({
-      description: "Absolute path or workspace-relative path where tab.screenshot should save the PNG or JPEG",
+      description: "Absolute path or workspace-relative path where a screenshot or PDF should be saved",
     }),
   ),
   clip: Schema.optional(
@@ -102,15 +144,28 @@ export const BrowserParametersSchema = Schema.Struct({
   ),
   target: Schema.optional(AutomationTarget),
   sourceTarget: Schema.optional(AutomationTarget),
+  interactive: Schema.optional(Schema.Boolean),
   interactiveOnly: Schema.optional(Schema.Boolean),
+  compact: Schema.optional(Schema.Boolean),
+  depth: Schema.optional(Schema.Number),
+  selector: Schema.optional(Schema.String),
+  urls: Schema.optional(Schema.Boolean),
+  raw: Schema.optional(Schema.Boolean),
+  requireMd: Schema.optional(Schema.Boolean),
+  llms: Schema.optional(Schema.Literals(["index", "full"])),
+  outline: Schema.optional(Schema.Boolean),
+  filter: Schema.optional(Schema.String),
   snapshotId: Schema.optional(Schema.String).annotate({
-    description: "Legacy DOM-CUA snapshot ID used with nodeId; automation ref targets must put snapshotId inside target",
+    description:
+      "Legacy DOM-CUA snapshot ID used with nodeId; automation ref targets must put snapshotId inside target",
   }),
   nodeId: Schema.optional(Schema.String),
   value: Schema.optional(Schema.String),
   values: Schema.optional(Schema.Array(Schema.String)),
   attribute: Schema.optional(Schema.String),
   key: Schema.optional(Schema.String),
+  direction: Schema.optional(Schema.Literals(["down", "left", "right", "up"])),
+  amount: Schema.optional(Schema.Number),
   keys: Schema.optional(Schema.Array(Schema.String)),
   filePaths: Schema.optional(Schema.Array(Schema.String)),
   chooserId: Schema.optional(Schema.String),
@@ -128,28 +183,41 @@ export const BrowserParametersSchema = Schema.Struct({
   deltaY: Schema.optional(Schema.Number),
   scrollX: Schema.optional(Schema.Number),
   scrollY: Schema.optional(Schema.Number),
-  dragPath: Schema.optional(Schema.Array(Schema.Struct({
-    x: Schema.Number,
-    y: Schema.Number,
-  }))),
-  cuaButton: Schema.optional(Schema.Number.annotate({
-    description: "CUA mouse button: 1-left, 2-middle, 3-right, 4-back, or 5-forward",
-  })),
+  dragPath: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        x: Schema.Number,
+        y: Schema.Number,
+      }),
+    ),
+  ),
+  cuaButton: Schema.optional(
+    Schema.Number.annotate({
+      description: "CUA mouse button: 1-left, 2-middle, 3-right, 4-back, or 5-forward",
+    }),
+  ),
   text: Schema.optional(Schema.String),
-  clipboardItems: Schema.optional(Schema.Array(Schema.Struct({
-    entries: Schema.Array(Schema.Struct({
-      base64: Schema.optional(Schema.String),
-      mimeType: Schema.String,
-      text: Schema.optional(Schema.String),
-    })),
-    presentationStyle: Schema.optional(Schema.Literals(["attachment", "inline", "unspecified"])),
-  }))),
+  clipboardItems: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        entries: Schema.Array(
+          Schema.Struct({
+            base64: Schema.optional(Schema.String),
+            mimeType: Schema.String,
+            text: Schema.optional(Schema.String),
+          }),
+        ),
+        presentationStyle: Schema.optional(Schema.Literals(["attachment", "inline", "unspecified"])),
+      }),
+    ),
+  ),
   modifiers: Schema.optional(Schema.Array(Schema.Literals(["alt", "control", "meta", "shift"]))),
   method: Schema.optional(Schema.String).annotate({
     description: "Required top-level Chrome DevTools Protocol method for tab.dev.cdp, for example Runtime.evaluate",
   }),
   params: Schema.optional(Schema.Unknown).annotate({
-    description: "Chrome DevTools Protocol method parameters; for Runtime.evaluate put expression and returnByValue here",
+    description:
+      "Chrome DevTools Protocol method parameters; for Runtime.evaluate put expression and returnByValue here",
   }),
   targetId: Schema.optional(Schema.String),
   targetSessionId: Schema.optional(Schema.String),
@@ -162,6 +230,22 @@ export const BrowserParametersSchema = Schema.Struct({
 
 export type BrowserParameters = Schema.Schema.Type<typeof BrowserParametersSchema>
 const decodeBrowserParameters = Schema.decodeUnknownSync(BrowserParametersSchema)
+
+export const BrowserScope = {
+  browserId: Schema.optional(Schema.String),
+}
+
+export const TabScope = {
+  ...BrowserScope,
+  tabId: Schema.optional(Schema.String),
+}
+
+export const Timeout = Schema.optional(TimeoutValue).annotate({
+  description: "Browser command timeout in milliseconds",
+})
+
+export const browserOperationGuidance =
+  "Put exactly one command and all of its arguments inside the required operation object."
 
 export class BrowserCapabilityError extends Error {
   constructor(
@@ -180,10 +264,8 @@ export const AuthorizedBrowserCapability = {
       const params = decodeBrowserParameters(input)
       const options = transportOptions(ctx)
       const initialClient = new BrowserClient(options)
-      const currentOrigin = yield* authorizeBrowserCommand(
-        params,
-        ctx,
-        () => resolveCurrentOrigin(initialClient, params),
+      const currentOrigin = yield* authorizeBrowserCommand(params, ctx, () =>
+        resolveCurrentOrigin(initialClient, params),
       )
 
       const client = new BrowserClient({ ...options, expectedOrigin: currentOrigin })
@@ -228,28 +310,19 @@ export function authorizeBrowserCommand(
     }
 
     const automation = params.command.startsWith("tab.automation.")
-    const devCdp = params.command === "tab.dev.cdp" || params.command === "tab.dev.cdp.events"
-    const originRequired =
-      automation
-      || isMutating(params)
-      || devCdp
+    const devCdp =
+      params.command === "tab.dev.cdp" ||
+      params.command === "tab.dev.cdp.events" ||
+      (params.command === "tab.automation.waitFor" && params.expression !== undefined)
+    const passiveNative =
+      params.command === "tab.pdf"
+      || (params.command === "tab.screenshot" && (params.annotate === true || params.target !== undefined))
+    const originRequired = automation || passiveNative || isMutating(params) || devCdp
     if (!originRequired) return undefined
 
     const currentOrigin = yield* Effect.promise(resolveOrigin)
     if (!currentOrigin) throw new Error("The current browser tab does not have an HTTP or HTTPS origin")
-    if (automation || devCdp) {
-      yield* ctx.ask({
-        permission: "browser_origin",
-        patterns: [currentOrigin],
-        always: [currentOrigin],
-        metadata: {
-          command: params.command,
-          origin: currentOrigin,
-          ...(params.command === "tab.dev.cdp" && params.method ? { method: params.method } : {}),
-        },
-      })
-    }
-    if (!automation || isMutating(params)) {
+    if ((!automation && !passiveNative) || isMutating(params) || devCdp) {
       yield* ctx.ask({
         permission: devCdp ? "browser_cdp" : "browser_interaction",
         patterns: [currentOrigin],
@@ -265,77 +338,80 @@ export function authorizeBrowserCommand(
   })
 }
 
-export const BrowserTool = Tool.define(
-  "browser",
-  Effect.gen(function* () {
-    const fs = yield* AppFileSystem.Service
-    const bus = yield* Bus.Service
-    return {
-      description: [
-        "Control the desktop client's embedded browser through namespaced commands.",
-        "For screenshot requests, call tab.screenshot once: it returns an image attachment rendered directly in chat.",
-        "To also save a screenshot, pass savePath to the same tab.screenshot call; the tool writes the image directly and returns savedPath.",
-        "Do not use shell commands, curl, temporary files, tab.dev.cdp, or the screenshot asset reference to retrieve or save screenshots.",
-        "Before every semantic action, call tab.automation.snapshot and use its latest ref with snapshotId whenever possible.",
-        "A snapshot ref is only the exact e<number> token shown in the latest snapshot content, and target.snapshotId is the latest snapshot.snapshotId; neither an HTML tag such as html nor tabId is a ref or snapshotId.",
-        "After navigation or any state-changing action, take a fresh automation snapshot; never retry a STALE_REF.",
-        "Prefer snapshot refs, then role/label/placeholder/text/testId targets. CSS is an advanced fallback and requires { css, advanced: true }.",
-        "Do not guess locators absent from the latest snapshot, and do not retry an unchanged failed CSS target.",
-        "Use tab.automation.getBox/getHtml/getText/getValue/getAttribute for ordinary live-page reads.",
-        "Developer-only arbitrary JavaScript must use tab.dev.cdp with Runtime.evaluate; it requires browser_origin and browser_cdp approval, forces returnByValue: true, and must return bounded JSON-safe data.",
-        "For tab.dev.cdp, method is a required top-level field, for example { command: \"tab.dev.cdp\", method: \"Runtime.evaluate\", params: { expression: \"document.title\", returnByValue: true }, timeout: 10000 }; never put method inside params.",
-        "Do not use networkidle; the official Browser runtime does not support it.",
-        "tab.goto accepts url only; never pass waitUntil. Any legacy waitUntil field on tab.goto is ignored.",
-        "Do not call waitForLoadState after routine goto; goto already waits for navigation readiness.",
-        "Use tab.cua commands only when page geometry matters or semantic targeting is unavailable.",
-        "Tabs share the user's persistent browser session.",
-        "Use browser.user.openTabs followed by browser.user.claimTab to take over an existing user tab; never pass a user-tab claim ID as tabId.",
-        "Agent-created tabs are temporary unless marked deliverable or handoff.",
-        "Call tabs.finalize after the browser task to close temporary tabs and release claimed user tabs.",
-        "For dialog, file chooser, or download waits, pass the triggering target so waiting and clicking are atomic.",
-        "tab.download.wait returns a download ID; use tab.download.get to refresh its state and obtain the completed path.",
-        "Server-provided HTTP error pages remain visible; transport failures use the desktop error view.",
-      ].join(" "),
-      parameters: BrowserParametersSchema,
-      execute: (params: BrowserParameters, ctx: Tool.Context) =>
-        Effect.gen(function* () {
-          if (params.savePath && params.command !== "tab.screenshot") {
-            throw new Error("savePath is only supported by tab.screenshot")
-          }
-          const result = yield* AuthorizedBrowserCapability.execute(params, ctx)
-          const response = result.events.length ? { data: result.data, events: result.events } : result.data
-          const screenshot = findScreenshot(result.data)
-          const savedPath = params.savePath
-            ? yield* saveScreenshot(params.savePath, screenshot, ctx, fs, bus)
-            : undefined
-          const output = screenshot?.data ? stripScreenshotData(response, savedPath) : response
+export function defineBrowserTool<ID extends string, Parameters extends Schema.Decoder<unknown>>(
+  id: ID,
+  description: string,
+  parameters: Parameters,
+) {
+  return Tool.define(
+    id,
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const bus = yield* Bus.Service
+      return {
+        description,
+        parameters,
+        execute: (input: Schema.Schema.Type<Parameters>, ctx: Tool.Context) =>
+          executeBrowserTool((input as unknown as { operation: BrowserParameters }).operation, ctx, fs, bus),
+      }
+    }),
+  )
+}
 
-          return {
-            metadata: {
-              command: params.command,
-              savedPath,
-              tabId: params.tabId,
-              url: params.url,
-            },
-            output: JSON.stringify(output ?? {}, null, 2),
-            title: params.url ? `内嵌浏览器：${params.url}` : `内嵌浏览器：${params.command}`,
-            ...(screenshot?.data
-              ? {
-                  attachments: [
-                    {
-                      type: "file" as const,
-                      filename: `browser-${Date.now()}.${screenshot.mimeType === "image/jpeg" ? "jpg" : "png"}`,
-                      mime: screenshot.mimeType,
-                      url: `data:${screenshot.mimeType};base64,${screenshot.data}`,
-                    },
-                  ],
-                }
-              : {}),
-          }
-        }),
+function executeBrowserTool(
+  params: BrowserParameters,
+  ctx: Tool.Context,
+  fs: AppFileSystem.Interface,
+  bus: Bus.Interface,
+) {
+  return Effect.gen(function* () {
+    if (params.savePath && params.command !== "tab.screenshot" && params.command !== "tab.pdf") {
+      throw new Error("savePath is only supported by tab.screenshot and tab.pdf")
     }
-  }),
-)
+    const result = yield* AuthorizedBrowserCapability.execute(params, ctx)
+    const response = result.events.length ? { data: result.data, events: result.events } : result.data
+    const screenshot = findScreenshot(result.data)
+    const pdf = findPdf(result.data)
+    const savedPath = params.savePath
+      ? screenshot
+        ? yield* saveScreenshot(params.savePath, screenshot, ctx, fs, bus)
+        : yield* savePdf(params.savePath, pdf, ctx, fs, bus)
+      : undefined
+    const output = screenshot?.data
+      ? stripScreenshotData(response, savedPath)
+      : pdf?.data
+        ? stripPdfData(response, savedPath)
+        : response
+
+    return {
+      metadata: {
+        command: params.command,
+        savedPath,
+        tabId: params.tabId,
+        url: params.url,
+      },
+      output: JSON.stringify(output ?? {}, null, 2),
+      title: params.url ? `内嵌浏览器：${params.url}` : `内嵌浏览器：${params.command}`,
+      ...(screenshot?.data
+        ? {
+            attachments: [
+              {
+                type: "file" as const,
+                filename: `browser-${Date.now()}.${screenshot.mimeType === "image/jpeg" ? "jpg" : "png"}`,
+                mime: screenshot.mimeType,
+                url: `data:${screenshot.mimeType};base64,${screenshot.data}`,
+              },
+            ],
+          }
+        : {}),
+    }
+  })
+}
+
+/*
+ * Keep the model-facing tools above small and command-specific. The shared
+ * executor below remains the only translation layer to Browser Protocol.
+ */
 
 function transportOptions(ctx: Tool.Context): BrowserTransportOptions {
   const connection = desktopBrowserConnection()
@@ -352,7 +428,7 @@ function transportOptions(ctx: Tool.Context): BrowserTransportOptions {
 async function executeBrowserCommand(
   client: BrowserClient,
   params: BrowserParameters,
-  approvedOrigin?: string,
+  expectedOrigin?: string,
 ): Promise<unknown> {
   if (params.command === "browser.list") return { browsers: await client.browsers.list() }
   const browser = params.browserId ? await client.browsers.get(params.browserId) : await client.browsers.getDefault()
@@ -407,8 +483,7 @@ async function executeBrowserCommand(
   }
 
   const selected = params.tabId ? await browser.tabs.get(params.tabId) : await browser.tabs.selected()
-  const tab =
-    selected ?? (params.command === "tab.goto" ? await browser.tabs.new() : undefined)
+  const tab = selected ?? (params.command === "tab.goto" ? await browser.tabs.new() : undefined)
   if (!tab) throw new Error(`${params.command} requires an active browser tab`)
   if (params.command === "tab.state") return { tab: await tab.state() }
   if (params.command === "tab.activate") return { tab: await tab.activate() }
@@ -432,29 +507,61 @@ async function executeBrowserCommand(
   if (params.command === "tab.screenshot") {
     return {
       screenshot: await tab.screenshotResult({
+        annotate: params.annotate,
         clip: params.clip,
         fullPage: params.fullPage,
         imageFormat: params.imageFormat,
         quality: params.quality,
+        target: params.target ? automationSelector(params.target) : undefined,
       }),
     }
   }
+  if (params.command === "tab.pdf") return { pdf: await tab.pdfResult() }
   if (params.command === "tab.automation.snapshot") {
     return {
       snapshot: await tab.automation.snapshot({
+        compact: params.compact,
+        depth: params.depth,
+        interactive: params.interactive,
         interactiveOnly: params.interactiveOnly,
+        selector: params.selector,
+        urls: params.urls,
+      }),
+    }
+  }
+  if (params.command === "tab.automation.read") {
+    return {
+      readable: await tab.automation.read({
+        filter: params.filter,
+        llms: params.llms,
+        outline: params.outline,
+        raw: params.raw,
+        requireMd: params.requireMd,
+        timeoutMs: params.timeout,
+        url: params.url ? normalizeUrl(params.url) : undefined,
       }),
     }
   }
   if (params.command === "tab.automation.waitFor") {
-    const wait = params.target
-      ? { target: automationTarget(params.target) }
+    const wait: BrowserAutomationWait | undefined = params.target
+      ? {
+          state: params.state,
+          target: automationSelector(params.target),
+        }
       : params.text !== undefined
         ? { text: params.text }
         : params.url !== undefined
           ? { url: params.url }
-          : undefined
-    if (!wait) throw new Error("tab.automation.waitFor requires target, text, or url")
+          : params.loadState !== undefined
+            ? { loadState: params.loadState }
+            : params.expression !== undefined
+              ? { expression: params.expression }
+              : params.milliseconds !== undefined
+                ? { milliseconds: params.milliseconds }
+                : undefined
+    if (!wait) {
+      throw new Error("tab.automation.waitFor requires target, text, url, loadState, expression, or milliseconds")
+    }
     await tab.automation.waitFor(wait, { timeoutMs: params.timeout })
     return { value: true }
   }
@@ -462,17 +569,40 @@ async function executeBrowserCommand(
     if (!params.target || !params.sourceTarget) {
       throw new Error("tab.automation.drag requires sourceTarget and target")
     }
-    await tab.automation.drag(
-      automationTarget(params.sourceTarget),
-      automationTarget(params.target),
-      { timeoutMs: params.timeout },
-    )
+    await tab.automation.drag(automationSelector(params.sourceTarget), automationSelector(params.target), {
+      timeoutMs: params.timeout,
+    })
     return { value: true }
   }
   if (params.command === "tab.automation.press") {
     if (!params.key) throw new Error("tab.automation.press requires key")
     await tab.automation.press(params.key, {
-      target: params.target ? automationTarget(params.target) : undefined,
+      timeoutMs: params.timeout,
+    })
+    return { value: true }
+  }
+  if (params.command === "tab.automation.keydown" || params.command === "tab.automation.keyup") {
+    if (!params.key) throw new Error(`${params.command} requires key`)
+    await (params.command === "tab.automation.keydown"
+      ? tab.automation.keydown(params.key, { timeoutMs: params.timeout })
+      : tab.automation.keyup(params.key, { timeoutMs: params.timeout }))
+    return { value: true }
+  }
+  if (
+    params.command === "tab.automation.keyboard.type"
+    || params.command === "tab.automation.keyboard.insertText"
+  ) {
+    if (params.text === undefined) throw new Error(`${params.command} requires text`)
+    await (params.command === "tab.automation.keyboard.type"
+      ? tab.automation.keyboardType(params.text, { timeoutMs: params.timeout })
+      : tab.automation.insertText(params.text, { timeoutMs: params.timeout }))
+    return { value: true }
+  }
+  if (params.command === "tab.automation.scroll") {
+    await tab.automation.scroll({
+      amount: params.amount,
+      direction: params.direction,
+      target: params.target ? automationSelector(params.target) : undefined,
       timeoutMs: params.timeout,
     })
     return { value: true }
@@ -480,46 +610,47 @@ async function executeBrowserCommand(
   if (params.command.startsWith("tab.automation.")) {
     if (!params.target) throw new Error(`${params.command} requires target`)
     const target = automationTarget(params.target)
+    const selector = () => automationSelector(params.target)
     const options = { timeoutMs: params.timeout }
     if (params.command === "tab.automation.click") await tab.automation.click(target, options)
-    else if (params.command === "tab.automation.dblclick") await tab.automation.dblclick(target, options)
-    else if (params.command === "tab.automation.focus") await tab.automation.focus(target, options)
+    else if (params.command === "tab.automation.dblclick") await tab.automation.dblclick(selector(), options)
+    else if (params.command === "tab.automation.focus") await tab.automation.focus(selector(), options)
     else if (params.command === "tab.automation.fill") {
       if (params.value === undefined) throw new Error("tab.automation.fill requires value")
       await tab.automation.fill(target, params.value, options)
     } else if (params.command === "tab.automation.type") {
       if (params.value === undefined) throw new Error("tab.automation.type requires value")
-      await tab.automation.type(target, params.value, options)
+      await tab.automation.type(selector(), params.value, options)
     } else if (params.command === "tab.automation.hover") await tab.automation.hover(target, options)
     else if (params.command === "tab.automation.select") {
       const values = params.values ?? (params.value === undefined ? [] : [params.value])
       if (!values.length) throw new Error("tab.automation.select requires values")
-      await tab.automation.select(target, [...values], options)
+      await tab.automation.select(selector(), [...values], options)
     } else if (params.command === "tab.automation.check") await tab.automation.check(target, options)
-    else if (params.command === "tab.automation.uncheck") await tab.automation.uncheck(target, options)
+    else if (params.command === "tab.automation.uncheck") await tab.automation.uncheck(selector(), options)
     else if (params.command === "tab.automation.scrollIntoView") {
-      await tab.automation.scrollIntoView(target, options)
+      await tab.automation.scrollIntoView(selector(), options)
     } else if (params.command === "tab.automation.getText") {
       return tab.automation.getTextResult(target, options)
     } else if (params.command === "tab.automation.getHtml") {
-      return tab.automation.getHtmlResult(target, options)
+      return tab.automation.getHtmlResult(selector(), options)
     } else if (params.command === "tab.automation.getValue") {
-      return { value: await tab.automation.getValue(target, options) }
+      return { value: await tab.automation.getValue(selector(), options) }
     } else if (params.command === "tab.automation.getAttribute") {
       if (!params.attribute) throw new Error("tab.automation.getAttribute requires attribute")
-      return { value: await tab.automation.getAttribute(target, params.attribute, options) }
+      return { value: await tab.automation.getAttribute(selector(), params.attribute, options) }
     } else if (params.command === "tab.automation.getBox") {
-      return { box: await tab.automation.getBox(target, options) }
+      return { box: await tab.automation.getBox(selector(), options) }
     } else if (params.command === "tab.automation.getStyles") {
-      return { styles: await tab.automation.getStyles(target, options) }
+      return { styles: await tab.automation.getStyles(selector(), options) }
     } else if (params.command === "tab.automation.count") {
-      return { count: await tab.automation.count(target, options) }
+      return { count: await tab.automation.count(selector(), options) }
     } else if (params.command === "tab.automation.isVisible") {
-      return { value: await tab.automation.isVisible(target, options) }
+      return { value: await tab.automation.isVisible(selector(), options) }
     } else if (params.command === "tab.automation.isEnabled") {
-      return { value: await tab.automation.isEnabled(target, options) }
+      return { value: await tab.automation.isEnabled(selector(), options) }
     } else if (params.command === "tab.automation.isChecked") {
-      return { value: await tab.automation.isChecked(target, options) }
+      return { value: await tab.automation.isChecked(selector(), options) }
     } else {
       throw new Error(`Unsupported browser automation command: ${params.command}`)
     }
@@ -589,15 +720,14 @@ async function executeBrowserCommand(
     }
   }
   if (params.command === "tab.cua.drag") {
-    const path = params.dragPath?.map((point) => ({ ...point }))
-      ?? (
-        [params.fromX, params.fromY, params.toX, params.toY].every((value) => value !== undefined)
-          ? [
-              { x: params.fromX!, y: params.fromY! },
-              { x: params.toX!, y: params.toY! },
-            ]
-          : []
-      )
+    const path =
+      params.dragPath?.map((point) => ({ ...point })) ??
+      ([params.fromX, params.fromY, params.toX, params.toY].every((value) => value !== undefined)
+        ? [
+            { x: params.fromX!, y: params.fromY! },
+            { x: params.toX!, y: params.toY! },
+          ]
+        : [])
     if (!path.length) throw new Error("tab.cua.drag requires a non-empty dragPath")
     return {
       value: await tab.cua.drag({
@@ -640,7 +770,9 @@ async function executeBrowserCommand(
   }
   if (params.command === "tab.dialog.get") return { dialog: await tab.dialog() }
   if (params.command === "tab.dialog.wait") {
-    return { dialog: await tab.waitForDialog(params.timeout, params.target ? automationTarget(params.target) : undefined) }
+    return {
+      dialog: await tab.waitForDialog(params.timeout, params.target ? automationTarget(params.target) : undefined),
+    }
   }
   if (params.command === "tab.dialog.handle") {
     if (!params.dialogId || params.accept === undefined) {
@@ -665,10 +797,7 @@ async function executeBrowserCommand(
   }
   if (params.command === "tab.download.wait") {
     return {
-      download: await tab.waitForDownload(
-        params.timeout,
-        params.target ? automationTarget(params.target) : undefined,
-      ),
+      download: await tab.waitForDownload(params.timeout, params.target ? automationTarget(params.target) : undefined),
     }
   }
   if (params.command === "tab.download.get") {
@@ -679,10 +808,12 @@ async function executeBrowserCommand(
   if (params.command === "tab.clipboard.readText") return { text: await tab.clipboard.readText() }
   if (params.command === "tab.clipboard.write") {
     if (!params.clipboardItems?.length) throw new Error("tab.clipboard.write requires clipboardItems")
-    await tab.clipboard.write(params.clipboardItems.map((item) => ({
-      entries: item.entries.map((entry) => ({ ...entry })),
-      presentationStyle: item.presentationStyle,
-    })) satisfies BrowserClipboardItem[])
+    await tab.clipboard.write(
+      params.clipboardItems.map((item) => ({
+        entries: item.entries.map((entry) => ({ ...entry })),
+        presentationStyle: item.presentationStyle,
+      })) satisfies BrowserClipboardItem[],
+    )
     return { written: true }
   }
   if (params.command === "tab.clipboard.writeText") {
@@ -692,22 +823,18 @@ async function executeBrowserCommand(
   }
   if (params.command === "tab.dev.cdp") {
     if (!params.method) throw new Error("tab.dev.cdp requires a top-level method such as Runtime.evaluate")
-    if (!approvedOrigin) throw new Error("tab.dev.cdp requires an approved origin")
+    if (!expectedOrigin) throw new Error("tab.dev.cdp requires an HTTP or HTTPS page origin")
     const capability = await tab.capabilities.get("cdp")
     if (!(capability instanceof CdpCapability)) throw new Error("The current browser tab does not support CDP")
     return {
-      cdp: await capability.send(
-        params.method,
-        isRecord(params.params) ? params.params : undefined,
-        {
-          target: cdpTarget(params),
-          timeoutMs: params.timeout,
-        },
-      ),
+      cdp: await capability.send(params.method, isRecord(params.params) ? params.params : undefined, {
+        target: cdpTarget(params),
+        timeoutMs: params.timeout,
+      }),
     }
   }
   if (params.command === "tab.dev.cdp.events") {
-    if (!approvedOrigin) throw new Error("tab.dev.cdp.events requires an approved origin")
+    if (!expectedOrigin) throw new Error("tab.dev.cdp.events requires an HTTP or HTTPS page origin")
     const capability = await tab.capabilities.get("cdp")
     if (!(capability instanceof CdpCapability)) throw new Error("The current browser tab does not support CDP")
     return {
@@ -733,7 +860,7 @@ async function executeBrowserCommand(
 }
 
 function navigationUrl(params: BrowserParameters) {
-  if (params.command !== "tab.goto") return
+  if (params.command !== "tab.goto" && params.command !== "tab.automation.read") return
   if (!params.url) return
   return normalizeUrl(params.url)
 }
@@ -780,6 +907,7 @@ function isMutating(params: BrowserParameters) {
       "tab.automation.isChecked",
       "tab.automation.isEnabled",
       "tab.automation.isVisible",
+      "tab.automation.read",
       "tab.automation.snapshot",
       "tab.automation.waitFor",
     ].includes(command)
@@ -817,6 +945,13 @@ function automationTarget(target: BrowserParameters["target"]): BrowserAutomatio
   return target as BrowserAutomationTarget
 }
 
+function automationSelector(target: BrowserParameters["target"]): BrowserAutomationSelector {
+  if (!target || (!("ref" in target) && !("css" in target))) {
+    throw new Error("This command requires a snapshot ref or advanced CSS selector")
+  }
+  return target as BrowserAutomationSelector
+}
+
 function findScreenshot(input: unknown): BrowserScreenshot | undefined {
   if (!isRecord(input)) return
   if (isScreenshot(input.screenshot)) return input.screenshot
@@ -832,6 +967,16 @@ function isScreenshot(input: unknown): input is BrowserScreenshot {
   )
 }
 
+function findPdf(input: unknown): BrowserPdf | undefined {
+  if (!isRecord(input)) return
+  if (isPdf(input.pdf)) return input.pdf
+  return isRecord(input.data) && isPdf(input.data.pdf) ? input.data.pdf : undefined
+}
+
+function isPdf(input: unknown): input is BrowserPdf {
+  return isRecord(input) && input.mimeType === "application/pdf"
+}
+
 function stripScreenshotData(input: unknown, savedPath?: string): unknown {
   if (!isRecord(input)) return input
   if (!isScreenshot(input.screenshot)) {
@@ -842,11 +987,32 @@ function stripScreenshotData(input: unknown, savedPath?: string): unknown {
   return {
     ...input,
     screenshot: {
+      ...(input.screenshot.annotations ? { annotations: input.screenshot.annotations } : {}),
       attached: true,
       height: input.screenshot.height,
       mimeType: input.screenshot.mimeType,
       ...(savedPath ? { savedPath } : {}),
+      ...(input.screenshot.snapshotId ? { snapshotId: input.screenshot.snapshotId } : {}),
+      ...(input.screenshot.tabGeneration === undefined
+        ? {}
+        : { tabGeneration: input.screenshot.tabGeneration }),
       width: input.screenshot.width,
+    },
+  }
+}
+
+function stripPdfData(input: unknown, savedPath?: string): unknown {
+  if (!isRecord(input)) return input
+  if (!isPdf(input.pdf)) {
+    return isRecord(input.data) && isPdf(input.data.pdf)
+      ? { ...input, data: stripPdfData(input.data, savedPath) }
+      : input
+  }
+  return {
+    ...input,
+    pdf: {
+      mimeType: input.pdf.mimeType,
+      ...(savedPath ? { savedPath } : {}),
     },
   }
 }
@@ -882,6 +1048,44 @@ function saveScreenshot(
 
     const existed = yield* fs.existsSafe(filepath)
     yield* fs.writeWithDirs(filepath, Buffer.from(screenshot.data, "base64"))
+    yield* bus.publish(File.Event.Edited, { file: filepath })
+    yield* bus.publish(FileWatcher.Event.Updated, {
+      file: filepath,
+      event: existed ? "change" : "add",
+    })
+    return filepath
+  }).pipe(Effect.orDie)
+}
+
+function savePdf(
+  input: string,
+  pdf: BrowserPdf | undefined,
+  ctx: Tool.Context,
+  fs: AppFileSystem.Interface,
+  bus: Bus.Interface,
+) {
+  return Effect.gen(function* () {
+    if (!pdf?.data) throw new Error("tab.pdf did not return PDF data to save")
+    const initial = path.isAbsolute(input) ? input : path.join(Instance.directory, input)
+    const filepath = path.extname(initial) ? initial : `${initial}.pdf`
+    if (path.extname(filepath).toLowerCase() !== ".pdf") {
+      throw new Error("savePath extension must be .pdf")
+    }
+
+    yield* assertExternalDirectoryEffect(ctx, filepath)
+    yield* ctx.ask({
+      permission: "edit",
+      patterns: [path.relative(Instance.worktree, filepath)],
+      always: ["*"],
+      metadata: {
+        binary: true,
+        filepath,
+        mime: pdf.mimeType,
+      },
+    })
+
+    const existed = yield* fs.existsSafe(filepath)
+    yield* fs.writeWithDirs(filepath, Buffer.from(pdf.data, "base64"))
     yield* bus.publish(File.Event.Edited, { file: filepath })
     yield* bus.publish(FileWatcher.Event.Updated, {
       file: filepath,

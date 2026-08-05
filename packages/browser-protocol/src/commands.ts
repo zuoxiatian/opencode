@@ -1,4 +1,5 @@
 import type {
+  BrowserAutomationSelector,
   BrowserAutomationTarget,
   BrowserAutomationWait,
   BrowserCdpTarget,
@@ -40,47 +41,87 @@ export type BrowserCommand =
     }
   | { name: "tab.goto"; url: string }
   | ({ name: "tab.screenshot" } & BrowserScreenshotInput)
-  | { interactiveOnly?: boolean; name: "tab.automation.snapshot" }
+  | { name: "tab.pdf" }
+  | {
+      compact?: boolean
+      depth?: number
+      interactive?: boolean
+      interactiveOnly?: boolean
+      name: "tab.automation.snapshot"
+      selector?: string
+      urls?: boolean
+    }
   | {
       name:
         | "tab.automation.click"
-        | "tab.automation.dblclick"
-        | "tab.automation.focus"
         | "tab.automation.hover"
         | "tab.automation.check"
-        | "tab.automation.uncheck"
-        | "tab.automation.scrollIntoView"
       target: BrowserAutomationTarget
       timeout?: number
     }
   | {
-      name: "tab.automation.fill" | "tab.automation.type"
+      name:
+        | "tab.automation.dblclick"
+        | "tab.automation.focus"
+        | "tab.automation.uncheck"
+        | "tab.automation.scrollIntoView"
+      target: BrowserAutomationSelector
+      timeout?: number
+    }
+  | {
+      name: "tab.automation.fill"
       target: BrowserAutomationTarget
+      timeout?: number
+      value: string
+    }
+  | {
+      name: "tab.automation.type"
+      target: BrowserAutomationSelector
       timeout?: number
       value: string
     }
   | {
       key: string
       name: "tab.automation.press"
-      target?: BrowserAutomationTarget
+      timeout?: number
+    }
+  | {
+      name: "tab.automation.keydown" | "tab.automation.keyup"
+      key: string
+      timeout?: number
+    }
+  | {
+      name: "tab.automation.keyboard.insertText" | "tab.automation.keyboard.type"
+      text: string
+      timeout?: number
+    }
+  | {
+      amount?: number
+      direction?: "down" | "left" | "right" | "up"
+      name: "tab.automation.scroll"
+      target?: BrowserAutomationSelector
       timeout?: number
     }
   | {
       name: "tab.automation.select"
-      target: BrowserAutomationTarget
+      target: BrowserAutomationSelector
       timeout?: number
       values: string[]
     }
   | {
       name: "tab.automation.drag"
-      source: BrowserAutomationTarget
-      target: BrowserAutomationTarget
+      source: BrowserAutomationSelector
+      target: BrowserAutomationSelector
       timeout?: number
     }
   | ({ name: "tab.automation.waitFor"; timeout?: number } & BrowserAutomationWait)
   | {
+      name: "tab.automation.getText"
+      target: BrowserAutomationTarget
+      timeout?: number
+    }
+  | {
       name:
-        | "tab.automation.getText"
         | "tab.automation.getHtml"
         | "tab.automation.getValue"
         | "tab.automation.getBox"
@@ -89,14 +130,24 @@ export type BrowserCommand =
         | "tab.automation.isVisible"
         | "tab.automation.isEnabled"
         | "tab.automation.isChecked"
-      target: BrowserAutomationTarget
+      target: BrowserAutomationSelector
       timeout?: number
     }
   | {
       attribute: string
       name: "tab.automation.getAttribute"
-      target: BrowserAutomationTarget
+      target: BrowserAutomationSelector
       timeout?: number
+    }
+  | {
+      filter?: string
+      llms?: "full" | "index"
+      name: "tab.automation.read"
+      outline?: boolean
+      raw?: boolean
+      requireMd?: boolean
+      timeout?: number
+      url?: string
     }
   | { name: "tab.domCua.getVisibleDom" }
   | ({ name: "tab.domCua.click" | "tab.domCua.doubleClick" } & BrowserNodeInput)

@@ -332,11 +332,19 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     const command = services.request.command
     const tab = services.tab
 
-    if (command.name.startsWith("tab.automation.")) {
+    if (
+        command.name.startsWith("tab.automation.")
+        || (
+            command.name === "tab.screenshot"
+            && (command.annotate === true || command.target !== undefined)
+        )
+    ) {
         return services.automation.run(
             tab,
             services.request.sessionId,
-            command as Extract<BrowserCommand, { name: `tab.automation.${string}` }>,
+            command as
+                | Extract<BrowserCommand, { name: `tab.automation.${string}` }>
+                | Extract<BrowserCommand, { name: "tab.screenshot" }>,
             services.context.signal,
             services.request.expectedOrigin,
         )
@@ -392,6 +400,16 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             }
         }
         return { screenshot: await withDebugger(tab, (send) => captureScreenshot(send, command)) }
+    }
+    if (command.name === "tab.pdf") {
+        return {
+            pdf: {
+                data: (await tab.webContents.printToPDF({
+                    printBackground: true,
+                })).toString("base64"),
+                mimeType: "application/pdf",
+            },
+        }
     }
     if (command.name === "tab.dev.logs") {
         const levels = new Set(command.levels?.map((level) => level === "warning" ? "warn" : level))

@@ -15,7 +15,7 @@ class FakeController {
     readonly calls: Array<{ args: string[]; operation: string; timeout?: number }> = []
     readonly recordedRefs: string[][] = []
     readonly validated: Array<{ ref?: string; snapshotId: string }> = []
-    output: (input: { args: string[]; operation: string }) => AgentBrowserJsonResult =
+    output: (input: { args: string[]; operation: string }) => AgentBrowserJsonResult | Promise<AgentBrowserJsonResult> =
         () => ({ data: {}, success: true })
 
     transaction<T>(
@@ -25,11 +25,11 @@ class FakeController {
         return task({
             run: (input) => {
                 this.calls.push(input)
-                return Promise.resolve({
+                return Promise.resolve(this.output(input)).then((output) => ({
                     ...(this.childSessionId ? { childSessionId: this.childSessionId } : {}),
-                    output: this.output(input),
+                    output,
                     sessionGeneration: 1,
-                })
+                }))
             },
         })
     }
@@ -65,13 +65,13 @@ describe("agent-browser command adapter", () => {
         )
 
         expect(result.automationSnapshot).toMatchObject({
-            interactiveOnly: true,
+            interactiveOnly: false,
             snapshotId: "snapshot-1",
             tabGeneration: 7,
             tabId: "tab-1",
         })
         expect(controller.calls).toEqual([{
-            args: ["snapshot", "-i"],
+            args: ["snapshot"],
             operation: "snapshot",
             timeout: 10_000,
         }])
@@ -125,11 +125,180 @@ describe("agent-browser command adapter", () => {
         }])
     })
 
-    test("preflights semantic targets and maps typed locator errors", async () => {
+    test("implements element state waits with ref-aware native probes", async () => {
         const controller = new FakeController()
-        controller.output = () => ({ data: { count: 2 }, success: true })
+        controller.output = (input) => {
+            if (input.args[0] === "get" && input.args[1] === "count") {
+                return { data: { count: 1 }, success: true }
+            }
+            if (input.args[0] === "get" && input.args[1] === "styles") {
+                return { data: { styles: { display: "block" } }, success: true }
+            }
+            return { data: { visible: false }, success: true }
+        }
+
+        await adapter(controller).run(
+            tab(),
+            "owner",
+            automation({
+                name: "tab.automation.waitFor",
+                state: "hidden",
+                target: { advanced: true, css: "#spinner" },
+                timeout: 5_000,
+            }),
+        )
+        await adapter(controller).run(
+            tab(),
+            "owner",
+            automation({
+                name: "tab.automation.waitFor",
+                state: "attached",
+                target: { ref: "e12", snapshotId: "snapshot-1" },
+                timeout: 5_000,
+            }),
+        )
+
+        expect(controller.calls.map((call) => ({
+            args: call.args,
+            operation: call.operation,
+        }))).toEqual([
+            {
+                args: ["is", "visible", "#spinner"],
+                operation: "waitFor",
+            },
+            {
+                args: ["get", "styles", "@e12"],
+                operation: "waitFor",
+            },
+        ])
+        expect(controller.calls.every((call) =>
+            typeof call.timeout === "number"
+            && call.timeout > 0
+            && call.timeout <= 2_000)).toBe(true)
+        expect(controller.validated).toEqual([{ ref: "e12", snapshotId: "snapshot-1" }])
+    })
+
+    test("treats a missing ref as detached or hidden", async () => {
+        const controller = new FakeController()
+        controller.output = () => Promise.reject(new BrowserRuntimeException(
+            "LOCATOR_NOT_FOUND",
+            "Browser automation target was not found",
+            true,
+        ))
+
+        for (const state of ["detached", "hidden"] as const) {
+            await adapter(controller).run(
+                tab(),
+                "owner",
+                automation({
+                    name: "tab.automation.waitFor",
+                    state,
+                    target: { ref: "e12", snapshotId: "snapshot-1" },
+                    timeout: 100,
+                }),
+            )
+        }
+
+        expect(controller.calls.map((call) => call.args)).toEqual([
+            ["get", "styles", "@e12"],
+            ["is", "visible", "@e12"],
+        ])
+    })
+
+    test("reports an element wait timeout without racing the final native probe", async () => {
+        const controller = new FakeController()
+        controller.output = () => ({ data: { visible: true }, success: true })
 
         const error = await adapter(controller).run(
+            tab(),
+            "owner",
+            automation({
+                name: "tab.automation.waitFor",
+                state: "hidden",
+                target: { advanced: true, css: "#spinner" },
+                timeout: 1,
+            }),
+        ).catch((failure: unknown) => failure)
+
+        expect(error).toBeInstanceOf(BrowserRuntimeException)
+        expect((error as BrowserRuntimeException).browser).toMatchObject({
+            code: "TIMEOUT",
+            details: { causeCategory: "element_wait" },
+        })
+        expect(controller.calls.every((call) => (call.timeout ?? 0) >= 100)).toBe(true)
+    })
+
+    test("maps non-element wait conditions to native agent-browser wait", async () => {
+        const controller = new FakeController()
+        const waits = [
+            {
+                command: automation({ name: "tab.automation.waitFor", text: "Ready" }),
+                expected: ["wait", "--text", "Ready"],
+            },
+            {
+                command: automation({ name: "tab.automation.waitFor", url: "**/dashboard" }),
+                expected: ["wait", "--url", "**/dashboard"],
+            },
+            {
+                command: automation({ loadState: "networkidle", name: "tab.automation.waitFor" }),
+                expected: ["wait", "--load", "networkidle"],
+            },
+            {
+                command: automation({
+                    expression: "window.appReady === true",
+                    name: "tab.automation.waitFor",
+                }),
+                expected: ["wait", "--fn", "window.appReady === true"],
+            },
+            {
+                command: automation({ milliseconds: 20_000, name: "tab.automation.waitFor" }),
+                expected: ["wait", "20000"],
+                timeout: 21_000,
+            },
+        ]
+
+        for (const wait of waits) {
+            await adapter(controller).run(tab(), "owner", wait.command)
+        }
+
+        expect(controller.calls).toEqual(
+            waits.map((wait) => ({
+                args: wait.expected,
+                operation: "waitFor",
+                timeout: "timeout" in wait ? wait.timeout : 30_000,
+            })),
+        )
+    })
+
+    test("counts a ref by probing whether the referenced element is attached", async () => {
+        const attached = new FakeController()
+        attached.output = () => ({ data: { styles: { display: "block" } }, success: true })
+        const missing = new FakeController()
+        missing.output = () => ({ data: { styles: {} }, success: true })
+        const target = { ref: "e12", snapshotId: "snapshot-1" }
+
+        expect(await adapter(attached).run(
+            tab(),
+            "owner",
+            automation({ name: "tab.automation.count", target }),
+        )).toEqual({ count: 1 })
+        expect(await adapter(missing).run(
+            tab(),
+            "owner",
+            automation({ name: "tab.automation.count", target }),
+        )).toEqual({ count: 0 })
+        expect(attached.calls[0]).toEqual({
+            args: ["get", "styles", "@e12"],
+            operation: "count",
+            timeout: undefined,
+        })
+    })
+
+    test("routes semantic targets through native find without a count preflight", async () => {
+        const controller = new FakeController()
+        controller.output = () => ({ data: { filled: "@e1" }, success: true })
+
+        await adapter(controller).run(
             tab(),
             "owner",
             automation({
@@ -137,38 +306,180 @@ describe("agent-browser command adapter", () => {
                 target: { name: "Search", role: "textbox" },
                 value: "query",
             }),
-        ).catch((failure: unknown) => failure)
+        )
 
-        expect(error).toBeInstanceOf(BrowserRuntimeException)
-        expect((error as BrowserRuntimeException).browser).toMatchObject({
-            code: "AMBIGUOUS_LOCATOR",
-            details: { operation: "fill", selectorKind: "role" },
-        })
-        expect(controller.calls).toHaveLength(1)
-        expect(controller.calls[0].args.slice(0, 3)).toEqual(["get", "count", expect.stringContaining("xpath=")])
-        expect(controller.calls[0].args[2]).toContain("//label[")
+        expect(controller.calls).toEqual([{
+            args: ["find", "role", "textbox", "fill", "query", "--name", "Search"],
+            operation: "fill",
+            timeout: undefined,
+        }])
     })
 
-    test("returns LOCATOR_NOT_FOUND without running an action when preflight finds no target", async () => {
+    test("maps every native locator kind directly to agent-browser find", async () => {
         const controller = new FakeController()
-        controller.output = () => ({ data: { count: 0 }, success: true })
+        controller.output = () => ({ data: { clicked: "@e1" }, success: true })
+        const targets = [
+            { expected: ["find", "placeholder", "Search", "click", "--exact"], target: { exact: true, placeholder: "Search" } },
+            { expected: ["find", "alt", "Logo", "click"], target: { alt: "Logo" } },
+            { expected: ["find", "title", "Settings", "click"], target: { title: "Settings" } },
+            { expected: ["find", "testid", "save", "click"], target: { testId: "save" } },
+            { expected: ["find", "first", ".item", "click"], target: { advanced: true, first: ".item" } },
+            { expected: ["find", "last", ".item", "click"], target: { advanced: true, last: ".item" } },
+            {
+                expected: ["find", "nth", "2", ".item", "click"],
+                target: { advanced: true, nth: 2, selector: ".item" },
+            },
+        ] as const
 
-        const error = await adapter(controller).run(
-            tab(),
-            "owner",
-            automation({
-                name: "tab.automation.click",
-                target: { placeholder: "Search" },
-            }),
-        ).catch((failure: unknown) => failure)
+        for (const locator of targets) {
+            await adapter(controller).run(
+                tab(),
+                "owner",
+                automation({ name: "tab.automation.click", target: locator.target }),
+            )
+        }
 
-        expect(error).toBeInstanceOf(BrowserRuntimeException)
-        expect((error as BrowserRuntimeException).browser).toMatchObject({
-            code: "LOCATOR_NOT_FOUND",
-            details: { operation: "click", selectorKind: "placeholder" },
+        expect(controller.calls.map((call) => call.args)).toEqual(targets.map((locator) => locator.expected))
+    })
+
+    test("maps snapshot, keyboard, read, and semantic scroll options one-to-one", async () => {
+        const controller = new FakeController()
+        controller.output = (input) => input.operation === "snapshot"
+            ? { data: { refs: {}, snapshot: "document" }, success: true }
+            : input.operation === "read"
+                ? {
+                    data: {
+                        content: "# Page",
+                        contentType: "text/markdown",
+                        finalUrl: "https://example.test/docs",
+                        source: "http-markdown",
+                        status: 200,
+                        truncated: false,
+                        url: "https://example.test/docs",
+                    },
+                    success: true,
+                }
+                : { data: {}, success: true }
+
+        await adapter(controller).run(tab(), "owner", automation({
+            compact: true,
+            depth: 3,
+            interactive: true,
+            name: "tab.automation.snapshot",
+            selector: "main",
+            urls: true,
+        }))
+        await adapter(controller).run(tab(), "owner", automation({
+            name: "tab.automation.keyboard.type",
+            text: "hello",
+        }))
+        await adapter(controller).run(tab(), "owner", automation({
+            name: "tab.automation.keyboard.insertText",
+            text: " world",
+        }))
+        await adapter(controller).run(tab(), "owner", automation({
+            amount: 600,
+            direction: "right",
+            name: "tab.automation.scroll",
+            target: { advanced: true, css: ".pane" },
+        }))
+        const readable = await adapter(controller).run(tab(), "owner", automation({
+            llms: "full",
+            name: "tab.automation.read",
+            outline: true,
+            requireMd: true,
+            timeout: 4_000,
+            url: "https://example.test/docs",
+        }))
+
+        expect(controller.calls.map((call) => call.args)).toEqual([
+            ["snapshot", "--interactive", "--urls", "--compact", "--depth", "3", "--selector", "main"],
+            ["keyboard", "type", "hello"],
+            ["keyboard", "inserttext", " world"],
+            ["scroll", "right", "600", "--selector", ".pane"],
+            ["read", "https://example.test/docs", "--require-md", "--llms", "full", "--outline", "--timeout", "4000"],
+        ])
+        expect(readable.readable).toMatchObject({
+            content: "# Page",
+            source: "http-markdown",
+            status: 200,
         })
-        expect(controller.calls).toHaveLength(1)
-        expect(controller.calls[0].operation).toBe("count")
+    })
+
+    test("returns native annotated screenshots as in-memory assets", async () => {
+        const controller = new FakeController()
+        const outputPaths: string[] = []
+        controller.output = async (input) => {
+            const filepath = input.args.find((argument) => /\.(?:jpe?g|png)$/.test(argument))
+            if (!filepath) throw new Error("Expected screenshot output path")
+            outputPaths.push(filepath)
+            if (filepath.endsWith(".jpg")) {
+                const jpeg = Buffer.from([
+                    0xff, 0xd8,
+                    0xff, 0xc0, 0x00, 0x0b, 0x08,
+                    0x00, 0x64,
+                    0x00, 0xc8,
+                    0x03, 0x01, 0x11,
+                    0xff, 0xd9,
+                ])
+                await Bun.write(filepath, jpeg)
+                return { data: { path: filepath }, success: true }
+            }
+            const png = Buffer.alloc(24)
+            Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png)
+            png.writeUInt32BE(320, 16)
+            png.writeUInt32BE(180, 20)
+            await Bun.write(filepath, png)
+            return {
+                data: {
+                    annotations: [{
+                        box: { height: 20, width: 80, x: 10, y: 12 },
+                        name: "Save",
+                        number: 1,
+                        ref: "e1",
+                        role: "button",
+                    }],
+                    path: filepath,
+                },
+                success: true,
+            }
+        }
+
+        const screenshot = await adapter(controller).run(tab(), "owner", {
+            annotate: true,
+            name: "tab.screenshot",
+        })
+        const jpeg = await adapter(controller).run(tab(), "owner", {
+            imageFormat: "jpeg",
+            name: "tab.screenshot",
+            quality: 80,
+            target: { advanced: true, css: ".card" },
+        })
+        expect(screenshot.screenshot).toMatchObject({
+            annotations: [{ number: 1, ref: "e1", role: "button" }],
+            height: 180,
+            mimeType: "image/png",
+            snapshotId: "snapshot-1",
+            tabGeneration: 7,
+            width: 320,
+        })
+        expect(Buffer.from(screenshot.screenshot?.data ?? "", "base64")).toHaveLength(24)
+        expect(jpeg.screenshot).toMatchObject({
+            height: 100,
+            mimeType: "image/jpeg",
+            width: 200,
+        })
+        expect(controller.calls[1].args).toEqual([
+            "screenshot",
+            ".card",
+            outputPaths[1],
+            "--screenshot-format",
+            "jpeg",
+            "--screenshot-quality",
+            "80",
+        ])
+        expect(controller.recordedRefs.at(-1)).toEqual(["e1"])
+        expect(await Promise.all(outputPaths.map((filepath) => Bun.file(filepath).exists()))).toEqual([false, false])
     })
 
     test("returns live box and HTML getter results", async () => {
@@ -316,6 +627,7 @@ function tab(
         id: "tab-1",
         webContents: {
             getURL: () => url,
+            printToPDF: () => Promise.resolve(Buffer.from("%PDF-1.7\n")),
         },
     } as EmbeddedTab
 }

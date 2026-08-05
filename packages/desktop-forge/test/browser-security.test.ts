@@ -32,6 +32,28 @@ describe("BrowserSecurityGate", () => {
             request({ method: "Runtime.evaluate", name: "tab.dev.cdp" }),
             state(),
         )).toThrow("CDP commands require an approved page origin")
+        expect(() => gate.ensureAllowed(
+            request({ annotate: true, name: "tab.screenshot" }),
+            state(),
+        )).toThrow("Browser automation requires an approved page origin")
+        expect(() => gate.ensureAllowed(
+            request({ name: "tab.pdf" }),
+            state(),
+        )).toThrow("Browser automation requires an approved page origin")
+        expect(() => gate.ensureAllowed(
+            request({ name: "tab.screenshot" }),
+            state(),
+        )).not.toThrow()
+    })
+
+    test("only allows HTTP and HTTPS URLs for native read", () => {
+        expect(() => new BrowserSecurityGate().ensureAllowed(
+            request(
+                { name: "tab.automation.read", url: "file:///etc/passwd" },
+                { expectedOrigin: "https://example.com" },
+            ),
+            state(),
+        )).toThrow("Unsupported browser URL protocol: file:")
     })
 
     test("detects an origin change after permission was granted", () => {

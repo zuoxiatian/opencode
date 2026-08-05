@@ -38,12 +38,16 @@ const DOCUMENTS: Record<string, string> = {
     "# Automation",
     "",
     "Use `tab.automation.snapshot()` before semantic interaction and reuse refs with their snapshotId.",
-    "Routine `tab.goto()` already waits for navigation readiness; do not add `networkidle` waits.",
+    "Snapshots default to the full accessibility tree; pass `{ interactive: true }` only when an interactive-only tree is sufficient.",
+    "Native role/text/label/placeholder/alt/title/testId/first/last/nth locators are available for click, fill, check, hover, and getText. Other element operations require a snapshot ref or advanced CSS.",
+    '`tab.goto()` returns after navigation commits. Use `waitFor({ loadState: "load" })` when page lifecycle completion matters.',
+    "Use `networkidle` only when explicitly required, then wait for a target or text when application readiness matters.",
   ].join("\n"),
   screenshots: [
     "# Screenshots",
     "",
-    "Call `tab.screenshot(options)` to receive the screenshot bytes directly.",
+    "Call `tab.screenshot(options)` to receive screenshot bytes directly. `target` captures a ref/CSS element and `annotate` adds numbered labels plus fresh snapshot metadata.",
+    "Call `tab.pdf()` to receive the current page as PDF bytes.",
   ].join("\n"),
   "tab-claiming-iab": [
     "# In-app browser tab claiming",
@@ -76,7 +80,7 @@ export class BrowserDocumentation {
       "# Browser API",
       "",
       "`agent.browsers` selects a browser. A selected browser exposes `tabs`, `user`, `capabilities`, `documentation()`, and `nameSession()`.",
-      "A tab exposes `automation`, `dom_cua`, `cua`, `clipboard`, `dev`, and `capabilities`, plus navigation, screenshot, dialog, title, URL, and lifecycle methods.",
+      "A tab exposes `automation`, `dom_cua`, `cua`, `clipboard`, `dev`, and `capabilities`, plus navigation, screenshot, PDF, dialog, title, URL, and lifecycle methods.",
     ].join("\n")
   }
 

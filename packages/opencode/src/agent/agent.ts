@@ -87,7 +87,6 @@ export const layer = Layer.effect(
           "*": "allow",
           browser_cdp: "ask",
           browser_interaction: "ask",
-          browser_origin: "ask",
           doom_loop: "ask",
           external_directory: {
             "*": "ask",

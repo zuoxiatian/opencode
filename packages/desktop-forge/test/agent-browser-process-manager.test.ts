@@ -192,6 +192,45 @@ describe("agent-browser ProcessManager", () => {
         expect(await readdir(directory)).toEqual(["other.config"])
     })
 
+    test("terminates one exact daemon immediately and removes its sidecars", async () => {
+        const runtimeDir = await mkdtemp("/tmp/df-process-manager-")
+        const directory = path.join(
+            runtimeDir,
+            "sockets",
+            "namespaces",
+            "desktop-forge",
+            "run",
+        )
+        const daemon = Bun.spawn([
+            process.execPath,
+            "-e",
+            "process.on('SIGTERM', () => undefined); setInterval(() => undefined, 1000)",
+        ], {
+            stderr: "ignore",
+            stdout: "ignore",
+        })
+        await mkdir(directory, { recursive: true })
+        await Promise.all([
+            writeFile(path.join(directory, "df-tab.config"), "{}"),
+            writeFile(path.join(directory, "df-tab.pid"), String(daemon.pid)),
+            writeFile(path.join(directory, "df-tab.sock"), ""),
+            writeFile(path.join(directory, "other.config"), "{}"),
+        ])
+
+        try {
+            await createManager(runtimeDir).terminate({
+                cdpUrl: "ws://127.0.0.1:43127/cdp/opaque",
+                session: "df-tab",
+                timeout: 25,
+            })
+
+            expect(await daemon.exited).not.toBe(0)
+            expect(await readdir(directory)).toEqual(["other.config"])
+        } finally {
+            daemon.kill()
+        }
+    })
+
     test("rejects version mismatches", async () => {
         const manager = createManager(await mkdtemp("/tmp/df-process-manager-"), "0.32.0")
         const error = await manager.prepare().catch((failure: unknown) => failure)

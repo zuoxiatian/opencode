@@ -87,7 +87,17 @@ export class BrowserSecurityGate {
         ) {
             throw new BrowserRuntimeException("PERMISSION_DENIED", "CDP commands require an approved page origin")
         }
-        if (request.command.name.startsWith("tab.automation.") && !request.expectedOrigin) {
+        if (
+            (
+                request.command.name.startsWith("tab.automation.")
+                || request.command.name === "tab.pdf"
+                || (
+                    request.command.name === "tab.screenshot"
+                    && (request.command.annotate === true || request.command.target !== undefined)
+                )
+            )
+            && !request.expectedOrigin
+        ) {
             throw new BrowserRuntimeException(
                 "PERMISSION_DENIED",
                 "Browser automation requires an approved page origin",
@@ -111,6 +121,9 @@ export class BrowserSecurityGate {
             }
         }
         if (request.command.name === "tab.goto") validateWebUrl(request.command.url)
+        if (request.command.name === "tab.automation.read" && request.command.url) {
+            validateWebUrl(request.command.url)
+        }
         if (request.command.name === "tab.screenshot" && request.command.clip) {
             if (
                 request.command.clip.width <= 0

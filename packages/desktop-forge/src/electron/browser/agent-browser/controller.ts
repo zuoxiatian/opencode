@@ -12,7 +12,7 @@ import {
     type AgentBrowserDiagnosticSink,
 } from "./diagnostics"
 
-type AgentBrowserRunner = Pick<AgentBrowserProcessManager, "prepare" | "run" | "stop">
+type AgentBrowserRunner = Pick<AgentBrowserProcessManager, "prepare" | "run" | "stop" | "terminate">
 
 type QueuedCommandInput = Pick<
     AgentBrowserCommandInput,
@@ -24,8 +24,10 @@ type SessionRecord = {
     agentSession: string
     closing: boolean
     cdpUrl: string
+    daemonTerminated: boolean
     idleTimer?: NodeJS.Timeout
     leaseId: string
+    leaseRevoked: boolean
     latestSnapshot?: {
         id: string
         refs: Set<string>
@@ -165,12 +167,14 @@ export class AgentBrowserTabController {
         record.closing = true
         record.abort.abort()
         await this.queues.get(tabId)?.catch(() => undefined)
-        await this.processes.stop({
-            cdpUrl: record.cdpUrl,
-            session: record.agentSession,
-            timeout: 3_000,
-        }).catch(() => undefined)
-        this.gateway.revoke(record.leaseId)
+        if (!record.daemonTerminated) {
+            await this.processes.stop({
+                cdpUrl: record.cdpUrl,
+                session: record.agentSession,
+                timeout: 3_000,
+            }).catch(() => undefined)
+        }
+        this.revokeLease(record)
         this.records.delete(tabId)
         this.diagnostic?.({
             activeSessions: this.records.size,
@@ -280,7 +284,9 @@ export class AgentBrowserTabController {
             agentSession: sessionName(tab.id, ownerSessionId),
             cdpUrl: issued.url,
             closing: false,
+            daemonTerminated: false,
             leaseId: issued.lease.id,
+            leaseRevoked: false,
             ownerSessionId,
             sessionGeneration: 1,
             tab,
@@ -312,6 +318,7 @@ export class AgentBrowserTabController {
             pendingCommands: this.queues.size,
             tabHash: diagnosticHash(record.tab.id),
         })
+        record.daemonTerminated = false
         return this.processes.run({
             ...input,
             cdpUrl: record.cdpUrl,
@@ -354,6 +361,10 @@ export class AgentBrowserTabController {
                     pendingCommands: this.queues.size,
                     tabHash: diagnosticHash(record.tab.id),
                 })
+                if (interruptsDaemon(error)) {
+                    await this.interrupt(record)
+                    throw error
+                }
                 if (!reconnect || !this.recoverable(record, error) || record.closing) throw error
                 await this.reconnect(record)
                 return this.execute(record, input, false)
@@ -368,7 +379,32 @@ export class AgentBrowserTabController {
             session: record.agentSession,
             timeout: 3_000,
         }).catch(() => undefined)
-        this.gateway.revoke(record.leaseId)
+        record.daemonTerminated = true
+        this.revokeLease(record)
+        this.replaceLease(record)
+    }
+
+    private async interrupt(record: SessionRecord) {
+        this.revokeLease(record)
+        record.latestSnapshot = undefined
+        await this.processes.terminate({
+            cdpUrl: record.cdpUrl,
+            session: record.agentSession,
+            timeout: 1_000,
+        })
+        record.daemonTerminated = true
+        if (
+            this.destroyed
+            || record.closing
+            || this.records.get(record.tab.id) !== record
+        ) {
+            return
+        }
+        this.ensureActive(record)
+        this.replaceLease(record)
+    }
+
+    private replaceLease(record: SessionRecord) {
         const issued = this.gateway.createLease({
             active: () =>
                 !this.destroyed
@@ -383,6 +419,7 @@ export class AgentBrowserTabController {
         })
         record.cdpUrl = issued.url
         record.leaseId = issued.lease.id
+        record.leaseRevoked = false
         record.latestSnapshot = undefined
         record.sessionGeneration += 1
         this.diagnostic?.({
@@ -392,6 +429,12 @@ export class AgentBrowserTabController {
             reconnectCount: record.sessionGeneration - 1,
             tabHash: diagnosticHash(record.tab.id),
         })
+    }
+
+    private revokeLease(record: SessionRecord) {
+        if (record.leaseRevoked) return
+        this.gateway.revoke(record.leaseId)
+        record.leaseRevoked = true
     }
 
     private recoverable(record: SessionRecord, error: unknown) {
@@ -478,4 +521,15 @@ function recoverable(error: unknown) {
             || error.browser.code === "TARGET_GONE"
         )
         && error.browser.retryable
+}
+
+function interruptsDaemon(error: unknown) {
+    return error instanceof BrowserRuntimeException
+        && (
+            error.browser.code === "CANCELLED"
+            || (
+                error.browser.code === "TIMEOUT"
+                && error.browser.details?.causeCategory === "process_timeout"
+            )
+        )
 }

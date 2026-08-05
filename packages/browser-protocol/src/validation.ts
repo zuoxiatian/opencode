@@ -31,7 +31,13 @@ export const BROWSER_COMMAND_NAMES = [
   "tab.automation.isChecked",
   "tab.automation.isEnabled",
   "tab.automation.isVisible",
+  "tab.automation.keydown",
+  "tab.automation.keyboard.insertText",
+  "tab.automation.keyboard.type",
+  "tab.automation.keyup",
   "tab.automation.press",
+  "tab.automation.read",
+  "tab.automation.scroll",
   "tab.automation.scrollIntoView",
   "tab.automation.select",
   "tab.automation.snapshot",
@@ -72,6 +78,7 @@ export const BROWSER_COMMAND_NAMES = [
   "tab.forward",
   "tab.goto",
   "tab.mark",
+  "tab.pdf",
   "tab.reload",
   "tab.screenshot",
   "tab.state",
@@ -202,41 +209,116 @@ function validateCommand(command: Record<string, unknown>, name: string) {
     readScreenshot(command)
     return
   }
+  if (name === "tab.pdf") return
   if (name === "tab.automation.snapshot") {
+    if (command.interactive !== undefined) {
+      readBoolean(command.interactive, "command.interactive")
+    }
     if (command.interactiveOnly !== undefined) {
       readBoolean(command.interactiveOnly, "command.interactiveOnly")
+    }
+    if (command.interactive !== undefined && command.interactiveOnly !== undefined) {
+      throw new Error("command.interactive and command.interactiveOnly cannot be used together")
+    }
+    if (command.urls !== undefined) readBoolean(command.urls, "command.urls")
+    if (command.compact !== undefined) readBoolean(command.compact, "command.compact")
+    if (command.selector !== undefined) readString(command.selector, "command.selector")
+    const depth = readOptionalNumber(command.depth, "command.depth")
+    if (depth !== undefined && (!Number.isInteger(depth) || depth < 0 || depth > 1_000)) {
+      throw new Error("command.depth must be an integer between 0 and 1000")
     }
     return
   }
   if (name.startsWith("tab.automation.")) {
     readTimeout(command.timeout)
+    if (name === "tab.automation.read") {
+      readOptionalString(command.url, "command.url")
+      if (command.raw !== undefined) readBoolean(command.raw, "command.raw")
+      if (command.requireMd !== undefined) readBoolean(command.requireMd, "command.requireMd")
+      if (command.outline !== undefined) readBoolean(command.outline, "command.outline")
+      readOptionalString(command.filter, "command.filter")
+      if (command.llms !== undefined && command.llms !== "index" && command.llms !== "full") {
+        throw new Error("command.llms must be index or full")
+      }
+      return
+    }
     if (name === "tab.automation.waitFor") {
       if (typeof command.timeout === "number" && command.timeout > 120_000) {
         throw new Error("command.timeout must not exceed 120000 milliseconds for automation waits")
       }
-      if ([
-        command.target !== undefined,
-        command.text !== undefined,
-        command.url !== undefined,
-      ].filter(Boolean).length !== 1) {
-        throw new Error("command requires exactly one of target, text, or url")
+      if (
+        [command.expression, command.loadState, command.milliseconds, command.target, command.text, command.url].filter(
+          (value) => value !== undefined,
+        ).length !== 1
+      ) {
+        throw new Error("command requires exactly one of target, text, url, loadState, expression, or milliseconds")
       }
-      if (command.target !== undefined) readAutomationTarget(command.target)
+      if (command.target !== undefined) readAutomationSelector(command.target)
+      if (command.state !== undefined) {
+        if (command.target === undefined) throw new Error("command.state requires command.target")
+        if (!["attached", "detached", "hidden", "visible"].includes(readString(command.state, "command.state"))) {
+          throw new Error("command.state must be attached, detached, hidden, or visible")
+        }
+      }
+      if (command.expression !== undefined) readString(command.expression, "command.expression")
+      if (command.loadState !== undefined) {
+        if (!["domcontentloaded", "load", "networkidle"].includes(readString(command.loadState, "command.loadState"))) {
+          throw new Error("command.loadState must be domcontentloaded, load, or networkidle")
+        }
+      }
+      if (command.milliseconds !== undefined) {
+        const milliseconds = readNumber(command.milliseconds, "command.milliseconds")
+        if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > 120_000) {
+          throw new Error("command.milliseconds must be an integer between 0 and 120000")
+        }
+      }
       if (command.text !== undefined) readString(command.text, "command.text")
       if (command.url !== undefined) readString(command.url, "command.url")
       return
     }
     if (name === "tab.automation.press") {
       readString(command.key, "command.key")
-      if (command.target !== undefined) readAutomationTarget(command.target)
+      if (command.target !== undefined) throw new Error("command.target is not supported for tab.automation.press")
+      return
+    }
+    if (name === "tab.automation.keydown" || name === "tab.automation.keyup") {
+      readString(command.key, "command.key")
+      return
+    }
+    if (name === "tab.automation.keyboard.type" || name === "tab.automation.keyboard.insertText") {
+      readStringAllowEmpty(command.text, "command.text")
+      return
+    }
+    if (name === "tab.automation.scroll") {
+      if (
+        command.direction !== undefined
+        && !["down", "left", "right", "up"].includes(readString(command.direction, "command.direction"))
+      ) {
+        throw new Error("command.direction must be down, left, right, or up")
+      }
+      const amount = readOptionalNumber(command.amount, "command.amount")
+      if (amount !== undefined && (!Number.isInteger(amount) || amount < 0 || amount > 1_000_000)) {
+        throw new Error("command.amount must be an integer between 0 and 1000000")
+      }
+      if (command.target !== undefined) readAutomationSelector(command.target)
       return
     }
     if (name === "tab.automation.drag") {
-      readAutomationTarget(command.source, "command.source")
-      readAutomationTarget(command.target)
+      readAutomationSelector(command.source, "command.source")
+      readAutomationSelector(command.target)
       return
     }
-    readAutomationTarget(command.target)
+    if (
+      name === "tab.automation.click"
+      || name === "tab.automation.fill"
+      || name === "tab.automation.hover"
+      || name === "tab.automation.check"
+      || name === "tab.automation.getText"
+    ) {
+      readAutomationTarget(command.target)
+    } else {
+      readAutomationSelector(command.target)
+    }
     if (name === "tab.automation.fill" || name === "tab.automation.type") {
       readStringAllowEmpty(command.value, "command.value")
     }
@@ -252,11 +334,7 @@ function validateCommand(command: Record<string, unknown>, name: string) {
     return
   }
   if (name === "tab.domCua.getVisibleDom") return
-  if (
-    name === "tab.domCua.click"
-    || name === "tab.domCua.doubleClick"
-    || name === "tab.domCua.downloadMedia"
-  ) {
+  if (name === "tab.domCua.click" || name === "tab.domCua.doubleClick" || name === "tab.domCua.downloadMedia") {
     readString(command.nodeId, "command.nodeId")
     readOptionalString(command.snapshotId, "command.snapshotId")
     if (name === "tab.domCua.downloadMedia") readTimeout(command.timeout)
@@ -279,10 +357,10 @@ function validateCommand(command: Record<string, unknown>, name: string) {
     return
   }
   if (
-    name === "tab.cua.click"
-    || name === "tab.cua.doubleClick"
-    || name === "tab.cua.downloadMedia"
-    || name === "tab.cua.move"
+    name === "tab.cua.click" ||
+    name === "tab.cua.doubleClick" ||
+    name === "tab.cua.downloadMedia" ||
+    name === "tab.cua.move"
   ) {
     readNumber(command.x, "command.x")
     readNumber(command.y, "command.y")
@@ -393,26 +471,27 @@ function validateCommand(command: Record<string, unknown>, name: string) {
 
 function readAutomationTarget(input: unknown, name = "command.target") {
   const target = readRecord(input, name)
-  const keys = ["ref", "role", "label", "placeholder", "text", "testId", "css"]
-    .filter((key) => target[key] !== undefined)
+  const keys = ["ref", "role", "label", "placeholder", "text", "alt", "title", "testId", "css", "first", "last", "nth"].filter(
+    (key) => target[key] !== undefined,
+  )
   if (keys.length !== 1) throw new Error(`${name} requires exactly one locator kind`)
   const key = keys[0]
-  const value = readString(target[key], `${name}.${key}`)
-  if (key === "ref" && !/^@?e[0-9]+$/.test(value)) {
+  const value = key === "nth" ? undefined : readString(target[key], `${name}.${key}`)
+  if (key === "ref" && (value === undefined || !/^@?e[0-9]+$/.test(value))) {
     throw new Error(`${name}.ref must be an e<number> ref copied from the latest automation snapshot`)
   }
   if (key === "ref") readString(target.snapshotId, `${name}.snapshotId`)
   if (key !== "ref" && target.snapshotId !== undefined) {
     throw new Error(`${name}.snapshotId is only supported for ref`)
   }
-  if (key === "css" && target.advanced !== true) {
-    throw new Error(`${name}.css requires advanced: true`)
+  if (["css", "first", "last", "nth"].includes(key) && target.advanced !== true) {
+    throw new Error(`${name}.${key} requires advanced: true`)
   }
-  if (key !== "css" && target.advanced !== undefined) {
-    throw new Error(`${name}.advanced is only supported for css`)
+  if (!["css", "first", "last", "nth"].includes(key) && target.advanced !== undefined) {
+    throw new Error(`${name}.advanced is only supported for css, first, last, or nth`)
   }
   if (target.exact !== undefined) {
-    if (!["role", "label", "placeholder", "text"].includes(key)) {
+    if (!["role", "label", "placeholder", "text", "alt", "title"].includes(key)) {
       throw new Error(`${name}.exact is not supported for ${key}`)
     }
     readBoolean(target.exact, `${name}.exact`)
@@ -421,6 +500,21 @@ function readAutomationTarget(input: unknown, name = "command.target") {
   if (key !== "role" && target.name !== undefined) {
     throw new Error(`${name}.name is only supported for role`)
   }
+  if (key === "nth") {
+    const nth = readNumber(target.nth, `${name}.nth`)
+    if (!Number.isInteger(nth) || nth < 0) throw new Error(`${name}.nth must be a non-negative integer`)
+    readString(target.selector, `${name}.selector`)
+  } else if (target.selector !== undefined) {
+    throw new Error(`${name}.selector is only supported for nth`)
+  }
+}
+
+function readAutomationSelector(input: unknown, name = "command.target") {
+  const target = readRecord(input, name)
+  if (!("ref" in target) && !("css" in target)) {
+    throw new Error(`${name} requires a snapshot ref or advanced CSS selector`)
+  }
+  readAutomationTarget(target, name)
 }
 
 function readScreenshot(command: Record<string, unknown>) {
@@ -438,6 +532,21 @@ function readScreenshot(command: Record<string, unknown>) {
     }
     if (height > 32_768 || width > 32_768 || x > 1_000_000 || y > 1_000_000) {
       throw new Error("command.clip exceeds the supported bounds")
+    }
+  }
+  if (command.target !== undefined) {
+    if (command.clip !== undefined) throw new Error("command.target and command.clip cannot be used together")
+    readAutomationSelector(command.target)
+  }
+  if (command.annotate !== undefined) {
+    readBoolean(command.annotate, "command.annotate")
+    if (command.clip !== undefined) throw new Error("command.annotate and command.clip cannot be used together")
+    if (
+      command.annotate === true
+      && isRecord(command.target)
+      && command.target.ref !== undefined
+    ) {
+      throw new Error("command.annotate cannot be combined with a ref target; use advanced CSS")
     }
   }
   if (command.fullPage !== undefined) readBoolean(command.fullPage, "command.fullPage")
@@ -486,8 +595,8 @@ function readOptionalNumber(input: unknown, name: string) {
 function readTimeout(input: unknown) {
   const timeout = readOptionalNumber(input, "command.timeout")
   if (timeout === undefined) return
-  if (timeout < 0 || timeout > 10 * 60_000) {
-    throw new Error("command.timeout must be between 0 and 600000 milliseconds")
+  if (!Number.isInteger(timeout) || timeout <= 0 || timeout > 10 * 60_000) {
+    throw new Error("command.timeout must be an integer between 1 and 600000 milliseconds")
   }
 }
 
@@ -503,11 +612,7 @@ function readStringAllowEmpty(input: unknown, name: string) {
 
 function readStringArray(input: unknown, name: string) {
   if (input === undefined) return undefined
-  if (
-    Array.isArray(input)
-    && input.length <= 1_000
-    && input.every((value) => typeof value === "string")
-  ) return input
+  if (Array.isArray(input) && input.length <= 1_000 && input.every((value) => typeof value === "string")) return input
   throw new Error(`${name} must be a string array`)
 }
 
@@ -524,10 +629,10 @@ function readClipboardItems(input: unknown) {
   input.forEach((itemInput, itemIndex) => {
     const item = readRecord(itemInput, `command.items[${itemIndex}]`)
     if (
-      item.presentationStyle !== undefined
-      && item.presentationStyle !== "attachment"
-      && item.presentationStyle !== "inline"
-      && item.presentationStyle !== "unspecified"
+      item.presentationStyle !== undefined &&
+      item.presentationStyle !== "attachment" &&
+      item.presentationStyle !== "inline" &&
+      item.presentationStyle !== "unspecified"
     ) {
       throw new Error(`command.items[${itemIndex}].presentationStyle is invalid`)
     }
@@ -540,15 +645,10 @@ function readClipboardItems(input: unknown) {
       if ((entry.text === undefined) === (entry.base64 === undefined)) {
         throw new Error(`command.items[${itemIndex}].entries[${entryIndex}] requires exactly one of text or base64`)
       }
-      if (entry.text !== undefined) readStringAllowEmpty(
-        entry.text,
-        `command.items[${itemIndex}].entries[${entryIndex}].text`,
-      )
+      if (entry.text !== undefined)
+        readStringAllowEmpty(entry.text, `command.items[${itemIndex}].entries[${entryIndex}].text`)
       if (entry.base64 !== undefined) {
-        const base64 = readStringAllowEmpty(
-          entry.base64,
-          `command.items[${itemIndex}].entries[${entryIndex}].base64`,
-        )
+        const base64 = readStringAllowEmpty(entry.base64, `command.items[${itemIndex}].entries[${entryIndex}].base64`)
         try {
           atob(base64)
         } catch {

@@ -12,6 +12,10 @@ import type {
 
 class FakeRunner {
     readonly calls: AgentBrowserCommandInput[] = []
+    readonly terminations: Array<Pick<
+        AgentBrowserCommandInput,
+        "cdpUrl" | "session" | "timeout"
+    >> = []
     handler: (input: AgentBrowserCommandInput) => Promise<{
         data: Record<string, unknown>
         success: boolean
@@ -32,6 +36,11 @@ class FakeRunner {
             args: ["close"],
             operation: "close",
         }).then(() => undefined)
+    }
+
+    terminate(input: Pick<AgentBrowserCommandInput, "cdpUrl" | "session" | "timeout">) {
+        this.terminations.push(input)
+        return Promise.resolve()
     }
 }
 
@@ -301,6 +310,35 @@ describe("agent-browser TabController", () => {
         await controller.destroy()
     })
 
+    test("terminates the daemon and replaces its lease after a process timeout", async () => {
+        const gateway = new FakeGateway()
+        const runner = new FakeRunner()
+        const controller = createController(gateway, runner)
+        const tab = fakeTab("tab-1", "owner")
+        runner.handler = (input) => input.operation === "wait"
+            ? Promise.reject(new BrowserRuntimeException(
+                "TIMEOUT",
+                "Browser automation command timed out",
+                true,
+                { causeCategory: "process_timeout", operation: "wait" },
+            ))
+            : Promise.resolve({ data: {}, success: true })
+
+        const error = await controller.run(command(tab, "wait"))
+            .catch((failure: unknown) => failure)
+
+        expect(error).toBeInstanceOf(BrowserRuntimeException)
+        expect((error as BrowserRuntimeException).browser.code).toBe("TIMEOUT")
+        expect(runner.terminations).toHaveLength(1)
+        expect(runner.terminations[0].cdpUrl).toContain("/lease-1")
+        expect(gateway.revoked).toEqual(["lease-1"])
+
+        const recovered = await controller.run(command(tab, "snapshot"))
+        expect(recovered.sessionGeneration).toBe(2)
+        expect(runner.calls.at(-1)?.cdpUrl).toContain("/lease-2")
+        await controller.destroy()
+    })
+
     test("maps raw Gateway startup failures", async () => {
         const gateway = new FakeGateway()
         const runner = new FakeRunner()
@@ -348,7 +386,8 @@ describe("agent-browser TabController", () => {
         await controller.closeTab(tab.id)
 
         await expect(commandResult).resolves.toBeInstanceOf(BrowserRuntimeException)
-        expect(runner.calls.map((call) => call.operation)).toEqual(["wait", "close"])
+        expect(runner.calls.map((call) => call.operation)).toEqual(["wait"])
+        expect(runner.terminations).toHaveLength(1)
         expect(gateway.revoked).toEqual(["lease-1"])
         expect(() => controller.recordSnapshot(tab.id, "owner"))
             .toThrow("Browser automation session is not ready")
@@ -411,7 +450,10 @@ function createController(
 ) {
     return new AgentBrowserTabController(
         gateway as unknown as CdpTabGateway,
-        runner as unknown as Pick<AgentBrowserProcessManager, "prepare" | "run" | "stop">,
+        runner as unknown as Pick<
+            AgentBrowserProcessManager,
+            "prepare" | "run" | "stop" | "terminate"
+        >,
         maxSessions,
         diagnostic,
         idleTimeout,
