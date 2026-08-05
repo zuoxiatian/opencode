@@ -97,7 +97,9 @@ export async function createMainWindow(state: MainState) {
 
 async function loadRenderer(window: BrowserWindowType) {
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-        await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+        const url = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+        if (url.hostname === "localhost") url.hostname = "127.0.0.1"
+        await window.loadURL(url.toString())
         window.webContents.openDevTools()
         return
     }

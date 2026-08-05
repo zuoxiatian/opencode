@@ -23,7 +23,7 @@ async function bootstrap() {
     }
 
     app.setName(APP_NAME)
-    app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
+    if (app.isPackaged) app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
     if (process.platform === "win32") app.setAppUserModelId(APP_ID)
 
     registerIpcHandlers(state)
