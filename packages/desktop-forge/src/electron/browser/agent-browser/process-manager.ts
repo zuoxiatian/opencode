@@ -12,7 +12,7 @@ import {
     writeFile,
 } from "node:fs/promises"
 import path from "node:path"
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { BrowserRuntimeException } from "../errors"
 import {
     DESKTOP_FORGE_AGENT_BROWSER_CDP_URL,
@@ -405,44 +405,72 @@ function execute(
         let stdoutBytes = 0
         let stderrBytes = 0
         let reason: "cancelled" | "output_limit" | "timeout" | undefined
-        const timer = setTimeout(() => {
+        let completed = false
+        let timer: NodeJS.Timeout | undefined
+        let forceTimer: NodeJS.Timeout | undefined
+        const finish = (exitCode: number | null, force = false) => {
+            if (completed) return
+            completed = true
+            if (timer) clearTimeout(timer)
+            if (forceTimer) clearTimeout(forceTimer)
+            signal?.removeEventListener("abort", cancel)
+            const result = {
+                exitCode,
+                reason,
+                stderrBytes,
+                stdout: Buffer.concat(stdout).toString("utf8"),
+            }
+            if (force) {
+                resolve(result)
+                return
+            }
+            void streamsSettled.then(() => resolve(result))
+        }
+        const finishAfterWindowsTermination = () => {
+            if (process.platform !== "win32") return
+            forceTimer = setTimeout(() => finish(null, true), 1_000)
+            forceTimer.unref()
+        }
+        timer = setTimeout(() => {
             reason = "timeout"
-            child.kill()
+            terminateChild(child)
+            finishAfterWindowsTermination()
         }, Math.max(1, timeout))
         timer.unref()
         const cancel = () => {
             reason = "cancelled"
-            child.kill()
+            terminateChild(child)
+            finishAfterWindowsTermination()
         }
         signal?.addEventListener("abort", cancel, { once: true })
         child.stdout.on("data", (data: Buffer) => {
             stdoutBytes += data.byteLength
             if (stdoutBytes > MAX_STDOUT_BYTES) {
                 reason = "output_limit"
-                child.kill()
+                terminateChild(child)
+                finishAfterWindowsTermination()
                 return
             }
             stdout.push(data)
+            // Bun-compiled Windows children can keep stdio open after the final JSON line.
+            const output = process.platform === "win32"
+                ? parseOutput(Buffer.concat(stdout).toString("utf8"))
+                : undefined
+            if (!output) return
+            terminateChild(child)
+            finish(output.success ? 0 : 1, true)
         })
         child.stderr.on("data", (data: Buffer) => {
             stderrBytes = Math.min(MAX_STDERR_BYTES, stderrBytes + data.byteLength)
         })
         child.once("error", (error) => {
-            clearTimeout(timer)
+            if (completed) return
+            if (timer) clearTimeout(timer)
+            if (forceTimer) clearTimeout(forceTimer)
             signal?.removeEventListener("abort", cancel)
             reject(error)
         })
-        child.once("close", async (exitCode) => {
-            clearTimeout(timer)
-            signal?.removeEventListener("abort", cancel)
-            await streamsSettled
-            resolve({
-                exitCode,
-                reason,
-                stderrBytes,
-                stdout: Buffer.concat(stdout).toString("utf8"),
-            })
-        })
+        child.once("close", (exitCode) => finish(exitCode))
     }).catch((error: unknown) => {
         if (error instanceof BrowserRuntimeException) throw error
         throw new BrowserRuntimeException(
@@ -452,6 +480,17 @@ function execute(
             { causeCategory: "spawn" },
         )
     })
+}
+
+function terminateChild(child: ChildProcess) {
+    if (process.platform !== "win32" || !child.pid) {
+        child.kill()
+        return
+    }
+    spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: "ignore",
+        windowsHide: true,
+    }).once("error", () => child.kill())
 }
 
 function streamSettled(stream: NodeJS.ReadableStream) {

@@ -37,6 +37,7 @@ export async function prepareAgentBrowser(ids: readonly RuntimeTargetId[]) {
         verify(binary, input.artifact.sha256, `agent-browser ${input.id}`)
         const directory = path.join(packageDir, "resources", "agent-browser", input.id)
         const executable = input.id === "win32-x64" ? "agent-browser.exe" : "agent-browser"
+        const executablePath = path.join(directory, executable)
         const provider = path.join(
           directory,
           input.id === "win32-x64"
@@ -44,17 +45,24 @@ export async function prepareAgentBrowser(ids: readonly RuntimeTargetId[]) {
             : "desktop-forge-agent-browser-provider",
         )
         await mkdir(directory, { recursive: true })
-        await writeFile(path.join(directory, executable), binary, { mode: 0o755 })
+        if (
+          !existsSync(executablePath)
+          || digest(await readFile(executablePath)) !== input.artifact.sha256
+        ) {
+          await writeFile(executablePath, binary, { mode: 0o755 })
+        }
         await run([
       bun,
       "build",
       "--compile",
           "--target",
           bunTarget(input.id),
+          ...providerBuildFlags(input.id),
           "--outfile",
           provider,
           path.join(packageDir, "script", "agent-browser-provider.ts"),
         ], { cwd: packageDir })
+        if (input.id === "win32-x64") await setWindowsGuiSubsystem(provider)
         if (process.platform === "darwin" && input.id.startsWith("darwin-")) {
       await run([
         "codesign",
@@ -66,7 +74,7 @@ export async function prepareAgentBrowser(ids: readonly RuntimeTargetId[]) {
         }
         if (input.id !== "win32-x64") {
           await Promise.all([
-            chmod(path.join(directory, executable), 0o755),
+            chmod(executablePath, 0o755),
             chmod(provider, 0o755),
           ])
         }
@@ -80,6 +88,7 @@ export async function prepareAgentBrowser(ids: readonly RuntimeTargetId[]) {
       ),
       `${JSON.stringify({
         providerSha256: digest(await readFile(provider)),
+        ...providerBuildFingerprint(input.id),
         providerSourceSha256,
         version: manifest.version,
       }, null, 2)}\n`,
@@ -119,6 +128,8 @@ async function prepared(
     return digest(await readFile(executable)) === input.artifact.sha256
       && fingerprint?.version === manifest.version
       && fingerprint.providerSourceSha256 === providerSourceSha256
+      && (!providerBuildFingerprint(input.id).providerBuild
+        || fingerprint.providerBuild === providerBuildFingerprint(input.id).providerBuild)
       && typeof fingerprint.providerSha256 === "string"
       && digest(await readFile(provider)) === fingerprint.providerSha256
   }))
@@ -138,6 +149,32 @@ function tarEntry(archive: Buffer, expected: string) {
     offset = start + Math.ceil(size / 512) * 512
   }
   throw new Error(`agent-browser archive is missing ${expected}`)
+}
+
+function providerBuildFlags(id: RuntimeTargetId) {
+  if (id === "win32-x64") return ["--windows-hide-console"]
+  return []
+}
+
+function providerBuildFingerprint(id: RuntimeTargetId) {
+  if (id === "win32-x64") return { providerBuild: "windows-gui-subsystem" }
+  return {}
+}
+
+async function setWindowsGuiSubsystem(file: string) {
+  const binary = await readFile(file)
+  const peOffset = binary.readUInt32LE(0x3c)
+  const subsystemOffset = peOffset + 24 + 68
+  const subsystem = binary.readUInt16LE(subsystemOffset)
+  if (binary.toString("ascii", peOffset, peOffset + 4) !== "PE\0\0") {
+    throw new Error(`${path.basename(file)} is not a PE executable`)
+  }
+  if (subsystem === 2) return
+  if (subsystem !== 3) {
+    throw new Error(`${path.basename(file)} has unsupported Windows subsystem ${subsystem}`)
+  }
+  binary.writeUInt16LE(2, subsystemOffset)
+  await writeFile(file, binary)
 }
 
 function tarString(value: Buffer) {
