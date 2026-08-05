@@ -1429,7 +1429,7 @@ export function FolderPanel(props: FolderPanelProps) {
                                             <SettingsSwitchRow
                                                 icon={Wrench}
                                                 title="显示工具调用"
-                                                description="展示文件、搜索、任务等非 Shell 工具调用。默认关闭。"
+                                                description="展示文件、搜索等非 Shell 工具调用；子任务始终展示。默认关闭。"
                                                 checked={props.chatVisibility.toolCalls}
                                                 onChange={(toolCalls) => updateChatVisibility({ toolCalls })}
                                             />

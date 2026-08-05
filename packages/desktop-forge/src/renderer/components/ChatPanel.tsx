@@ -13,6 +13,7 @@ import type {
     QuestionRequest,
     Session,
     SessionStatus,
+    Todo,
     FilePartInput,
     TextPartInput,
 } from "@opencode-ai/sdk/v2/client"
@@ -512,6 +513,7 @@ const isShellToolPart = (part: ToolPartView) => {
 }
 
 const isQuestionToolPart = (part: ToolPartView) => normalizeToolName(part.tool) === "question"
+const isTaskToolPart = (part: ToolPartView) => normalizeToolName(part.tool) === "task"
 
 const activeToolStatusLabel = (part: ToolPartView) => {
     const label = toolLabel(part)
@@ -783,6 +785,152 @@ function QuestionToolDetails(props: { part: ToolPartView }) {
     )
 }
 
+const taskSessionID = (part: ToolPartView) => {
+    const metadata = stateMetadata(part.state)
+    const fromMetadata = stringField(metadata, ["sessionId", "sessionID"])
+    if (fromMetadata) return fromMetadata
+    return stateOutput(part.state).match(/task_id\s*:\s*([^\s<"']+)/i)?.[1]
+}
+
+const taskResult = (part: ToolPartView) => {
+    const output = stateOutput(part.state)
+    const result = output.match(/<task_result>\s*([\s\S]*?)\s*<\/task_result>/i)?.[1]?.trim()
+    if (result) return result
+    return output.replace(/^task_id\s*:[^\n]*\n*/i, "").trim()
+}
+
+const todoPriorityLabel = (priority: string) => {
+    if (priority === "high") return "高"
+    if (priority === "low") return "低"
+    return "中"
+}
+
+function TaskToolDetails(props: { part: ToolPartView }) {
+    const sdk = useSDK()
+    const [opening, setOpening] = createSignal(false)
+    const [openError, setOpenError] = createSignal("")
+    const [loadingActivity, setLoadingActivity] = createSignal(false)
+    const [loadedActivity, setLoadedActivity] = createSignal<Part[]>([])
+    const sessionID = createMemo(() => taskSessionID(props.part))
+    const result = createMemo(() => taskResult(props.part))
+    const prompt = createMemo(() => stringField(props.part.state.input, ["prompt"]) ?? "")
+    const agent = createMemo(() => stringField(props.part.state.input, ["subagent_type"]) ?? "")
+    const error = createMemo(() => stateError(props.part.state))
+    const activity = createMemo(() => {
+        const id = sessionID()
+        const live = id
+            ? (sdk.store.message[id] ?? []).flatMap((message) => sdk.store.part[message.id] ?? [])
+            : []
+        return Array.from(new Map([...loadedActivity(), ...live].map((part) => [part.id, part])).values())
+            .filter((part): part is ToolPartView => part.type === "tool")
+            .filter((part) => !["task", "todowrite", "todoread"].includes(normalizeToolName(part.tool)))
+    })
+
+    createEffect(() => {
+        const id = sessionID()
+        if (!id) return
+        let active = true
+        setLoadingActivity(true)
+        setLoadedActivity([])
+        void sdk.client.session.messages({ sessionID: id, limit: 50 }, { throwOnError: false })
+            .then((response) => {
+                if (!active) return
+                setLoadedActivity(response.data?.flatMap((message) => message.parts) ?? [])
+            })
+            .catch(() => undefined)
+            .finally(() => {
+                if (active) setLoadingActivity(false)
+            })
+        onCleanup(() => {
+            active = false
+        })
+    })
+
+    const openSession = () => {
+        const id = sessionID()
+        if (!id || opening()) return
+        setOpening(true)
+        setOpenError("")
+        void sdk.client.session.get({ sessionID: id }, { throwOnError: false })
+            .then((response) => {
+                if (!response.data) {
+                    setOpenError("无法读取子任务会话")
+                    return
+                }
+                if (response.data.directory && response.data.directory !== sdk.directory()) {
+                    sdk.setDirectory(response.data.directory)
+                }
+                sdk.setSelectedSession(response.data)
+            })
+            .catch((reason: unknown) => setOpenError(reason instanceof Error ? reason.message : "无法打开子任务会话"))
+            .finally(() => setOpening(false))
+    }
+
+    return (
+        <div class="tool-detail-stack">
+            <Show when={agent()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">子任务类型</div>
+                        <div class="tool-task-agent">{value()}</div>
+                    </section>
+                )}
+            </Show>
+            <Show when={prompt()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">任务指令</div>
+                        <ToolCodeBlock>{value()}</ToolCodeBlock>
+                    </section>
+                )}
+            </Show>
+            <Show when={activity().length > 0 || loadingActivity()}>
+                <section class="tool-detail-section">
+                    <div class="tool-detail-heading">执行过程</div>
+                    <div class="tool-task-activity" data-scrollable>
+                        <For each={activity()}>
+                            {(item) => (
+                                <div class="tool-task-activity-item" data-status={item.state.status}>
+                                    <span class="tool-task-activity-icon" aria-hidden="true"><ToolIcon part={item} /></span>
+                                    <span class="tool-task-activity-title">{toolLabel(item)}</span>
+                                    <span class="tool-task-activity-description">{toolDescription(item) ?? ""}</span>
+                                    <span class="tool-task-activity-status">{formatToolStatus(item.state.status)}</span>
+                                </div>
+                            )}
+                        </For>
+                        <Show when={loadingActivity() && activity().length === 0}>
+                            <div class="tool-task-activity-empty">正在读取子任务活动...</div>
+                        </Show>
+                    </div>
+                </section>
+            </Show>
+            <Show when={result()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">子任务结果</div>
+                        <ToolCodeBlock>{value()}</ToolCodeBlock>
+                    </section>
+                )}
+            </Show>
+            <Show when={sessionID()}>
+                <button class="tool-task-open" type="button" disabled={opening()} onClick={openSession}>
+                    <Brain size={14} strokeWidth={1.9} />
+                    <span>{opening() ? "正在打开..." : "打开子任务会话"}</span>
+                </button>
+            </Show>
+            <Show when={error().trim()}>
+                {(value) => (
+                    <section class="tool-detail-section">
+                        <div class="tool-detail-heading">错误</div>
+                        <ToolCodeBlock tone="error">{cleanToolError(value())}</ToolCodeBlock>
+                    </section>
+                )}
+            </Show>
+            <Show when={openError()}>{(value) => <div class="tool-task-open-error">{value()}</div>}</Show>
+        </div>
+    )
+}
+
 function GenericToolDetails(props: { part: ToolPartView }) {
     const inputText = createMemo(() => formatToolInput(props.part.state.input, props.part.tool))
     const output = createMemo(() => stateOutput(props.part.state))
@@ -825,8 +973,15 @@ function ToolCallDetails(props: { part: ToolPartView }) {
         <Show
             when={normalized() === "question"}
             fallback={
-                <Show when={normalized() === "bash" || normalized() === "shell"} fallback={<GenericToolDetails part={props.part} />}>
-                    <ShellToolDetails part={props.part} />
+                <Show
+                    when={normalized() === "task"}
+                    fallback={
+                        <Show when={normalized() === "bash" || normalized() === "shell"} fallback={<GenericToolDetails part={props.part} />}>
+                            <ShellToolDetails part={props.part} />
+                        </Show>
+                    }
+                >
+                    <TaskToolDetails part={props.part} />
                 </Show>
             }
         >
@@ -909,6 +1064,54 @@ function ToolCallBlock(props: {
                 </div>
             </Show>
         </div>
+    )
+}
+
+function SessionTodoDock(props: { todos: Todo[] }) {
+    const [expanded, setExpanded] = createSignal(false)
+    const visible = createMemo(() => props.todos.filter((todo) => todo.status !== "cancelled"))
+    const remaining = createMemo(() => visible().filter((todo) => todo.status === "pending" || todo.status === "in_progress").length)
+    const completed = createMemo(() => visible().filter((todo) => todo.status === "completed").length)
+    const active = createMemo(() => (
+        visible().find((todo) => todo.status === "in_progress")
+        ?? visible().find((todo) => todo.status === "pending")
+    ))
+
+    return (
+        <Show when={remaining() > 0}>
+            <div class="chat-todo-dock" data-expanded={expanded() ? "true" : "false"}>
+                <button
+                    class="chat-todo-summary"
+                    type="button"
+                    onClick={() => setExpanded((value) => !value)}
+                    aria-expanded={expanded()}
+                    title={`${completed()}/${visible().length} 个任务已完成`}
+                >
+                    <span class="chat-todo-summary-icon" aria-hidden="true"><ListChecks size={16} strokeWidth={1.9} /></span>
+                    <span class="chat-todo-summary-title">任务</span>
+                    <span class="chat-todo-active">{active()?.content ?? "等待任务更新"}</span>
+                    <span class="chat-todo-progress">{completed()}/{visible().length}</span>
+                    <ChevronDown class="chat-todo-chevron" size={15} strokeWidth={1.9} />
+                </button>
+                <Show when={expanded()}>
+                    <div class="chat-todo-list" role="list">
+                        <For each={visible()}>
+                            {(todo) => (
+                                <div class="chat-todo-item" data-status={todo.status} role="listitem">
+                                    <span class="chat-todo-status" aria-hidden="true">
+                                        <Show when={todo.status === "completed"} fallback={<span class="chat-todo-status-dot" />}>
+                                            <CircleCheck size={15} strokeWidth={1.9} />
+                                        </Show>
+                                    </span>
+                                    <span class="chat-todo-content">{todo.content}</span>
+                                    <span class="chat-todo-priority" data-priority={todo.priority}>{todoPriorityLabel(todo.priority)}</span>
+                                </div>
+                            )}
+                        </For>
+                    </div>
+                </Show>
+            </div>
+        </Show>
     )
 }
 
@@ -1005,6 +1208,8 @@ export function ChatPanel(props: ChatPanelProps) {
     const [scrollToBottomVisible, setScrollToBottomVisible] = createSignal(false)
     const loadedSessions = new Set<string>()
     const loadingSessions = new Set<string>()
+    const loadedTodoSessions = new Set<string>()
+    const loadingTodoSessions = new Set<string>()
     const autoRespondingPermissions = new Set<string>()
     let messagesContainer: HTMLDivElement | undefined
     let messagesTimeline: HTMLDivElement | undefined
@@ -1157,6 +1362,13 @@ export function ChatPanel(props: ChatPanelProps) {
         if (!sid) return []
         return sdk.store.message[sid] ?? []
     })
+
+    const todos = createMemo<Todo[]>(() => {
+        const sid = currentSessionId()
+        if (!sid) return []
+        return sdk.store.todo[sid] ?? []
+    })
+    const hasActiveTodos = createMemo(() => todos().some((todo) => todo.status === "pending" || todo.status === "in_progress"))
 
     // 取某条消息的可见 parts（与 reducer 的 SKIP_PARTS 一致，保留 text/reasoning/tool 等）
     const partsOf = (messageID: string) => sdk.store.part[messageID] ?? []
@@ -1925,12 +2137,34 @@ export function ChatPanel(props: ChatPanelProps) {
         }
     }
 
+    const loadSessionTodos = async (sessionId: string) => {
+        if (loadedTodoSessions.has(sessionId) || loadingTodoSessions.has(sessionId)) return
+        if (sdk.store.todo[sessionId] !== undefined) {
+            loadedTodoSessions.add(sessionId)
+            return
+        }
+        loadingTodoSessions.add(sessionId)
+        await sdk.client.session.todo({ sessionID: sessionId }, { throwOnError: false })
+            .then((response) => {
+                if (sdk.store.todo[sessionId] !== undefined) return
+                sdk.setStore("todo", sessionId, reconcile(response.data ?? [], { key: "id" }))
+            })
+            .catch((error: unknown) => console.error("加载会话任务失败:", error))
+            .finally(() => {
+                loadingTodoSessions.delete(sessionId)
+                loadedTodoSessions.add(sessionId)
+            })
+    }
+
     // 切换到一个未加载过的会话时按需拉一次历史
     createEffect(() => {
         const sid = currentSessionId()
         if (!sid) return
         if (sdk.store.message[sid] === undefined) {
             void loadSession(sid)
+        }
+        if (sdk.store.todo[sid] === undefined) {
+            void loadSessionTodos(sid)
         }
         // 切换会话清理之前的发送错误提示
         setSendError(null)
@@ -2468,6 +2702,7 @@ export function ChatPanel(props: ChatPanelProps) {
         if (part.type !== "tool") return false
         const tool = part as ToolPartView
         if (isQuestionToolPart(tool)) return props.chatVisibility.questionAnswers
+        if (isTaskToolPart(tool)) return true
         return isShellToolPart(tool) ? props.chatVisibility.shellCalls : props.chatVisibility.toolCalls
     }
 
@@ -2510,7 +2745,7 @@ export function ChatPanel(props: ChatPanelProps) {
         return "正在思考"
     })
 
-    const emptyConversation = createMemo(() => messages().length === 0 && !isLoading() && !sendError() && !hasPendingRequest())
+    const emptyConversation = createMemo(() => messages().length === 0 && !hasActiveTodos() && !isLoading() && !sendError() && !hasPendingRequest())
 
     return (
         <div class="chat-panel" classList={{ "chat-panel-empty": emptyConversation() }}>
@@ -2771,6 +3006,8 @@ export function ChatPanel(props: ChatPanelProps) {
                     </div>
                 )}
             </Show>
+
+            <SessionTodoDock todos={todos()} />
 
             <div class="chat-composer-wrap">
                 <Show when={emptyConversation()}>
