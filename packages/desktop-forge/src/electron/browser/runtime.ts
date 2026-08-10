@@ -23,6 +23,8 @@ export interface BrowserRuntime {
     destroy: () => Promise<void>
     dispatch: (request: BrowserCommandRequest, signal?: AbortSignal) => Promise<BrowserCommandResponse>
     getState: (browserId?: string) => import("@opencode-ai/browser-protocol").BrowserState
+    setLayoutBounds: (bounds: import("@opencode-ai/browser-protocol").BrowserBounds) => void
+    setSuspended: (suspended: boolean) => void
     subscribe: (listener: (event: BrowserEvent) => void) => () => void
 }
 
@@ -54,6 +56,8 @@ export function createBrowserRuntime(window: BrowserWindow, raiseOverlays?: () =
         destroy: () => registry.destroy(),
         dispatch: (request, signal) => dispatcher.dispatch(request, { signal }),
         getState: (browserId = DEFAULT_BROWSER_ID) => registry.get(browserId).getState(),
+        setLayoutBounds: (bounds) => registry.get(DEFAULT_BROWSER_ID).setLayoutBounds(bounds),
+        setSuspended: (suspended) => registry.get(DEFAULT_BROWSER_ID).setSuspended(suspended),
         subscribe: (listener) => events.subscribe(listener),
     }
 }

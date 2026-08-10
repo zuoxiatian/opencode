@@ -18,7 +18,8 @@ export class EmbeddedTabStore {
     private readonly historyEntries: BrowserHistoryEntry[] = []
     private activeTabId: string | null = null
     private attachedTabId: string | null = null
-    private bounds: BrowserBounds = EMPTY_BOUNDS
+    private layoutBounds: BrowserBounds = EMPTY_BOUNDS
+    private suspended = false
     private destroyed = false
     private readonly sweepTimer: NodeJS.Timeout
     private visible = false
@@ -150,14 +151,22 @@ export class EmbeddedTabStore {
         this.events.publish("browser.hidden", eventInput(request))
     }
 
-    setBounds(bounds: BrowserBounds) {
-        this.bounds = sanitizeBounds(bounds)
-        this.get(this.attachedTabId)?.view.setBounds(this.bounds)
+    setLayoutBounds(bounds: BrowserBounds) {
+        const [width, height] = this.window.isDestroyed() ? [0, 0] : this.window.getContentSize()
+        this.layoutBounds = sanitizeBounds(bounds, { height, width })
+        if (this.destroyed || this.window.isDestroyed()) return
+        this.get(this.attachedTabId)?.view.setBounds(this.layoutBounds)
+    }
+
+    setSuspended(suspended: boolean) {
+        if (this.suspended === suspended) return
+        this.suspended = suspended
+        this.syncView()
     }
 
     getState(): BrowserState {
         if (this.destroyed) return browserState([], null, false, EMPTY_BOUNDS)
-        return browserState(this.tabs, this.activeTabId, this.visible, this.bounds)
+        return browserState(this.tabs, this.activeTabId, this.visible, this.layoutBounds)
     }
 
     changed(tab: EmbeddedTab, request?: BrowserCommandRequest) {
@@ -281,7 +290,8 @@ export class EmbeddedTabStore {
     private syncView() {
         if (this.destroyed || this.window.isDestroyed()) return
         const active = this.get()
-        const shouldAttach = this.visible
+        const shouldAttach = !this.suspended
+            && this.visible
             && active
             && !active.closed
             && !active.webContents.isDestroyed()
@@ -292,7 +302,7 @@ export class EmbeddedTabStore {
         this.window.contentView.addChildView(active.view)
         this.raiseOverlays?.()
         this.attachedTabId = active.id
-        active.view.setBounds(this.bounds)
+        active.view.setBounds(this.layoutBounds)
     }
 
     private detach() {

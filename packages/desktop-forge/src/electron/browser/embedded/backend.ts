@@ -52,10 +52,6 @@ const info: BrowserInfo = {
                 description: "Show or hide the embedded browser and inspect its visibility.",
                 id: "visibility",
             },
-            {
-                description: "Set or reset an explicit browser viewport override.",
-                id: "viewport",
-            },
         ],
         tab: [{
             description: "Send raw Chrome DevTools Protocol commands and read debugger events through a supported tab.",
@@ -229,14 +225,6 @@ export function createEmbeddedBrowserBackend(
                     sessionNames.set(request.sessionId, request.command.value)
                     return {}
                 }
-                if (request.command.name === "browser.viewport.set") {
-                    tabs.setBounds(request.command.bounds)
-                    return {}
-                }
-                if (request.command.name === "browser.viewport.reset") {
-                    tabs.setBounds({ height: 0, width: 0, x: 0, y: 0 })
-                    return {}
-                }
                 if (request.command.name === "browser.user.openTabs") {
                     return { userTabs: userTabs.openTabs(request.sessionId) }
                 }
@@ -308,7 +296,8 @@ export function createEmbeddedBrowserBackend(
                 })
         },
         getState: () => tabs.getState(),
-        setBounds: (bounds: BrowserBounds) => tabs.setBounds(bounds),
+        setLayoutBounds: (bounds: BrowserBounds) => tabs.setLayoutBounds(bounds),
+        setSuspended: (suspended: boolean) => tabs.setSuspended(suspended),
     }
 }
 
@@ -356,8 +345,6 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
         return { tab: tabState(tab) }
     }
     if (command.name === "tab.close") {
-        services.aria.clear(tab.id)
-        await services.agentBrowser.closeTab(tab.id)
         services.tabs.close(tab.id, services.request)
         return {}
     }
@@ -449,18 +436,18 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.domCua.scroll") {
         if (command.nodeId) return services.nodes.scroll(tab, { ...command, nodeId: command.nodeId })
-        coordinateScroll(tab.webContents, {
+        await withDebugger(tab, (send) => coordinateScroll(send, {
             deltaX: command.deltaX,
             deltaY: command.deltaY,
-        })
+        }))
         return { value: true }
     }
     if (command.name === "tab.domCua.type") {
-        textInput(tab.webContents, command.text)
+        await withDebugger(tab, (send) => textInput(send, command.text))
         return { value: true }
     }
     if (command.name === "tab.domCua.keypress") {
-        keypressKeys(tab.webContents, command.keys)
+        await withDebugger(tab, (send) => keypressKeys(send, command.keys))
         return { value: true }
     }
     if (command.name === "tab.cua.click") {
@@ -472,34 +459,34 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             await services.navigation.forward(tab, services.request, services.context.signal)
             return { value: true }
         }
-        coordinateClick(tab.webContents, {
+        await withDebugger(tab, (send) => coordinateClick(send, {
             ...command,
             button: cuaMouseButton(command.button),
-        })
+        }))
         return { value: true }
     }
     if (command.name === "tab.cua.doubleClick") {
-        coordinateClick(tab.webContents, { ...command, clickCount: 2 })
+        await withDebugger(tab, (send) => coordinateClick(send, { ...command, clickCount: 2 }))
         return { value: true }
     }
     if (command.name === "tab.cua.move") {
-        coordinateMove(tab.webContents, command)
+        await withDebugger(tab, (send) => coordinateMove(send, command))
         return { value: true }
     }
     if (command.name === "tab.cua.drag") {
-        coordinateDrag(tab.webContents, command)
+        await withDebugger(tab, (send) => coordinateDrag(send, command))
         return { value: true }
     }
     if (command.name === "tab.cua.scroll") {
-        coordinateScroll(tab.webContents, command)
+        await withDebugger(tab, (send) => coordinateScroll(send, command))
         return { value: true }
     }
     if (command.name === "tab.cua.type") {
-        textInput(tab.webContents, command.text)
+        await withDebugger(tab, (send) => textInput(send, command.text))
         return { value: true }
     }
     if (command.name === "tab.cua.keypress") {
-        keypressKeys(tab.webContents, command.keys)
+        await withDebugger(tab, (send) => keypressKeys(send, command.keys))
         return { value: true }
     }
     if (command.name === "tab.cua.downloadMedia") {
@@ -513,7 +500,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
                     signal,
                     false,
                 ),
-                () => Promise.resolve(coordinateClick(tab.webContents, {
+                () => withDebugger(tab, (send) => coordinateClick(send, {
                     x: command.x,
                     y: command.y,
                 })),

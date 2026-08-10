@@ -12,8 +12,6 @@ const tablessCommands = new Set<BrowserCommand["name"]>([
     "browser.user.claimTab",
     "browser.user.history",
     "browser.user.openTabs",
-    "browser.viewport.reset",
-    "browser.viewport.set",
     "tabs.finalize",
     "tabs.get",
     "tabs.list",

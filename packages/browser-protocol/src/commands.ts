@@ -7,13 +7,11 @@ import type {
   BrowserNodeInput,
   BrowserScreenshotInput,
 } from "./automation"
-import type { BrowserBounds } from "./browser"
 import type { BrowserFinalizeTabStatus } from "./tab"
 import type { BrowserClipboardItem } from "./files"
 
 export type BrowserCommand =
-  | { name: "browser.list" | "browser.state" | "browser.show" | "browser.hide" | "browser.viewport.reset" }
-  | { bounds: BrowserBounds; name: "browser.viewport.set" }
+  | { name: "browser.list" | "browser.state" | "browser.show" | "browser.hide" }
   | { name: "browser.nameSession"; value: string }
   | { name: "browser.user.openTabs" }
   | { claimId: string; name: "browser.user.claimTab" }

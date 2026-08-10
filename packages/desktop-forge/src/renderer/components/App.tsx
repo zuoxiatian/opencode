@@ -67,7 +67,7 @@ export function App(props: AppProps) {
         e.preventDefault()
         setIsDragging(type)
         void window.electronAPI
-            .setBrowserBounds({ height: 0, width: 0, x: 0, y: 0 })
+            .setBrowserSuspended(true)
             .catch(() => undefined)
         document.body.style.cursor = "col-resize"
         document.body.style.userSelect = "none"
@@ -93,6 +93,7 @@ export function App(props: AppProps) {
             setIsDragging(null)
             document.body.style.cursor = ""
             document.body.style.userSelect = ""
+            void window.electronAPI.setBrowserSuspended(false).catch(() => undefined)
             setBrowserLayoutRevision((value) => value + 1)
         }
     }
@@ -110,6 +111,7 @@ export function App(props: AppProps) {
     onCleanup(() => {
         document.removeEventListener("mousemove", handleMouseMove)
         document.removeEventListener("mouseup", handleMouseUp)
+        void window.electronAPI.setBrowserSuspended(false).catch(() => undefined)
     })
 
     return (

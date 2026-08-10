@@ -40,7 +40,7 @@ export interface BrowserUserTabInfo {
   url?: string
 }
 
-export type BrowserCapabilityId = "visibility" | "viewport"
+export type BrowserCapabilityId = "visibility"
 export type BrowserTabCapabilityId = string
 
 export interface BrowserLoadError {

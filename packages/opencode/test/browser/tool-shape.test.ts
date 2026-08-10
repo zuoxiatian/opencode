@@ -25,6 +25,8 @@ describe("browser tool facade", () => {
     ])
     expect(new Set(commands).size).toBe(commands.length)
     expect(commands.toSorted()).toEqual([...BROWSER_COMMAND_NAMES].toSorted())
+    expect(commands).not.toContain("browser.viewport.set")
+    expect(commands).not.toContain("browser.viewport.reset")
   })
 
   test("keeps the model-facing schema root as an object", () => {

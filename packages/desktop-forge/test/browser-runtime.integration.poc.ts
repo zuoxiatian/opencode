@@ -87,12 +87,7 @@ async function runPoc() {
 
     try {
         step("create-and-navigate")
-        await command(runtime, {
-            command: {
-                bounds: { height: 600, width: 900, x: 0, y: 0 },
-                name: "browser.viewport.set",
-            },
-        })
+        runtime.setLayoutBounds({ height: 600, width: 900, x: 0, y: 0 })
         const created = await command(runtime, { command: { name: "tabs.new" } })
         const tabId = created.data.tab?.id
         assert.ok(tabId)

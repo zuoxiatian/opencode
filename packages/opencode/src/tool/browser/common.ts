@@ -117,14 +117,6 @@ export const BrowserParametersSchema = Schema.Struct({
       }),
     ),
   ),
-  bounds: Schema.optional(
-    Schema.Struct({
-      height: Schema.Number,
-      width: Schema.Number,
-      x: Schema.Number,
-      y: Schema.Number,
-    }),
-  ),
   imageFormat: Schema.optional(Schema.Literals(["png", "jpeg"])),
   quality: Schema.optional(Schema.Number),
   fullPage: Schema.optional(Schema.Boolean),
@@ -440,11 +432,6 @@ async function executeBrowserCommand(
   if (params.command === "browser.show") return { state: await browser.show() }
   if (params.command === "browser.hide") return { state: await browser.hide() }
   if (params.command === "browser.state") return { state: await browser.state() }
-  if (params.command === "browser.viewport.set") {
-    if (!params.bounds) throw new Error("browser.viewport.set requires bounds")
-    return { state: await browser.setViewport(params.bounds) }
-  }
-  if (params.command === "browser.viewport.reset") return { state: await browser.resetViewport() }
   if (params.command === "browser.user.openTabs") return { tabs: await browser.user.openTabs() }
   if (params.command === "browser.user.history") {
     return {

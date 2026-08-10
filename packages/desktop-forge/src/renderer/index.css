@@ -544,6 +544,8 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
 }
 
 .app-layout {
+    --chat-panel-min-width: 420px;
+    --panel-resizer-width: 1px;
     position: relative;
     display: flex;
     height: 100vh;
@@ -586,6 +588,12 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
     overflow: hidden;
     background: var(--lxz-bg-left);
     flex-shrink: 0;
+    max-width: calc(
+        100vw
+        - var(--chat-panel-min-width)
+        - var(--panel-resizer-width)
+        - var(--panel-resizer-width)
+    );
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--border-subtle);
@@ -649,7 +657,7 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
 /* 当内容面板收起时，聊天面板铺满右侧 */
 .chat-panel-wrapper.expanded {
     flex: 1;
-    min-width: 0;
+    min-width: var(--chat-panel-min-width);
 }
 
 .app-layout-browser-default .chat-panel-wrapper.expanded {
@@ -661,8 +669,8 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
    ======================================== */
 
 .browser-panel-wrapper {
-    flex-shrink: 0;
-    min-width: 420px;
+    flex-shrink: 1;
+    min-width: 0;
     overflow: hidden;
     background: var(--bg-secondary);
     opacity: 1;
@@ -1108,10 +1116,6 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
 }
 
 @media (max-width: 1180px) {
-    .browser-panel-wrapper {
-        min-width: 360px;
-    }
-
     .embedded-browser-tab {
         width: 132px;
         flex-basis: 132px;
@@ -1123,7 +1127,7 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
    ======================================== */
 
 .resizer {
-    width: 1px;
+    width: var(--panel-resizer-width);
     background: var(--border-subtle);
     cursor: col-resize;
     flex-shrink: 0;

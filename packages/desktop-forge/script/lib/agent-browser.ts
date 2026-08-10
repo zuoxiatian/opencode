@@ -151,8 +151,8 @@ function tarEntry(archive: Buffer, expected: string) {
   throw new Error(`agent-browser archive is missing ${expected}`)
 }
 
-function providerBuildFlags(id: RuntimeTargetId) {
-  if (id === "win32-x64") return ["--windows-hide-console"]
+export function providerBuildFlags(id: RuntimeTargetId, platform: NodeJS.Platform = process.platform) {
+  if (platform === "win32" && id === "win32-x64") return ["--windows-hide-console"]
   return []
 }
 

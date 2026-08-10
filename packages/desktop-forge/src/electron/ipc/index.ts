@@ -94,9 +94,13 @@ export function registerIpcHandlers(state: MainState) {
 
     ipcMain.handle("browser:set-bounds", (event, bounds: BrowserBounds) => {
         assertMainWindowSender(state, event.sender)
-        return state.browserRuntime?.command({
-            command: { bounds, name: "browser.viewport.set" },
-        })
+        state.browserRuntime?.setLayoutBounds(bounds)
+    })
+
+    ipcMain.handle("browser:set-suspended", (event, suspended: boolean) => {
+        assertMainWindowSender(state, event.sender)
+        if (typeof suspended !== "boolean") throw new Error("浏览器暂停状态必须是布尔值")
+        state.browserRuntime?.setSuspended(suspended)
     })
 
     ipcMain.handle("browser:command", (event, command: BrowserCommandInput) => {

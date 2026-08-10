@@ -1,5 +1,4 @@
 import type {
-  BrowserBounds,
   BrowserCapabilityInfo,
   BrowserCdpEvents,
   BrowserCdpTarget,
@@ -40,12 +39,6 @@ export function browserCapabilities(
     if (info.id === "visibility") {
       return [[info.id, {
         capability: new VisibilityCapability(transport, browserId, info),
-        info,
-      }] as const]
-    }
-    if (info.id === "viewport") {
-      return [[info.id, {
-        capability: new ViewportCapability(transport, browserId, info),
         info,
       }] as const]
     }
@@ -192,36 +185,6 @@ class VisibilityCapability extends DescribedCapability {
     return this.transport.command({
       browserId: this.browserId,
       command: { name: visible ? "browser.show" : "browser.hide" },
-    }).then(() => undefined)
-  }
-}
-
-class ViewportCapability extends DescribedCapability {
-  constructor(
-    private readonly transport: BrowserTransport,
-    private readonly browserId: string,
-    info: BrowserCapabilityInfo,
-  ) {
-    super(info)
-  }
-
-  reset() {
-    return this.transport.command({
-      browserId: this.browserId,
-      command: { name: "browser.viewport.reset" },
-    }).then(() => undefined)
-  }
-
-  set(input: Pick<BrowserBounds, "height" | "width">) {
-    if (!Number.isInteger(input.width) || input.width <= 0 || !Number.isInteger(input.height) || input.height <= 0) {
-      throw new Error("viewport.set requires positive integer width and height")
-    }
-    return this.transport.command({
-      browserId: this.browserId,
-      command: {
-        bounds: { height: input.height, width: input.width, x: 0, y: 0 },
-        name: "browser.viewport.set",
-      },
     }).then(() => undefined)
   }
 }

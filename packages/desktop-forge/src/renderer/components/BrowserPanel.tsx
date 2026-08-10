@@ -33,12 +33,7 @@ export function BrowserPanel(props: BrowserPanelProps) {
             console.error("Embedded browser command failed:", error)
         })
     const syncBounds = () => {
-        if (!viewport || !activeTab()?.url) {
-            void window.electronAPI
-                .setBrowserBounds({ height: 0, width: 0, x: 0, y: 0 })
-                .catch(() => undefined)
-            return
-        }
+        if (!viewport || !activeTab()?.url) return
         const bounds = viewport.getBoundingClientRect()
         void window.electronAPI
             .setBrowserBounds({
@@ -94,9 +89,6 @@ export function BrowserPanel(props: BrowserPanelProps) {
         onCleanup(() => {
             observer.disconnect()
             window.removeEventListener("resize", syncBounds)
-            void window.electronAPI
-                .setBrowserBounds({ height: 0, width: 0, x: 0, y: 0 })
-                .catch(() => undefined)
         })
     })
 

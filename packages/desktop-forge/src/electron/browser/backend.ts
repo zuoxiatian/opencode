@@ -15,5 +15,6 @@ export interface BrowserBackend {
     destroy: () => Promise<void>
     dispatch: (request: BrowserCommandRequest, context: BrowserDispatchContext) => Promise<BrowserCommandData>
     getState: () => BrowserState
-    setBounds: (bounds: BrowserBounds) => void
+    setLayoutBounds: (bounds: BrowserBounds) => void
+    setSuspended: (suspended: boolean) => void
 }

@@ -79,7 +79,7 @@ export class NodeActionService {
                 if (Object.keys(exception).length) {
                     throw new BrowserRuntimeException("ELEMENT_NOT_ACTIONABLE", "DOM node action failed")
                 }
-                if (action === "type") textInput(tab.webContents, value ?? "")
+                if (action === "type") await textInput(send, value ?? "")
                 return { value: asRecord(result.result).value }
             } finally {
                 if (sessionId) {

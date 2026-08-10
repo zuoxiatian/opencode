@@ -36,11 +36,24 @@ export function browserState(
     }
 }
 
-export function sanitizeBounds(bounds: BrowserBounds) {
-    return {
-        height: Math.max(0, Math.round(bounds.height)),
-        width: Math.max(0, Math.round(bounds.width)),
-        x: Math.max(0, Math.round(bounds.x)),
-        y: Math.max(0, Math.round(bounds.y)),
+export function sanitizeBounds(bounds: BrowserBounds, limit?: { height: number; width: number }) {
+    const sanitized = {
+        height: nonnegativeInteger(bounds.height),
+        width: nonnegativeInteger(bounds.width),
+        x: nonnegativeInteger(bounds.x),
+        y: nonnegativeInteger(bounds.y),
     }
+    if (!limit) return sanitized
+    const x = Math.min(sanitized.x, limit.width)
+    const y = Math.min(sanitized.y, limit.height)
+    return {
+        height: Math.min(sanitized.height, limit.height - y),
+        width: Math.min(sanitized.width, limit.width - x),
+        x,
+        y,
+    }
+}
+
+function nonnegativeInteger(value: number) {
+    return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }

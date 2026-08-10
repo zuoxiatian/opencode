@@ -11,8 +11,6 @@ export const BROWSER_COMMAND_NAMES = [
   "browser.user.claimTab",
   "browser.user.history",
   "browser.user.openTabs",
-  "browser.viewport.reset",
-  "browser.viewport.set",
   "tab.activate",
   "tab.automation.check",
   "tab.automation.click",
@@ -166,19 +164,6 @@ function validateCommand(command: Record<string, unknown>, name: string) {
     }
     readOptionalDate(command.from, "command.from")
     readOptionalDate(command.to, "command.to")
-    return
-  }
-  if (name === "browser.viewport.set") {
-    const bounds = readRecord(command.bounds, "command.bounds")
-    const values = [
-      readNumber(bounds.height, "command.bounds.height"),
-      readNumber(bounds.width, "command.bounds.width"),
-      readNumber(bounds.x, "command.bounds.x"),
-      readNumber(bounds.y, "command.bounds.y"),
-    ]
-    if (values.some((value) => value < 0 || value > 32_768)) {
-      throw new Error("command.bounds values must be between 0 and 32768")
-    }
     return
   }
   if (name === "tabs.get") {

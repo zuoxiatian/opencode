@@ -1,5 +1,4 @@
 import type {
-  BrowserBounds,
   BrowserCapabilityInfo,
   BrowserCommandData,
   BrowserInfo,
@@ -65,13 +64,6 @@ export class BrowserHandle {
     return this.stateCommand("browser.state")
   }
 
-  setViewport(bounds: BrowserBounds) {
-    return this.transport.command({
-      browserId: this.id,
-      command: { bounds, name: "browser.viewport.set" },
-    }).then((result) => requireBrowserResult(result.state, "browser state"))
-  }
-
   nameSession(name: string) {
     const value = name.trim()
     if (!value) throw new Error("browser.nameSession requires a name")
@@ -79,13 +71,6 @@ export class BrowserHandle {
       browserId: this.browserId,
       command: { name: "browser.nameSession", value },
     }).then(() => undefined)
-  }
-
-  resetViewport() {
-    return this.transport.command({
-      browserId: this.id,
-      command: { name: "browser.viewport.reset" },
-    }).then((result) => requireBrowserResult(result.state, "browser state"))
   }
 
   private stateCommand(name: "browser.hide" | "browser.show" | "browser.state"): Promise<BrowserState> {

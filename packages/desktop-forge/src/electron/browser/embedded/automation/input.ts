@@ -2,10 +2,10 @@ import type {
     BrowserKeyModifier,
     BrowserMouseButton,
 } from "@opencode-ai/browser-protocol"
-import type { WebContents } from "electron"
+import type { CdpSender } from "./cdp"
 
-export function coordinateClick(
-    webContents: WebContents,
+export async function coordinateClick(
+    send: CdpSender,
     input: {
         button?: BrowserMouseButton
         clickCount?: number
@@ -14,29 +14,42 @@ export function coordinateClick(
         y: number
     },
 ) {
-    webContents.focus()
     const button = input.button ?? "left"
     const clickCount = Math.max(1, Math.min(3, Math.round(input.clickCount ?? 1)))
     const point = { x: Math.max(0, Math.round(input.x)), y: Math.max(0, Math.round(input.y)) }
-    webContents.sendInputEvent({ button, clickCount, modifiers: input.modifiers, type: "mouseDown", ...point })
-    webContents.sendInputEvent({ button, clickCount, modifiers: input.modifiers, type: "mouseUp", ...point })
+    const modifiers = modifierMask(input.modifiers)
+    await send("Input.dispatchMouseEvent", {
+        button,
+        buttons: buttonMask(button),
+        clickCount,
+        modifiers,
+        type: "mousePressed",
+        ...point,
+    })
+    await send("Input.dispatchMouseEvent", {
+        button,
+        buttons: 0,
+        clickCount,
+        modifiers,
+        type: "mouseReleased",
+        ...point,
+    })
 }
 
 export function coordinateMove(
-    webContents: WebContents,
+    send: CdpSender,
     input: { modifiers?: BrowserKeyModifier[]; x: number; y: number },
 ) {
-    webContents.focus()
-    webContents.sendInputEvent({
-        modifiers: input.modifiers,
-        type: "mouseMove",
+    return send("Input.dispatchMouseEvent", {
+        modifiers: modifierMask(input.modifiers),
+        type: "mouseMoved",
         x: Math.max(0, Math.round(input.x)),
         y: Math.max(0, Math.round(input.y)),
     })
 }
 
-export function coordinateDrag(
-    webContents: WebContents,
+export async function coordinateDrag(
+    send: CdpSender,
     input: {
         button?: BrowserMouseButton
         modifiers?: BrowserKeyModifier[]
@@ -47,56 +60,71 @@ export function coordinateDrag(
     const start = input.path[0]
     const end = input.path.at(-1)
     if (!start || !end) return
-    coordinateMove(webContents, { modifiers: input.modifiers, ...start })
-    webContents.sendInputEvent({
+    const modifiers = modifierMask(input.modifiers)
+    await coordinateMove(send, { modifiers: input.modifiers, ...start })
+    await send("Input.dispatchMouseEvent", {
         button,
+        buttons: buttonMask(button),
         clickCount: 1,
-        modifiers: input.modifiers,
-        type: "mouseDown",
+        modifiers,
+        type: "mousePressed",
         x: Math.round(start.x),
         y: Math.round(start.y),
     })
-    input.path.slice(1).forEach((point) =>
-        webContents.sendInputEvent({
+    for (const point of input.path.slice(1)) {
+        await send("Input.dispatchMouseEvent", {
             button,
-            modifiers: input.modifiers,
-            type: "mouseMove",
+            buttons: buttonMask(button),
+            modifiers,
+            type: "mouseMoved",
             x: Math.round(point.x),
             y: Math.round(point.y),
-        }))
-    webContents.sendInputEvent({
+        })
+    }
+    await send("Input.dispatchMouseEvent", {
         button,
+        buttons: 0,
         clickCount: 1,
-        modifiers: input.modifiers,
-        type: "mouseUp",
+        modifiers,
+        type: "mouseReleased",
         x: Math.round(end.x),
         y: Math.round(end.y),
     })
 }
 
-export function textInput(webContents: WebContents, text: string) {
-    webContents.focus()
-    webContents.insertText(text)
+export function textInput(send: CdpSender, value: string) {
+    return send("Input.insertText", { text: value })
 }
 
-export function keypress(
-    webContents: WebContents,
+export async function keypress(
+    send: CdpSender,
     input: { key: string; modifiers?: BrowserKeyModifier[] },
 ) {
-    webContents.focus()
-    const modifiers = input.modifiers ?? []
-    webContents.sendInputEvent({ keyCode: input.key, modifiers, type: "keyDown" })
-    if (input.key.length === 1 && !modifiers.some((modifier) => modifier === "control" || modifier === "meta")) {
-        webContents.sendInputEvent({ keyCode: input.key, modifiers, type: "char" })
-    }
-    webContents.sendInputEvent({ keyCode: input.key, modifiers, type: "keyUp" })
+    const modifiers = modifierMask(input.modifiers)
+    const key = keyboardKey(input.key, modifiers)
+    await send("Input.dispatchKeyEvent", {
+        code: key.code,
+        key: key.key,
+        modifiers,
+        nativeVirtualKeyCode: key.keyCode,
+        type: key.text ? "keyDown" : "rawKeyDown",
+        windowsVirtualKeyCode: key.keyCode,
+        ...(key.text ? { text: key.text, unmodifiedText: key.unmodifiedText } : {}),
+    })
+    await send("Input.dispatchKeyEvent", {
+        code: key.code,
+        key: key.key,
+        modifiers,
+        nativeVirtualKeyCode: key.keyCode,
+        type: "keyUp",
+        windowsVirtualKeyCode: key.keyCode,
+    })
 }
 
-export function keypressKeys(webContents: WebContents, keys: readonly string[]) {
-    if (!keys.length) return
-    const key = keys.at(-1) ?? "Enter"
-    keypress(webContents, {
-        key: normalizeKey(key),
+export function keypressKeys(send: CdpSender, keys: readonly string[]) {
+    if (!keys.length) return Promise.resolve()
+    return keypress(send, {
+        key: normalizeKey(keys.at(-1) ?? "Enter"),
         modifiers: Array.from(new Set(keys.slice(0, -1).flatMap((value) => {
             const modifier = normalizeModifier(value)
             return modifier ? [modifier] : []
@@ -104,12 +132,12 @@ export function keypressKeys(webContents: WebContents, keys: readonly string[]) 
     })
 }
 
-export function keypressValue(webContents: WebContents, value: string) {
-    keypressKeys(webContents, value.split("+").filter(Boolean))
+export function keypressValue(send: CdpSender, value: string) {
+    return keypressKeys(send, value.split("+").filter(Boolean))
 }
 
 export function coordinateScroll(
-    webContents: WebContents,
+    send: CdpSender,
     input: {
         deltaX?: number
         deltaY: number
@@ -118,16 +146,31 @@ export function coordinateScroll(
         y?: number
     },
 ) {
-    webContents.focus()
-    webContents.sendInputEvent({
-        canScroll: true,
+    return send("Input.dispatchMouseEvent", {
         deltaX: input.deltaX ?? 0,
         deltaY: input.deltaY,
-        modifiers: input.modifiers,
+        modifiers: modifierMask(input.modifiers),
         type: "mouseWheel",
         x: Math.max(0, Math.round(input.x ?? 1)),
         y: Math.max(0, Math.round(input.y ?? 1)),
     })
+}
+
+function modifierMask(input: readonly BrowserKeyModifier[] = []) {
+    return input.reduce((mask, modifier) => mask | {
+        alt: 1,
+        control: 2,
+        meta: 4,
+        shift: 8,
+    }[modifier], 0)
+}
+
+function buttonMask(input: BrowserMouseButton) {
+    return {
+        left: 1,
+        middle: 4,
+        right: 2,
+    }[input]
 }
 
 function normalizeModifier(input: string): BrowserKeyModifier | undefined {
@@ -141,20 +184,59 @@ function normalizeModifier(input: string): BrowserKeyModifier | undefined {
 
 function normalizeKey(input: string) {
     const aliases: Record<string, string> = {
-        arrowdown: "Down",
-        arrowleft: "Left",
-        arrowright: "Right",
-        arrowup: "Up",
+        arrowdown: "ArrowDown",
+        arrowleft: "ArrowLeft",
+        arrowright: "ArrowRight",
+        arrowup: "ArrowUp",
         backspace: "Backspace",
         delete: "Delete",
+        down: "ArrowDown",
         end: "End",
         enter: "Enter",
         escape: "Escape",
         home: "Home",
+        left: "ArrowLeft",
         pagedown: "PageDown",
         pageup: "PageUp",
-        space: "Space",
+        right: "ArrowRight",
+        space: " ",
         tab: "Tab",
+        up: "ArrowUp",
     }
     return aliases[input.toLowerCase()] ?? input
+}
+
+function keyboardKey(input: string, modifiers: number) {
+    const key = normalizeKey(input)
+    const special = {
+        ArrowDown: { code: "ArrowDown", keyCode: 40 },
+        ArrowLeft: { code: "ArrowLeft", keyCode: 37 },
+        ArrowRight: { code: "ArrowRight", keyCode: 39 },
+        ArrowUp: { code: "ArrowUp", keyCode: 38 },
+        Backspace: { code: "Backspace", keyCode: 8 },
+        Delete: { code: "Delete", keyCode: 46 },
+        End: { code: "End", keyCode: 35 },
+        Enter: { code: "Enter", keyCode: 13, text: "\r" },
+        Escape: { code: "Escape", keyCode: 27 },
+        Home: { code: "Home", keyCode: 36 },
+        PageDown: { code: "PageDown", keyCode: 34 },
+        PageUp: { code: "PageUp", keyCode: 33 },
+        Tab: { code: "Tab", keyCode: 9 },
+    }[key]
+    if (special) return { key, unmodifiedText: special.text, ...special }
+    const shifted = Boolean(modifiers & 8)
+    const text = key.length === 1 && !(modifiers & 6)
+        ? shifted ? key.toUpperCase() : key
+        : undefined
+    return {
+        code: /^[a-z]$/i.test(key)
+            ? `Key${key.toUpperCase()}`
+            : /^\d$/.test(key)
+                ? `Digit${key}`
+                : key === " " ? "Space" : key,
+        key: text ?? key,
+        keyCode: key === " " ? 32 : key.toUpperCase().charCodeAt(0),
+        text,
+        unmodifiedText: key,
+    }
 }

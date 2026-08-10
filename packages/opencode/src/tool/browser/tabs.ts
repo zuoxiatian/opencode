@@ -11,8 +11,6 @@ export const BROWSER_TABS_COMMANDS = [
   "browser.user.claimTab",
   "browser.user.history",
   "browser.user.openTabs",
-  "browser.viewport.reset",
-  "browser.viewport.set",
   "tab.activate",
   "tab.close",
   "tab.mark",
@@ -32,7 +30,6 @@ const Operation = Schema.Union([
       "browser.show",
       "browser.state",
       "browser.user.openTabs",
-      "browser.viewport.reset",
       "tab.activate",
       "tab.close",
       "tabs.list",
@@ -44,16 +41,6 @@ const Operation = Schema.Union([
     ...BrowserScope,
     command: Schema.Literal("browser.nameSession"),
     sessionName: Schema.String,
-  }),
-  Schema.Struct({
-    ...BrowserScope,
-    bounds: Schema.Struct({
-      height: Schema.Number,
-      width: Schema.Number,
-      x: Schema.Number,
-      y: Schema.Number,
-    }),
-    command: Schema.Literal("browser.viewport.set"),
   }),
   Schema.Struct({
     ...BrowserScope,
@@ -108,7 +95,7 @@ const browserGuidance = [
 export const BrowserTabsTool = defineBrowserTool(
   "browser_tabs",
   [
-    "Manage embedded browser instances, user-tab claims, tabs, viewport, activation, disposition, and finalization.",
+    "Manage embedded browser instances, user-tab claims, tabs, activation, disposition, and finalization.",
     browserOperationGuidance,
     browserGuidance,
   ].join(" "),

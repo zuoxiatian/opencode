@@ -58,6 +58,7 @@ export interface ElectronAPI {
     getBrowserState: () => Promise<BrowserState | null>
     onBrowserStateChanged: (callback: (state: BrowserState) => void) => () => void
     setBrowserBounds: (bounds: BrowserBounds) => Promise<void>
+    setBrowserSuspended: (suspended: boolean) => Promise<void>
     onServerReady: (callback: (data: ServerInfo) => void) => void
     getServerInfo: () => Promise<ServerInfo | null>
     startServer: (options: { opencodeConfig: unknown }) => Promise<ServerInfo>
@@ -139,6 +140,8 @@ const electronAPI: ElectronAPI = {
     },
 
     setBrowserBounds: (bounds) => ipcRenderer.invoke("browser:set-bounds", bounds),
+
+    setBrowserSuspended: (suspended) => ipcRenderer.invoke("browser:set-suspended", suspended),
 
     onServerReady: (callback) => {
         ipcRenderer.on("server-ready", (_, data) => callback(data))

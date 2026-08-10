@@ -19,8 +19,10 @@ describe("browser protocol v3", () => {
     })
   })
 
-  test("rejects removed content and Playwright commands", () => {
+  test("rejects removed viewport, content, and Playwright commands", () => {
     for (const name of [
+      "browser.viewport.reset",
+      "browser.viewport.set",
       "tabs.content",
       "tab.content.read",
       "tab.content.export",

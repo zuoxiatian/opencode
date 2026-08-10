@@ -300,7 +300,7 @@ class TabHandle {
 ```
 
 句柄只保存 `browserId`、`tabId` 和 transport，不持有 Electron 对象。
-`show`、`hide`、`state`、viewport、原子等待及结构化结果方法属于当前扁平 Tool/Runtime
+`show`、`hide`、`state`、原子等待及结构化结果方法属于当前扁平 Tool/Runtime
 的内部扩展，不冒充官方 Browser Client 的公开成员。
 
 ## 8. 新 browser Tool
@@ -352,8 +352,6 @@ browser.list
 browser.show
 browser.hide
 browser.state
-browser.viewport.set
-browser.viewport.reset
 
 tabs.list
 tabs.selected
@@ -510,7 +508,8 @@ interface BrowserRuntime {
   dispatch(request: BrowserCommandRequest): Promise<BrowserCommandResponse>
   getState(browserId: string): BrowserState
   subscribe(listener: BrowserEventListener): () => void
-  setBounds(browserId: string, bounds: BrowserBounds): void
+  setLayoutBounds(bounds: BrowserBounds): void
+  setSuspended(suspended: boolean): void
   destroy(): Promise<void>
 }
 ```
@@ -540,7 +539,7 @@ Runtime 不直接：
 - 创建并持有 Tab Store。
 - 调用 navigation、automation、dialogs、downloads 和 permissions。
 - 返回统一 state。
-- 处理 show/hide 和 viewport。
+- 处理 show/hide 和原生布局边界。
 - 注册 capabilities。
 
 当前只注册一个 backend：
@@ -773,7 +772,7 @@ interface BrowserDomSnapshot {
 
 支持：
 
-- viewport。
+- 当前可见区域。
 - full page。
 - clip。
 - element。
@@ -782,7 +781,7 @@ interface BrowserDomSnapshot {
 
 Runtime 返回图像字节和元数据；Tool 直接转换为聊天附件，并在 JSON 输出中删除完整
 base64。`savePath`、JPEG 和 quality 是扁平 Tool 的产品扩展；官方 `Tab.screenshot()`
-公开参数仍只暴露 viewport/fullPage/clip，并返回 `Uint8Array`。
+公开参数仍只暴露 fullPage/clip，并返回 `Uint8Array`。
 
 失败页截图同样以目标 Tab 为边界：当前可见失败页直接截取 Renderer 中的错误覆盖层；
 后台或隐藏失败 Tab 使用不挂接主窗口的 offscreen `BrowserWindow` 独立渲染共享错误页，
@@ -868,7 +867,6 @@ session 的下载记录才允许返回最终本地路径。
 浏览器级：
 
 - `visibility`。
-- `viewport`。
 
 Tab 级：
 
@@ -1199,7 +1197,7 @@ packages/desktop-forge/src/renderer/components/BrowserPanel.tsx
 
 ### 28.7 文件与媒体
 
-- viewport、full page、clip 和 element screenshot 正确。
+- 当前可见区域、full page、clip 和 element screenshot 正确。
 - 单文件、多文件上传校验正确。
 - Dialog 可接受、拒绝和输入 prompt。
 - 下载成功、取消、失败均有状态。
