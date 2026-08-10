@@ -599,7 +599,7 @@ Tab Store 是标签页顺序、活动 Tab 和 view attach 状态的唯一真相�
 
 Navigation Service 负责：
 
-- URL 标准化，只允许 HTTP/HTTPS。
+- URL 标准化，允许 HTTP/HTTPS 和经过 `read` 授权的本地文件；本地文件使用精确 `file://` URL 隔离，不能隐式加载相邻文件。
 - `goto`、back、forward、reload 和 stop。
 - redirect 链。
 - pending、committed、failed 和 stopped 状态。
@@ -888,12 +888,12 @@ Dialog、下载和文件选择是官方 `Tab`/`PlaywrightAPI` 的核心公开 AP
 
 ### 21.1 Tool 层
 
-- 导航按目标 URL 申请 `webfetch`。
-- 页面交互按当前 origin 申请 `browser_interaction`。
+- HTTP/HTTPS 导航按目标 URL 申请 `webfetch`，本地文件导航申请 `read`，工作区外文件额外申请 `external_directory`。
+- 页面交互按当前 HTTP/HTTPS origin 或精确本地文件 URL 申请 `browser_interaction`。
 - 文件上传申请文件 read 权限。
 - CDP 申请 `browser_cdp`。
 - 有外部副作用的提交在动作发生时确认。
-- `browser_interaction` 与 `browser_cdp` 的内置默认策略均为 `ask`，不能被全局 `* = allow` 静默放行。
+- `browser_interaction` 的内置默认策略为 `allow`；`browser_cdp` 的内置默认策略为 `ask`，不能被全局 `* = allow` 静默放行。
 
 ### 21.2 Runtime 层
 

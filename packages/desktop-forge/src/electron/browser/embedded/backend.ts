@@ -178,6 +178,20 @@ export function createEmbeddedBrowserBackend(
     }
 
     const clearPermissions = configureBrowserPermissions(browserSession, window, events)
+    const fileRequested = (
+        details: Electron.OnBeforeRequestListenerDetails,
+        callback: (response: Electron.CallbackResponse) => void,
+    ) => {
+        const tab = tabs.list().find((candidate) =>
+            candidate.webContents.id === (details.webContentsId ?? details.webContents?.id))
+        const requested = browserOrigin(details.url)
+        callback({
+            cancel: !tab
+                || !requested?.startsWith("file:")
+                || requested !== browserOrigin(tab.pendingUrl || tab.webContents.getURL()),
+        })
+    }
+    browserSession.webRequest.onBeforeRequest({ urls: ["file://*/*"] }, fileRequested)
     const headersReceived = (
         details: Electron.OnHeadersReceivedListenerDetails,
         callback: (response: Electron.HeadersReceivedResponse) => void,
@@ -201,6 +215,7 @@ export function createEmbeddedBrowserBackend(
         info,
         destroy: async () => {
             clearClosedTab()
+            browserSession.webRequest.onBeforeRequest(null)
             browserSession.webRequest.onHeadersReceived(null)
             clearPermissions()
             downloads.destroy()

@@ -451,6 +451,18 @@ test("webfetch is allowed by default", async () => {
   })
 })
 
+test("browser interaction is allowed by default", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const build = await load(tmp.path, (svc) => svc.get("build"))
+      expect(evalPerm(build, "browser_interaction")).toBe("allow")
+      expect(evalPerm(build, "browser_cdp")).toBe("ask")
+    },
+  })
+})
+
 test("legacy tools config converts to permissions", async () => {
   await using tmp = await tmpdir({
     config: {

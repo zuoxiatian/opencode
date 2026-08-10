@@ -11,6 +11,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { EmbeddedTab } from "../embedded/tab"
+import { browserOrigin } from "../embedded/navigation"
 import { BrowserRuntimeException } from "../errors"
 import {
     AgentBrowserTabController,
@@ -879,15 +880,7 @@ function boundedPageContent(output: AgentBrowserJsonResult, value: string) {
 }
 
 function ensureOrigin(tab: EmbeddedTab, expectedOrigin: string) {
-    let actualOrigin: string | undefined
-    try {
-        const url = new URL(tab.webContents.getURL())
-        actualOrigin = url.protocol === "http:" || url.protocol === "https:"
-            ? url.origin
-            : undefined
-    } catch {
-        actualOrigin = undefined
-    }
+    const actualOrigin = browserOrigin(tab.webContents.getURL())
     if (actualOrigin === expectedOrigin) return
     throw new BrowserRuntimeException(
         "ORIGIN_CHANGED",

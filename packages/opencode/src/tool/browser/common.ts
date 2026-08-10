@@ -10,6 +10,7 @@ import { BROWSER_COMMAND_NAMES } from "@opencode-ai/browser-protocol"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Effect, Schema } from "effect"
 import path from "path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { BrowserClient, BrowserClientError, CdpCapability, type BrowserTransportOptions } from "../../browser"
 import { desktopBrowserConnection } from "../../browser/config"
 import { Bus } from "../../bus"
@@ -282,12 +283,24 @@ export function authorizeBrowserCommand(
     }
     const targetUrl = navigationUrl(params)
     if (targetUrl) {
-      yield* ctx.ask({
-        permission: "webfetch",
-        patterns: [targetUrl],
-        always: [`${new URL(targetUrl).origin}/*`],
-        metadata: { command: params.command, url: targetUrl },
-      })
+      const url = new URL(targetUrl)
+      if (url.protocol === "file:") {
+        const filepath = fileURLToPath(url)
+        yield* assertExternalDirectoryEffect(ctx, filepath)
+        yield* ctx.ask({
+          permission: "read",
+          patterns: [filepath],
+          always: [filepath],
+          metadata: { command: params.command, filepath, url: targetUrl },
+        })
+      } else {
+        yield* ctx.ask({
+          permission: "webfetch",
+          patterns: [targetUrl],
+          always: [`${url.origin}/*`],
+          metadata: { command: params.command, url: targetUrl },
+        })
+      }
     }
     if (params.command === "tab.fileChooser.setFiles") {
       if (!params.filePaths?.length) throw new Error("tab.fileChooser.setFiles requires filePaths")
@@ -313,7 +326,7 @@ export function authorizeBrowserCommand(
     if (!originRequired) return undefined
 
     const currentOrigin = yield* Effect.promise(resolveOrigin)
-    if (!currentOrigin) throw new Error("The current browser tab does not have an HTTP or HTTPS origin")
+    if (!currentOrigin) throw new Error("The current browser tab does not have a supported page scope")
     if ((!automation && !passiveNative) || isMutating(params) || devCdp) {
       yield* ctx.ask({
         permission: devCdp ? "browser_cdp" : "browser_interaction",
@@ -485,7 +498,7 @@ async function executeBrowserCommand(
   }
   if (params.command === "tab.goto") {
     if (!params.url) throw new Error("tab.goto requires url")
-    return { navigation: await tab.gotoResult(normalizeUrl(params.url)) }
+    return { navigation: await tab.gotoResult(normalizeUrl(params.url, true)) }
   }
   if (params.command === "tab.back") return { navigation: await tab.backResult() }
   if (params.command === "tab.forward") return { navigation: await tab.forwardResult() }
@@ -810,7 +823,7 @@ async function executeBrowserCommand(
   }
   if (params.command === "tab.dev.cdp") {
     if (!params.method) throw new Error("tab.dev.cdp requires a top-level method such as Runtime.evaluate")
-    if (!expectedOrigin) throw new Error("tab.dev.cdp requires an HTTP or HTTPS page origin")
+    if (!expectedOrigin) throw new Error("tab.dev.cdp requires a supported page scope")
     const capability = await tab.capabilities.get("cdp")
     if (!(capability instanceof CdpCapability)) throw new Error("The current browser tab does not support CDP")
     return {
@@ -821,7 +834,7 @@ async function executeBrowserCommand(
     }
   }
   if (params.command === "tab.dev.cdp.events") {
-    if (!expectedOrigin) throw new Error("tab.dev.cdp.events requires an HTTP or HTTPS page origin")
+    if (!expectedOrigin) throw new Error("tab.dev.cdp.events requires a supported page scope")
     const capability = await tab.capabilities.get("cdp")
     if (!(capability instanceof CdpCapability)) throw new Error("The current browser tab does not support CDP")
     return {
@@ -849,7 +862,7 @@ async function executeBrowserCommand(
 function navigationUrl(params: BrowserParameters) {
   if (params.command !== "tab.goto" && params.command !== "tab.automation.read") return
   if (!params.url) return
-  return normalizeUrl(params.url)
+  return normalizeUrl(params.url, params.command === "tab.goto")
 }
 
 function cdpTarget(params: BrowserParameters) {
@@ -860,12 +873,19 @@ function cdpTarget(params: BrowserParameters) {
   if (params.targetSessionId) return { sessionId: params.targetSessionId }
 }
 
-function normalizeUrl(input: string) {
-  const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(input) ? input : `https://${input}`)
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
+function normalizeUrl(input: string, localFiles = false) {
+  const value = input.trim()
+  const url = path.isAbsolute(value)
+    ? pathToFileURL(value)
+    : new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`)
+  if (url.protocol === "http:" || url.protocol === "https:") return url.toString()
+  if (url.protocol !== "file:" || !localFiles) {
     throw new Error("Browser URL must use HTTP or HTTPS")
   }
-  return url.toString()
+  const normalized = pathToFileURL(fileURLToPath(url))
+  normalized.hash = url.hash
+  normalized.search = url.search
+  return normalized.toString()
 }
 
 async function resolveCurrentOrigin(client: BrowserClient, params: BrowserParameters) {
@@ -874,7 +894,11 @@ async function resolveCurrentOrigin(client: BrowserClient, params: BrowserParame
   const state = await tab?.state()
   try {
     const url = new URL(state?.url ?? "")
-    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined
+    if (url.protocol === "http:" || url.protocol === "https:") return url.origin
+    if (url.protocol !== "file:") return
+    url.hash = ""
+    url.search = ""
+    return pathToFileURL(fileURLToPath(url)).toString()
   } catch {
     return undefined
   }

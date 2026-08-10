@@ -19,7 +19,7 @@ const Operation = Schema.Union([
     ...TabScope,
     command: Schema.Literal("tab.goto"),
     url: Schema.String.annotate({
-      description: "HTTP or HTTPS URL; a hostname without a scheme is normalized to HTTPS",
+      description: "HTTP, HTTPS, or file URL; absolute local paths become file URLs and hostnames default to HTTPS",
     }),
   }),
 ])
@@ -35,7 +35,7 @@ export const BrowserNavigateTool = defineBrowserTool(
   [
     "Navigate the selected embedded browser tab with goto, back, forward, reload, or stop.",
     browserOperationGuidance,
-    "tab.goto accepts url only and returns after navigation commits.",
+    "tab.goto accepts HTTP, HTTPS, file URLs, or absolute local paths and returns after navigation commits. Local files require read permission and cannot load sibling files implicitly.",
     "When page lifecycle completion matters, follow it with browser_wait tab.automation.waitFor using loadState load; then wait for a target or text when application readiness matters.",
     "After navigation, call browser_snapshot with tab.automation.snapshot before using semantic targets.",
   ].join(" "),

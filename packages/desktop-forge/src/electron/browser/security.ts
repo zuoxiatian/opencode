@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { isAbsolute } from "node:path"
 import type { BrowserCommand, BrowserCommandRequest, BrowserState } from "@opencode-ai/browser-protocol"
 import { BrowserRuntimeException } from "./errors"
+import { browserOrigin, normalizeUrl } from "./embedded/navigation"
 
 const tablessCommands = new Set<BrowserCommand["name"]>([
     "browser.hide",
@@ -118,9 +119,9 @@ export class BrowserSecurityGate {
                 throw new BrowserRuntimeException("PERMISSION_DENIED", `Upload file does not exist: ${invalid}`)
             }
         }
-        if (request.command.name === "tab.goto") validateWebUrl(request.command.url)
+        if (request.command.name === "tab.goto") normalizeUrl(request.command.url)
         if (request.command.name === "tab.automation.read" && request.command.url) {
-            validateWebUrl(request.command.url)
+            normalizeUrl(request.command.url, false)
         }
         if (request.command.name === "tab.screenshot" && request.command.clip) {
             if (
@@ -161,27 +162,5 @@ function validatePoint(x: number, y: number, state: BrowserState) {
         || y >= state.viewport.height
     ) {
         throw new BrowserRuntimeException("INVALID_COMMAND", "Coordinate is outside the current browser viewport")
-    }
-}
-
-function validateWebUrl(input: string) {
-    try {
-        const value = input.trim()
-        const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`)
-        if (url.protocol !== "http:" && url.protocol !== "https:") {
-            throw new BrowserRuntimeException("INVALID_COMMAND", `Unsupported browser URL protocol: ${url.protocol}`)
-        }
-    } catch (error) {
-        if (error instanceof BrowserRuntimeException) throw error
-        throw new BrowserRuntimeException("INVALID_COMMAND", `Invalid browser URL: ${input}`)
-    }
-}
-
-function browserOrigin(input: string) {
-    try {
-        const url = new URL(input)
-        return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined
-    } catch {
-        return undefined
     }
 }

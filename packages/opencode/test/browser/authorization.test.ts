@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
 import type { Permission } from "../../src/permission"
+import { Instance } from "../../src/project/instance"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { authorizeBrowserCommand, BrowserParametersSchema } from "../../src/tool/browser"
 import type { Tool } from "../../src/tool/tool"
@@ -62,6 +65,57 @@ describe("authorized browser capability policy", () => {
       },
     ])
     expect(html.requests).toEqual([])
+  })
+
+  test("uses read permission for local file navigation", async () => {
+    const fixture = context()
+    const filepath = path.join(import.meta.dir, "authorization.test.ts")
+
+    await Instance.provide({
+      directory: path.resolve(import.meta.dir, "../.."),
+      fn: () =>
+        Effect.runPromise(
+          authorizeBrowserCommand(
+            { command: "tab.goto", url: pathToFileURL(filepath).toString() },
+            fixture.ctx,
+            async () => undefined,
+          ),
+        ),
+    })
+
+    expect(fixture.requests).toEqual([
+      {
+        permission: "read",
+        patterns: [filepath],
+        always: [filepath],
+        metadata: {
+          command: "tab.goto",
+          filepath,
+          url: pathToFileURL(filepath).toString(),
+        },
+      },
+    ])
+  })
+
+  test("requires external directory permission before reading a local file outside the project", async () => {
+    const fixture = context()
+    const project = path.resolve(import.meta.dir, "../..")
+    const filepath = path.resolve(project, "../../..", "outside-browser-file.html")
+
+    await Instance.provide({
+      directory: project,
+      fn: () =>
+        Effect.runPromise(
+          authorizeBrowserCommand(
+            { command: "tab.goto", url: filepath },
+            fixture.ctx,
+            async () => undefined,
+          ),
+        ),
+    })
+
+    expect(fixture.requests.map((request) => request.permission)).toEqual(["external_directory", "read"])
+    expect(fixture.requests[1]?.patterns).toEqual([filepath])
   })
 
   test("uses browser_interaction and returns the origin used for expectedOrigin", async () => {
@@ -153,7 +207,7 @@ describe("authorized browser capability policy", () => {
           async () => undefined,
         ),
       ),
-    ).rejects.toThrow("does not have an HTTP or HTTPS origin")
+    ).rejects.toThrow("does not have a supported page scope")
   })
 
   test("rejects CDP without a top-level method before resolving origin or asking permission", async () => {

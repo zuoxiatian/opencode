@@ -875,7 +875,7 @@ tab.dev.cdp Runtime.evaluate
 该能力要求：
 
 - `browser_cdp`。
-- 从当前 tab 捕获 HTTP/HTTPS origin 并写入 exact `expectedOrigin`。
+- 从当前 tab 捕获 HTTP/HTTPS origin 或精确本地文件 URL，并写入 `expectedOrigin`。
 - 高风险 metadata。
 - Gateway 当前 tab 限定。
 
@@ -1038,7 +1038,7 @@ agent-browser 通过 Gateway 收到 Page/Network event，并自动观察导航�
 2. 验证 tab 存在。
 3. 验证 owner session。
 4. 读取当前 URL。
-5. 从当前 URL 捕获 HTTP/HTTPS origin 并写入 `expectedOrigin`，不单独请求 origin 权限。
+5. 从当前 URL 捕获 HTTP/HTTPS origin 或精确本地文件 URL 并写入 `expectedOrigin`，不单独请求 scope 权限。
 6. Runtime 再次比较实际 origin。
 7. 只有一致时才调用 agent-browser。
 8. 页面交互、文件、下载、CDP 再叠加对应专项权限。

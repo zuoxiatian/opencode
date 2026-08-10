@@ -1,4 +1,6 @@
 import type { Session } from "electron"
+import path from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import type { BrowserCommandRequest, BrowserLoadError, BrowserNavigationResult } from "@opencode-ai/browser-protocol"
 import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
@@ -14,13 +16,19 @@ export class NavigationService {
     ) {}
 
     register(tab: EmbeddedTab) {
+        tab.webContents.on("will-navigate", (event, url) => {
+            const target = browserOrigin(url)
+            if (!target?.startsWith("file:")) return
+            if (target === browserOrigin(tab.pendingUrl || tab.webContents.getURL())) return
+            event.preventDefault()
+        })
         tab.webContents.on("did-start-loading", () => this.tabs.changed(tab))
         tab.webContents.on("did-stop-loading", () => {
             this.tabs.changed(tab)
             this.events.publish("navigation.completed", eventInput(tab))
         })
         tab.webContents.on("did-start-navigation", (_event, url, inPlace, isMainFrame) => {
-            if (!isMainFrame || !isWebUrl(url)) return
+            if (!isMainFrame || !isBrowserUrl(url)) return
             if (inPlace) {
                 if (!tab.pendingUrl) tab.generation += 1
                 this.events.publish("navigation.started", eventInput(tab, { url }))
@@ -58,7 +66,7 @@ export class NavigationService {
             this.tabs.changed(tab)
         })
         tab.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
-            if (isMainFrame && isWebUrl(url)) {
+            if (isMainFrame && isBrowserUrl(url)) {
                 this.events.publish("navigation.committed", eventInput(tab, { url }))
                 this.tabs.recordHistory(tab)
             }
@@ -151,6 +159,7 @@ export class NavigationService {
         if (!history.canGoBack()) return currentResult(tab)
         const url = history.getEntryAtIndex(history.getActiveIndex() - 1)?.url
         if (!url) return currentResult(tab)
+        ensureHistoryTargetAllowed(tab, url)
         this.prepare(tab, url)
         const generation = tab.generation
         const completed = expectNavigation(tab.webContents, 10_000, signal)
@@ -171,6 +180,7 @@ export class NavigationService {
         if (!history.canGoForward()) return currentResult(tab)
         const url = history.getEntryAtIndex(history.getActiveIndex() + 1)?.url
         if (!url) return currentResult(tab)
+        ensureHistoryTargetAllowed(tab, url)
         this.prepare(tab, url)
         const generation = tab.generation
         const completed = expectNavigation(tab.webContents, 10_000, signal)
@@ -272,14 +282,20 @@ export class NavigationService {
     }
 }
 
-export function normalizeUrl(input: string) {
+export function normalizeUrl(input: string, localFiles = true) {
     try {
         const value = input.trim()
-        const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`)
-        if (!isWebUrl(url.toString())) {
+        const url = path.isAbsolute(value)
+            ? pathToFileURL(value)
+            : new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`)
+        if (isWebUrl(url.toString())) return url.toString()
+        if (url.protocol !== "file:" || !localFiles) {
             throw new BrowserRuntimeException("INVALID_COMMAND", `Unsupported URL: ${input}`)
         }
-        return url.toString()
+        const normalized = pathToFileURL(fileURLToPath(url))
+        normalized.hash = url.hash
+        normalized.search = url.search
+        return normalized.toString()
     } catch (error) {
         if (error instanceof BrowserRuntimeException) throw error
         throw new BrowserRuntimeException("INVALID_COMMAND", `Invalid browser URL: ${input}`)
@@ -289,10 +305,18 @@ export function normalizeUrl(input: string) {
 export function browserOrigin(input: string) {
     try {
         const url = new URL(input)
-        return isWebUrl(url.toString()) ? url.origin : undefined
+        if (isWebUrl(url.toString())) return url.origin
+        if (url.protocol !== "file:") return
+        url.hash = ""
+        url.search = ""
+        return pathToFileURL(fileURLToPath(url)).toString()
     } catch {
         return undefined
     }
+}
+
+function isBrowserUrl(input: string) {
+    return browserOrigin(input) !== undefined
 }
 
 function isWebUrl(input: string) {
@@ -308,6 +332,16 @@ function browserFavicon(favicons: string[]) {
             return false
         }
     })
+}
+
+function ensureHistoryTargetAllowed(tab: EmbeddedTab, target: string) {
+    const scope = browserOrigin(target)
+    if (!scope?.startsWith("file:")) return
+    if (scope === browserOrigin(tab.webContents.getURL())) return
+    throw new BrowserRuntimeException(
+        "PERMISSION_DENIED",
+        "Local history entries must be reopened with tab.goto",
+    )
 }
 
 async function loadFavicon(browserSession: Session, input: string) {

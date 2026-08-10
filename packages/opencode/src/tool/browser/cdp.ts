@@ -47,7 +47,7 @@ export const BrowserCdpTool = defineBrowserTool(
     "Use this only when the typed browser read and action tools cannot express the operation.",
     "operation.method is required beside operation.command for tab.dev.cdp; never put method inside operation.params.",
     "Runtime.evaluate forces returnByValue: true and must return bounded JSON-safe data.",
-    "This tool requires browser_cdp permission and remains bound to the current HTTP or HTTPS page origin.",
+    "This tool requires browser_cdp permission and remains bound to the current HTTP/HTTPS origin or exact local file URL.",
   ].join(" "),
   BrowserCdpParametersSchema,
 )

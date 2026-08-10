@@ -46,14 +46,37 @@ describe("BrowserSecurityGate", () => {
         )).not.toThrow()
     })
 
-    test("only allows HTTP and HTTPS URLs for native read", () => {
+    test("allows local files for navigation but not native read URLs", () => {
+        expect(() => new BrowserSecurityGate().ensureAllowed(
+            request({ name: "tab.goto", url: "file:///tmp/local-page.html" }),
+            state(),
+        )).not.toThrow()
         expect(() => new BrowserSecurityGate().ensureAllowed(
             request(
                 { name: "tab.automation.read", url: "file:///etc/passwd" },
                 { expectedOrigin: "https://example.com" },
             ),
             state(),
-        )).toThrow("Unsupported browser URL protocol: file:")
+        )).toThrow("Unsupported URL")
+    })
+
+    test("binds local file automation to the exact file URL", () => {
+        const gate = new BrowserSecurityGate()
+
+        expect(() => gate.ensureAllowed(
+            request(
+                { interactiveOnly: true, name: "tab.automation.snapshot" },
+                { expectedOrigin: "file:///tmp/local-page.html" },
+            ),
+            state("file:///tmp/local-page.html#section"),
+        )).not.toThrow()
+        expect(() => gate.ensureAllowed(
+            request(
+                { interactiveOnly: true, name: "tab.automation.snapshot" },
+                { expectedOrigin: "file:///tmp/other-page.html" },
+            ),
+            state("file:///tmp/local-page.html"),
+        )).toThrow("The page origin changed after permission was granted")
     })
 
     test("detects an origin change after permission was granted", () => {
@@ -125,7 +148,7 @@ function request(
     }
 }
 
-function state(): BrowserState {
+function state(url = "https://example.com/page"): BrowserState {
     return {
         activeTabId: "tab-test",
         browserId: "embedded",
@@ -146,7 +169,7 @@ function state(): BrowserState {
                 ownerSessionId: "owner-session",
             },
             title: "Example",
-            url: "https://example.com/page",
+            url,
         }],
         viewport: {
             height: 768,
