@@ -3,6 +3,7 @@ import type { FSWatcher } from "node:fs"
 import type { ChildProcess } from "node:child_process"
 import type { BrowserRuntime } from "../browser/runtime"
 import type { BrowserTransportServer } from "../browser/transport-server"
+import type { OverlayWindowManager } from "../window/overlay-window"
 
 export interface ServerInfo {
     url: string
@@ -26,6 +27,7 @@ export interface MainState {
     closeDirectoryWatcher: (watcherID: string) => void
     closeDirectoryWatchers: () => void
     directoryWatchers: Map<string, FSWatcher>
+    overlayManager: OverlayWindowManager | null
     serverInfo: ServerInfo | null
     serverProcess: ChildProcess | null
     serverStartPromise: Promise<ServerInfo> | null
@@ -50,6 +52,7 @@ export function createMainState(): MainState {
             directoryWatchers.clear()
         },
         directoryWatchers,
+        overlayManager: null,
         serverInfo: null,
         serverProcess: null,
         serverStartPromise: null,

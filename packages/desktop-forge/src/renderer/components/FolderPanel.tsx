@@ -1,7 +1,6 @@
 import { batch, createEffect, createSignal, For, Index, onCleanup, onMount, Show, untrack } from "solid-js"
 import { Dynamic, Portal } from "solid-js/web"
 import type { Project, Session } from "@opencode-ai/sdk/v2/client"
-import { showToast } from "@opencode-ai/ui/toast"
 import { useSDK } from "../context/sdk"
 import type { LucideIcon } from "lucide-solid"
 import ChartColumn from "lucide-solid/icons/chart-column"
@@ -52,6 +51,7 @@ import { changeClientPassword, type ClientPasswordFailureReason } from "../api/c
 import { checkClientUpdate } from "../services/client-update"
 import { SkillMarketDialog } from "./SkillMarketDialog"
 import appIcon from "../../../build/128x128.png"
+import { showDesktopToast } from "../toast"
 
 interface FileItem {
     name: string
@@ -186,7 +186,8 @@ export function FolderPanel(props: FolderPanelProps) {
     const [lastSelectedFilePath, setLastSelectedFilePath] = createSignal<string | null>(null)
     const [unreadSessions, setUnreadSessions] = createSignal<Set<string>>(new Set())
     const [sidebarMenu, setSidebarMenu] = createSignal<SidebarMenu | null>(null)
-    const [sidebarDialog, setSidebarDialog] = createSignal<SidebarDialog | null>(null)
+    const [sidebarDialog] = createSignal<SidebarDialog | null>(null)
+    const [nativeSidebarDialog, setNativeSidebarDialog] = createSignal<SidebarDialog | null>(null)
     const [accountMenuPosition, setAccountMenuPosition] = createSignal<{ x: number; bottom: number } | null>(null)
     const [settingsOpen, setSettingsOpen] = createSignal(false)
     const [skillMarketOpen, setSkillMarketOpen] = createSignal(false)
@@ -232,15 +233,24 @@ export function FolderPanel(props: FolderPanelProps) {
 
     const openSettings = () => {
         closeMenus()
-        resetPasswordForm()
-        setIsPasswordFormOpen(false)
-        setSettingsOpen(true)
+        void window.electronAPI.openOverlay({
+            data: {
+                chatVisibility: props.chatVisibility,
+                clientAuthSession: props.clientAuthSession,
+                linkOpenMode: props.linkOpenMode,
+                themeMode: props.themeMode,
+            },
+            kind: "settings",
+        })
     }
 
     const openSkillMarket = () => {
         if (!props.appMarketEnabled) return
         closeMenus()
-        setSkillMarketOpen(true)
+        void window.electronAPI.openOverlay({
+            data: { serverInfo: sdk.serverInfo },
+            kind: "skill-market",
+        })
     }
 
     const updateChatVisibility = (changes: Partial<ChatVisibilitySettings>) => {
@@ -248,7 +258,7 @@ export function FolderPanel(props: FolderPanelProps) {
     }
 
     const closeSidebarDialog = () => {
-        setSidebarDialog(null)
+        setNativeSidebarDialog(null)
         setRenameSessionTitle("")
     }
 
@@ -289,19 +299,31 @@ export function FolderPanel(props: FolderPanelProps) {
         if (renamingSessions().has(session.id)) return
         closeSidebarMenu()
         setRenameSessionTitle(getSessionTitle(session))
-        setSidebarDialog({ kind: "rename-session", folder, session })
+        setNativeSidebarDialog({ kind: "rename-session", folder, session })
+        void window.electronAPI.openOverlay({
+            data: { kind: "rename-session", name: getSessionTitle(session), value: getSessionTitle(session) },
+            kind: "sidebar-dialog",
+        })
     }
 
     const openDeleteProjectDialog = (project: Project) => {
         if (deletingProjects().has(project.id)) return
         closeSidebarMenu()
-        setSidebarDialog({ kind: "delete-project", project })
+        setNativeSidebarDialog({ kind: "delete-project", project })
+        void window.electronAPI.openOverlay({
+            data: { kind: "delete-project", name: getFolderName(project.worktree) },
+            kind: "sidebar-dialog",
+        })
     }
 
     const openDeleteSessionDialog = (folder: string, session: Session) => {
         if (deletingSessions().has(session.id)) return
         closeSidebarMenu()
-        setSidebarDialog({ kind: "delete-session", folder, session })
+        setNativeSidebarDialog({ kind: "delete-session", folder, session })
+        void window.electronAPI.openOverlay({
+            data: { kind: "delete-session", name: getSessionTitle(session) },
+            kind: "sidebar-dialog",
+        })
     }
 
     const openProjectInFileManagerLabel = () => {
@@ -454,6 +476,28 @@ export function FolderPanel(props: FolderPanelProps) {
                 applyProjectUpdate(project)
             }
         })
+        const unsubscribeOverlayActions = window.electronAPI.onOverlayAction((action) => {
+            if (action.type === "settings.theme-mode") {
+                props.onThemeModeChange(action.mode)
+                return
+            }
+            if (action.type === "settings.chat-visibility") {
+                props.onChatVisibilityChange(action.settings)
+                return
+            }
+            if (action.type === "settings.link-open-mode") {
+                props.onLinkOpenModeChange(action.mode)
+                return
+            }
+            if (action.type === "sidebar-dialog.cancel") {
+                closeSidebarDialog()
+                return
+            }
+            if (action.type !== "sidebar-dialog.submit") return
+            if (action.value !== undefined) setRenameSessionTitle(action.value)
+            void confirmSidebarDialog(action.value)
+        })
+        onCleanup(unsubscribeOverlayActions)
     })
 
     createEffect(() => {
@@ -704,8 +748,8 @@ export function FolderPanel(props: FolderPanelProps) {
         }
     }
 
-    const renameSession = async (folder: string, session: Session) => {
-        const title = renameSessionTitle().trim()
+    const renameSession = async (folder: string, session: Session, value?: string) => {
+        const title = (value ?? renameSessionTitle()).trim()
         closeSidebarDialog()
         if (!title || title === session.title) return
         setRenamingSessions((prev) => new Set(prev).add(session.id))
@@ -725,11 +769,11 @@ export function FolderPanel(props: FolderPanelProps) {
         }
     }
 
-    const confirmSidebarDialog = async () => {
-        const dialog = sidebarDialog()
+    const confirmSidebarDialog = async (value?: string) => {
+        const dialog = nativeSidebarDialog()
         if (!dialog) return
         if (dialog.kind === "rename-session") {
-            await renameSession(dialog.folder, dialog.session)
+            await renameSession(dialog.folder, dialog.session, value)
             return
         }
         closeSidebarDialog()
@@ -826,7 +870,7 @@ export function FolderPanel(props: FolderPanelProps) {
         return "修改密码失败，请稍后重试"
     }
     const notifyPasswordChangeError = (description: string) => {
-        showToast({
+        showDesktopToast({
             description,
             title: "修改密码失败",
             variant: "error",
@@ -869,7 +913,7 @@ export function FolderPanel(props: FolderPanelProps) {
 
         resetPasswordForm()
         setIsPasswordFormOpen(false)
-        showToast({
+        showDesktopToast({
             title: "密码已修改",
             variant: "success",
         })
@@ -886,7 +930,7 @@ export function FolderPanel(props: FolderPanelProps) {
         setIsManualUpdateChecking(true)
         const update = await checkClientUpdate().catch((error: unknown) => {
             console.error("手动检查客户端更新失败:", error)
-            showToast({
+            showDesktopToast({
                 description: error instanceof Error ? error.message : String(error),
                 title: "检查更新失败",
                 variant: "error",
@@ -897,7 +941,7 @@ export function FolderPanel(props: FolderPanelProps) {
         if (update === undefined) return
 
         if (!update) {
-            showToast({
+            showDesktopToast({
                 description: `当前版本 ${appInfo()?.version ?? ""}`,
                 title: "当前已是最新版本",
                 variant: "success",

@@ -26,10 +26,10 @@ export interface BrowserRuntime {
     subscribe: (listener: (event: BrowserEvent) => void) => () => void
 }
 
-export function createBrowserRuntime(window: BrowserWindow): BrowserRuntime {
+export function createBrowserRuntime(window: BrowserWindow, raiseOverlays?: () => void): BrowserRuntime {
     const events = new BrowserEventStore()
     const registry = new BrowserRegistry()
-    registry.add(createEmbeddedBrowserBackend(window, events))
+    registry.add(createEmbeddedBrowserBackend(window, events, raiseOverlays))
     const dispatcher = new BrowserCommandDispatcher(registry, new BrowserSecurityGate(), events)
     events.subscribe((event) => {
         if (window.isDestroyed() || window.webContents.isDestroyed()) return

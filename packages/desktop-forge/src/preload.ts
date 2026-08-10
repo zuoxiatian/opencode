@@ -15,6 +15,14 @@ import type {
     BrowserCommandResponse,
     BrowserState,
 } from "./shared/browser"
+import type {
+    DesktopToastInput,
+    DesktopToastRenderState,
+    ModalOverlayContentSize,
+    ModalOverlayInput,
+    ModalOverlayRenderState,
+    OverlayAction,
+} from "./shared/overlay"
 
 export interface DirectoryChangeEvent {
     path: string
@@ -34,6 +42,18 @@ interface ServerInfo {
 }
 
 export interface ElectronAPI {
+    closeOverlay: () => Promise<void>
+    modalOverlayRendered: (revision: number, contentSize?: ModalOverlayContentSize) => Promise<void>
+    onModalOverlayState: (callback: (payload: ModalOverlayRenderState) => void) => () => void
+    onOverlayAction: (callback: (action: OverlayAction) => void) => () => void
+    onOverlayToastDismiss: (callback: (revision: number) => void) => () => void
+    onOverlayToast: (callback: (state: DesktopToastRenderState) => void) => () => void
+    openOverlay: (input: ModalOverlayInput) => Promise<void>
+    readyModalOverlay: () => Promise<void>
+    readyToastOverlay: () => Promise<void>
+    resizeToastOverlay: (revision: number, height: number) => Promise<void>
+    sendOverlayAction: (action: OverlayAction) => Promise<void>
+    showToast: (input: DesktopToastInput) => Promise<void>
     browserCommand: (command: BrowserCommandInput) => Promise<BrowserCommandResponse>
     getBrowserState: () => Promise<BrowserState | null>
     onBrowserStateChanged: (callback: (state: BrowserState) => void) => () => void
@@ -63,11 +83,51 @@ export interface ElectronAPI {
     installSkill: (input: SkillInstallRequest, options?: SkillMarketOperationOptions) => Promise<SkillOperationResult>
     deleteSkill: (skillKey: string, options?: SkillMarketOperationOptions) => Promise<SkillDeleteResult>
     setTitleBarOverlay: (options: { color: string; symbolColor: string }) => Promise<void>
-    setThemeMode: (mode: "system" | "light" | "dark") => Promise<void>
+    setThemeMode: (mode: "system" | "light" | "dark") => Promise<"light" | "dark">
     watchDirectory: (path: string, callback: (event: DirectoryChangeEvent) => void) => () => void
 }
 
 const electronAPI: ElectronAPI = {
+    closeOverlay: () => ipcRenderer.invoke("overlay:close"),
+
+    modalOverlayRendered: (revision, contentSize) => ipcRenderer.invoke("overlay:modal-rendered", revision, contentSize),
+
+    onModalOverlayState: (callback) => {
+        const handler = (_: unknown, payload: ModalOverlayRenderState) => callback(payload)
+        ipcRenderer.on("overlay:modal-state", handler)
+        return () => ipcRenderer.removeListener("overlay:modal-state", handler)
+    },
+
+    onOverlayAction: (callback) => {
+        const handler = (_: unknown, action: OverlayAction) => callback(action)
+        ipcRenderer.on("overlay:action", handler)
+        return () => ipcRenderer.removeListener("overlay:action", handler)
+    },
+
+    onOverlayToastDismiss: (callback) => {
+        const handler = (_: unknown, revision: number) => callback(revision)
+        ipcRenderer.on("overlay:toast-dismiss", handler)
+        return () => ipcRenderer.removeListener("overlay:toast-dismiss", handler)
+    },
+
+    onOverlayToast: (callback) => {
+        const handler = (_: unknown, state: DesktopToastRenderState) => callback(state)
+        ipcRenderer.on("overlay:toast", handler)
+        return () => ipcRenderer.removeListener("overlay:toast", handler)
+    },
+
+    openOverlay: (input) => ipcRenderer.invoke("overlay:open", input),
+
+    readyModalOverlay: () => ipcRenderer.invoke("overlay:modal-ready"),
+
+    readyToastOverlay: () => ipcRenderer.invoke("overlay:toast-ready"),
+
+    resizeToastOverlay: (revision, height) => ipcRenderer.invoke("overlay:resize-toast", revision, height),
+
+    sendOverlayAction: (action) => ipcRenderer.invoke("overlay:action", action),
+
+    showToast: (input) => ipcRenderer.invoke("overlay:show-toast", input),
+
     browserCommand: (command) => ipcRenderer.invoke("browser:command", command),
 
     getBrowserState: () => ipcRenderer.invoke("browser:get-state"),

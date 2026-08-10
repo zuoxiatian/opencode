@@ -1,5 +1,4 @@
 import { createSignal, onMount, Show } from "solid-js"
-import { showToast } from "@opencode-ai/ui/toast"
 import Eye from "lucide-solid/icons/eye"
 import EyeOff from "lucide-solid/icons/eye-off"
 import Lock from "lucide-solid/icons/lock"
@@ -8,6 +7,7 @@ import User from "lucide-solid/icons/user"
 import type { ClientAuthSession } from "../auth"
 import { loginClient, type ClientLoginFailureReason } from "../api/client"
 import welcomeIcon from "../../../build/128x128.png"
+import { showDesktopToast } from "../toast"
 
 type LoginPageProps = {
     onLogin: (session: ClientAuthSession) => void
@@ -23,7 +23,7 @@ export function LoginPage(props: LoginPageProps) {
     onMount(() => usernameInput?.focus())
 
     const notifyLoginError = (description: string) => {
-        showToast({
+        showDesktopToast({
             description,
             title: "登录失败",
             variant: "error",

@@ -1,9 +1,9 @@
 import type { MessageBoxOptions, TitleBarOverlayOptions } from "electron"
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron"
+import { BrowserWindow, app, dialog, ipcMain, nativeTheme, shell } from "electron"
 import { existsSync, watch } from "node:fs"
 import { readFile, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { applyWindowTheme, isThemeMode, writeStoredThemeMode } from "../window/theme"
+import { applyWindowTheme, isThemeMode, resolveThemeMode, writeStoredThemeMode } from "../window/theme"
 import type { DirectoryWatchOptions, MainState, ThemeMode } from "../app/state"
 import { startServer, stopServer } from "../server/opencode-server"
 import { deleteInstalledBundle, deleteInstalledSkill, installSkillPackage, listInstalledSkills, skillDirFor } from "../server/skill-market"
@@ -19,12 +19,50 @@ import type {
     SkillOperationResult,
 } from "../../shared/skill-market"
 import type { BrowserBounds, BrowserCommandInput } from "../../shared/browser"
+import type { DesktopToastInput, ModalOverlayContentSize, ModalOverlayInput, OverlayAction } from "../../shared/overlay"
 
 type SkillMarketMutationResult = SkillOperationResult | SkillDeleteResult
 
 const skillOperations = new Map<string, SkillMarketOperation>()
 
 export function registerIpcHandlers(state: MainState) {
+    ipcMain.handle("overlay:open", (event, input: ModalOverlayInput) => {
+        assertMainWindowSender(state, event.sender)
+        if (!isModalOverlayInput(input)) throw new Error("无效的浮层类型")
+        state.overlayManager?.open(input)
+    })
+
+    ipcMain.handle("overlay:close", (event) => state.overlayManager?.closeModal(event.sender))
+
+    ipcMain.handle("overlay:modal-ready", (event) => state.overlayManager?.readyModal(event.sender))
+
+    ipcMain.handle("overlay:modal-rendered", (event, revision: number, contentSize?: ModalOverlayContentSize) => {
+        if (!Number.isSafeInteger(revision) || revision < 0) throw new Error("无效的弹框版本")
+        if (contentSize && (
+            !Number.isFinite(contentSize.width) || contentSize.width <= 0 ||
+            !Number.isFinite(contentSize.height) || contentSize.height <= 0
+        )) throw new Error("无效的弹框内容尺寸")
+        state.overlayManager?.renderedModal(event.sender, revision, contentSize)
+    })
+
+    ipcMain.handle("overlay:action", (event, action: OverlayAction) => {
+        state.overlayManager?.sendAction(event.sender, action)
+    })
+
+    ipcMain.handle("overlay:show-toast", (event, input: DesktopToastInput) => {
+        assertAppWindowSender(state, event.sender)
+        if (!input || typeof input.title !== "string") throw new Error("无效的提示内容")
+        return state.overlayManager?.showToast(input)
+    })
+
+    ipcMain.handle("overlay:resize-toast", (event, revision: number, height: number) => {
+        if (!Number.isSafeInteger(revision) || revision < 0) throw new Error("无效的提示版本")
+        if (!Number.isFinite(height)) throw new Error("无效的提示高度")
+        state.overlayManager?.resizeToast(event.sender, revision, height)
+    })
+
+    ipcMain.handle("overlay:toast-ready", (event) => state.overlayManager?.readyToast(event.sender))
+
     ipcMain.handle("pick-directory", async () => {
         const result = await dialog.showOpenDialog({ properties: ["openDirectory"] })
         return result.canceled ? null : result.filePaths[0]
@@ -127,11 +165,16 @@ export function registerIpcHandlers(state: MainState) {
     })
 
     ipcMain.handle("set-theme-mode", async (event, mode: ThemeMode) => {
-        if (!isThemeMode(mode)) return
+        if (!isThemeMode(mode)) throw new Error("无效主题模式")
 
         await writeStoredThemeMode(mode)
         const window = BrowserWindow.fromWebContents(event.sender)
-        if (window) applyWindowTheme(window, mode)
+        if (window) return applyWindowTheme(window, mode)
+        if (state.overlayManager?.ownsWebContents(event.sender)) {
+            nativeTheme.themeSource = mode
+            return resolveThemeMode(mode)
+        }
+        throw new Error("无法定位主题窗口")
     })
 
     ipcMain.handle("read-directory", async (_, dirPath: string) =>
@@ -219,6 +262,16 @@ function assertMainWindowSender(state: MainState, sender: Electron.WebContents) 
     if (!state.window || state.window.isDestroyed() || state.window.webContents !== sender) {
         throw new Error("拒绝非主窗口发起的浏览器操作")
     }
+}
+
+function assertAppWindowSender(state: MainState, sender: Electron.WebContents) {
+    if (state.window?.webContents === sender) return
+    if (state.overlayManager?.ownsWebContents(sender)) return
+    throw new Error("拒绝未知窗口发起应用操作")
+}
+
+function isModalOverlayInput(input: ModalOverlayInput) {
+    return Boolean(input && ["image-preview", "settings", "sidebar-dialog", "skill-market"].includes(input.kind))
 }
 
 function isWebUrl(input: string) {

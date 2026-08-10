@@ -42,7 +42,9 @@ export async function writeStoredThemeMode(mode: ThemeMode) {
 
 export function applyWindowTheme(window: BrowserWindow, mode: ThemeMode) {
     nativeTheme.themeSource = mode
-    window.setBackgroundColor(windowThemeColors(resolveThemeMode(mode)).backgroundColor)
+    const theme = resolveThemeMode(mode)
+    window.setBackgroundColor(windowThemeColors(theme).backgroundColor)
+    return theme
 }
 
 function themeModePath() {

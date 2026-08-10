@@ -70,10 +70,11 @@ const info: BrowserInfo = {
 export function createEmbeddedBrowserBackend(
     window: BrowserWindow,
     events: BrowserEventStore,
+    raiseOverlays?: () => void,
 ): BrowserBackend {
     const browserSession = session.fromPartition("persist:desktop-forge-browser")
     let registerTab: (tab: EmbeddedTab) => void = () => undefined
-    const tabs = new EmbeddedTabStore(window, events, (tab) => registerTab(tab))
+    const tabs = new EmbeddedTabStore(window, events, (tab) => registerTab(tab), raiseOverlays)
     const navigation = new NavigationService(browserSession, tabs, events)
     const dialogs = new DialogService(tabs, events)
     const aria = new AriaSnapshotService()

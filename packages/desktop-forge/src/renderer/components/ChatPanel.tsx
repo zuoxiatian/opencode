@@ -424,6 +424,18 @@ const isImageFilePart = (part: unknown): part is ImageFilePart => (
     && typeof part.url === "string"
 )
 
+const imageOverlayUrl = (url: string) => {
+    if (!url.startsWith("blob:")) return Promise.resolve(url)
+    return fetch(url)
+        .then((response) => response.blob())
+        .then((blob) => new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.addEventListener("load", () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("无法读取图片")))
+            reader.addEventListener("error", () => reject(reader.error ?? new Error("无法读取图片")))
+            reader.readAsDataURL(blob)
+        }))
+}
+
 const normalizeToolName = (tool: string) => {
     const value = tool.trim().toLowerCase()
     if (!value.includes(".")) return value
@@ -1244,6 +1256,14 @@ export function ChatPanel(props: ChatPanelProps) {
     const currentSessionId = createMemo<string | null>(() => sdk.selectedSession()?.id ?? null)
 
     const closePreviewImage = () => setPreviewImage(null)
+    const openImagePreview = (image: ImageFilePart) => {
+        void imageOverlayUrl(image.url)
+            .then((url) => window.electronAPI.openOverlay({
+                data: { filename: image.filename, mime: image.mime, url },
+                kind: "image-preview",
+            }))
+            .catch((error: unknown) => console.error("打开图片预览失败:", error))
+    }
 
     createEffect(() => {
         if (!previewImage()) return
@@ -2498,7 +2518,7 @@ export function ChatPanel(props: ChatPanelProps) {
                                     type="button"
                                     title={image.filename ?? image.mime}
                                     aria-label={`预览图片 ${image.filename ?? image.mime}`}
-                                    onClick={() => setPreviewImage(image)}
+                                    onClick={() => openImagePreview(image)}
                                 >
                                     <img
                                         src={image.url}
@@ -2914,7 +2934,7 @@ export function ChatPanel(props: ChatPanelProps) {
                                                                 <div class="tool-calls">
                                                                     <ToolCallBlock
                                                                         part={tool}
-                                                                        onPreviewImage={(image) => setPreviewImage(image)}
+                                                                        onPreviewImage={openImagePreview}
                                                                         onImageLoad={() => queueMicrotask(updateScrollToBottomVisibility)}
                                                                     />
                                                                 </div>

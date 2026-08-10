@@ -7,6 +7,7 @@ import { readStoredThemeMode, resolveThemeMode, windowThemeColors } from "./them
 import type { MainState } from "../app/state"
 import { createBrowserRuntime } from "../browser/runtime"
 import { startBrowserTransportServer } from "../browser/transport-server"
+import { OverlayWindowManager } from "./overlay-window"
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -58,6 +59,8 @@ export async function createMainWindow(state: MainState) {
 
     window.on("ready-to-show", () => window.show())
     window.on("closed", () => {
+        state.overlayManager?.destroy()
+        state.overlayManager = null
         state.closeDirectoryWatchers()
         const destroy = state.browserRuntime?.destroy()
         state.browserRuntime = null
@@ -71,10 +74,13 @@ export async function createMainWindow(state: MainState) {
         if (state.window === window) state.window = null
     })
 
+    state.overlayManager?.destroy()
+    state.overlayManager = new OverlayWindowManager(window)
+
     await state.browserRuntimeDestroy?.catch(() => undefined)
     await state.browserRuntime?.destroy()
     state.browserRuntimeDestroy = null
-    state.browserRuntime = createBrowserRuntime(window)
+    state.browserRuntime = createBrowserRuntime(window, () => state.overlayManager?.raiseViews())
     state.browserTransport ??= await startBrowserTransportServer(() => state.browserRuntime)
     window.webContents.setWindowOpenHandler(({ url }) => {
         if (isWebUrl(url)) {
@@ -92,6 +98,7 @@ export async function createMainWindow(state: MainState) {
     })
     registerEditShortcuts(window)
     await loadRenderer(window)
+    void state.overlayManager?.prewarm().catch((error: unknown) => console.error("预热桌面浮层失败:", error))
     return window
 }
 

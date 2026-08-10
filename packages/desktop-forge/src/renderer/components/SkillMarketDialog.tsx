@@ -1,6 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
-import { showToast } from "@opencode-ai/ui/toast"
 import Download from "lucide-solid/icons/download"
 import LoaderCircle from "lucide-solid/icons/loader-circle"
 import Package from "lucide-solid/icons/package"
@@ -11,6 +10,7 @@ import X from "lucide-solid/icons/x"
 import type { InstalledSkill, SkillMarketOperation } from "../../shared/skill-market"
 import { listClientSkillCatalog, type ClientSkill } from "../api/skills"
 import { useSDK } from "../context/sdk"
+import { showDesktopToast } from "../toast"
 
 type SkillMarketTab = "market" | "installed"
 
@@ -200,13 +200,13 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
             })
 
             if (!result.success) {
-                showToast({ description: result.error, title: `${action}失败`, variant: "error" })
+                showDesktopToast({ description: result.error, title: `${action}失败`, variant: "error" })
                 return
             }
 
             await reloadInstalledSkills()
             await refreshSkillCache()
-            showToast({ description: `${skill.name} ${skill.version}`, title: `${action}成功`, variant: "success" })
+            showDesktopToast({ description: `${skill.name} ${skill.version}`, title: `${action}成功`, variant: "success" })
         })
     }
 
@@ -222,13 +222,13 @@ export function SkillMarketDialog(props: SkillMarketDialogProps) {
                     : undefined,
             )
             if (!result.success) {
-                showToast({ description: result.error, title: "删除失败", variant: "error" })
+                showDesktopToast({ description: result.error, title: "删除失败", variant: "error" })
                 return
             }
 
             await reloadInstalledSkills()
             await refreshSkillCache()
-            showToast({ description: installedDisplayName(skill), title: "已删除", variant: "success" })
+            showDesktopToast({ description: installedDisplayName(skill), title: "已删除", variant: "success" })
         })
     }
 

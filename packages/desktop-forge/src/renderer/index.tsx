@@ -1,9 +1,9 @@
 /* @refresh reload */
 import { render } from "solid-js/web"
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
-import { showToast, Toast } from "@opencode-ai/ui/toast"
 import "./index.css"
 import { App } from "./components/App"
+import { OverlayRoot } from "./components/OverlayRoot"
 import { LoginPage } from "./components/LoginPage"
 import { clearClientAuthSession, isClientAuthSessionExpired, readStoredClientAuthSession, subscribeClientAuthSession, type ClientAuthSession } from "./auth"
 import { checkClientStatus } from "./api/client"
@@ -21,6 +21,7 @@ import { checkClientUpdate } from "./services/client-update"
 import { syncRequiredClientSkills, type SkillSyncSummary } from "./services/skill-sync"
 import { getSystemTheme, readStoredThemeMode, resolveThemeMode, THEME_STORAGE_KEY } from "./theme"
 import welcomeIcon from "../../build/128x128.png"
+import { showDesktopToast } from "./toast"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -105,7 +106,7 @@ function Root() {
             return
         }
 
-        showToast({
+        showDesktopToast({
             description: result.message ?? "账号已在其他设备登录，请重新登录",
             title: "登录已失效",
             variant: "error",
@@ -165,11 +166,14 @@ function Root() {
     })
 
     createEffect(() => {
+        const mode = themeMode()
         document.documentElement.dataset.theme = resolvedTheme()
-        document.documentElement.dataset.themeMode = themeMode()
+        document.documentElement.dataset.themeMode = mode
         document.documentElement.style.colorScheme = resolvedTheme()
-        localStorage.setItem(THEME_STORAGE_KEY, themeMode())
-        void window.electronAPI.setThemeMode(themeMode())
+        localStorage.setItem(THEME_STORAGE_KEY, mode)
+        void window.electronAPI.setThemeMode(mode).then((theme) => {
+            if (mode === "system" && themeMode() === mode) setSystemTheme(theme)
+        })
         syncTitleBarOverlay()
     })
 
@@ -292,7 +296,7 @@ function Root() {
         const modelConfig = await getClientModelConfig().catch((error: unknown) => {
             const message = errorMessage(error, "读取模型配置失败")
             console.error("读取模型配置失败:", error)
-            showToast({
+            showDesktopToast({
                 description: message,
                 title: "模型配置同步失败",
                 variant: "error",
@@ -335,7 +339,7 @@ function Root() {
         setIsSkillSyncing(true)
         const summary = await syncRequiredClientSkills().catch((error: unknown) => {
             console.error("同步技能失败:", error)
-            showToast({
+            showDesktopToast({
                 description: error instanceof Error ? error.message : String(error),
                 title: "技能同步失败",
                 variant: "error",
@@ -447,7 +451,6 @@ function Root() {
                     </Show>
                 )}
             </Show>
-            <Toast.Region />
         </>
     )
 }
@@ -466,7 +469,7 @@ function isOpencodeServiceRecoveryGraceActive() {
 function notifySkillSyncSummary(summary: SkillSyncSummary) {
     const changed = summary.archivedDeleted + summary.requiredInstalled + summary.requiredUpdated
     if (summary.errors.length > 0) {
-        showToast({
+        showDesktopToast({
             description: summary.errors[0],
             title: "部分技能同步失败",
             variant: "error",
@@ -474,7 +477,7 @@ function notifySkillSyncSummary(summary: SkillSyncSummary) {
         return
     }
     if (changed === 0) return
-    showToast({
+    showDesktopToast({
         description: [
             summary.requiredInstalled ? `安装 ${summary.requiredInstalled}` : "",
             summary.requiredUpdated ? `更新 ${summary.requiredUpdated}` : "",
@@ -491,5 +494,10 @@ function errorMessage(error: unknown, fallback: string) {
 
 const rootElement = document.getElementById("root")
 if (rootElement) {
-    render(() => <Root />, rootElement)
+    const overlay = new URLSearchParams(window.location.search).get("overlay")
+    if (overlay) {
+        document.documentElement.dataset.overlayWindow = "true"
+        document.documentElement.dataset.overlayKind = overlay
+    }
+    render(() => overlay ? <OverlayRoot /> : <Root />, rootElement)
 }

@@ -27,6 +27,7 @@ export class EmbeddedTabStore {
         private readonly window: BrowserWindow,
         private readonly events: BrowserEventStore,
         private readonly register: (tab: EmbeddedTab) => void,
+        private readonly raiseOverlays?: () => void,
     ) {
         this.sweepTimer = setInterval(() => this.sweepExpired(), 60_000)
         this.sweepTimer.unref()
@@ -289,6 +290,7 @@ export class EmbeddedTabStore {
         if (this.attachedTabId && (!shouldAttach || this.attachedTabId !== active?.id)) this.detach()
         if (!shouldAttach || this.attachedTabId === active.id) return
         this.window.contentView.addChildView(active.view)
+        this.raiseOverlays?.()
         this.attachedTabId = active.id
         active.view.setBounds(this.bounds)
     }
