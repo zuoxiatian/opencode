@@ -2963,8 +2963,9 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
     padding: 16px;
     border: 1px solid var(--lxz-popover-separator);
     border-radius: 12px;
-    background: var(--lxz-popover-bg);
+    background: color-mix(in srgb, var(--lxz-popover-bg) 88%, transparent);
     box-shadow: 0 24px 58px -30px rgba(0, 0, 0, 0.96), 0 10px 24px -18px rgba(0, 0, 0, 0.82);
+    outline: none;
 }
 
 .sidebar-dialog-title {
@@ -3023,6 +3024,12 @@ html[data-overlay-kind="toast"][data-toast-replacing="true"] [data-component="to
 .sidebar-dialog-button:hover:not(:disabled) {
     background: var(--surface-raised-base-active);
     color: var(--text-primary);
+}
+
+.sidebar-dialog-button:focus,
+.sidebar-dialog-button:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
 }
 
 .sidebar-dialog-button.primary {
@@ -5935,6 +5942,11 @@ html[data-overlay-window] .chat-image-preview-img {
     max-width: none;
     max-height: none;
     flex: 1 1 0;
+}
+
+html[data-overlay-window] .sidebar-dialog-backdrop {
+    padding: 0;
+    background: transparent;
 }
 
 .chat-image-preview-shell {

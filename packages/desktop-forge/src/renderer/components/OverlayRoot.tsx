@@ -32,7 +32,7 @@ function ModalOverlay() {
                 if (pendingRevision !== payload.revision) return
                 setRevision(payload.revision)
                 setState(payload.state)
-                if (payload.state.kind !== "image-preview") queueMicrotask(rendered)
+                if (payload.state.kind !== "image-preview" && payload.state.kind !== "sidebar-dialog") queueMicrotask(rendered)
             })
         })
         void window.electronAPI.readyModalOverlay()
@@ -61,7 +61,10 @@ function ModalOverlay() {
                         />
                     </Match>
                     <Match when={current.kind === "sidebar-dialog"}>
-                        <SidebarDialogOverlay data={(current as Extract<OverlayState, { kind: "sidebar-dialog" }>).data} />
+                        <SidebarDialogOverlay
+                            data={(current as Extract<OverlayState, { kind: "sidebar-dialog" }>).data}
+                            onReady={rendered}
+                        />
                     </Match>
                 </Switch>
             )}
@@ -211,11 +214,24 @@ function ImagePreviewOverlay(props: {
     )
 }
 
-function SidebarDialogOverlay(props: { data: SidebarDialogOverlayData }) {
+function SidebarDialogOverlay(props: {
+    data: SidebarDialogOverlayData
+    onReady: (contentSize: ModalOverlayContentSize) => void
+}) {
+    let dialog: HTMLDivElement | undefined
+    let input: HTMLInputElement | undefined
     const [value, setValue] = createSignal(props.data.kind === "rename-session" ? props.data.value : "")
     const isRename = () => props.data.kind === "rename-session"
     const isProjectRemove = () => props.data.kind === "delete-project"
     const title = () => isRename() ? "重命名会话" : isProjectRemove() ? "移除项目" : "删除会话"
+    const focusInitial = () => {
+        if (!isRename()) {
+            dialog?.focus({ preventScroll: true })
+            return
+        }
+        input?.focus({ preventScroll: true })
+        input?.select()
+    }
     const cancel = async () => {
         await window.electronAPI.sendOverlayAction({ type: "sidebar-dialog.cancel" })
         await window.electronAPI.closeOverlay()
@@ -230,6 +246,11 @@ function SidebarDialogOverlay(props: { data: SidebarDialogOverlayData }) {
     }
 
     onMount(() => {
+        queueMicrotask(() => {
+            const bounds = dialog?.getBoundingClientRect()
+            if (bounds) props.onReady({ height: Math.ceil(bounds.height), width: Math.ceil(bounds.width) })
+            focusInitial()
+        })
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault()
@@ -240,13 +261,25 @@ function SidebarDialogOverlay(props: { data: SidebarDialogOverlayData }) {
             event.preventDefault()
             void submit()
         }
+        window.addEventListener("focus", focusInitial)
         window.addEventListener("keydown", handleKeyDown)
-        onCleanup(() => window.removeEventListener("keydown", handleKeyDown))
+        onCleanup(() => {
+            window.removeEventListener("focus", focusInitial)
+            window.removeEventListener("keydown", handleKeyDown)
+        })
     })
 
     return (
         <div class="sidebar-dialog-backdrop" onMouseDown={() => void cancel()}>
-            <div class="sidebar-dialog" role="dialog" aria-modal="true" aria-label={title()} onMouseDown={(event) => event.stopPropagation()}>
+            <div
+                ref={dialog}
+                class="sidebar-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label={title()}
+                tabIndex={-1}
+                onMouseDown={(event) => event.stopPropagation()}
+            >
                 <div class="sidebar-dialog-title">{title()}</div>
                 <Show
                     when={isRename()}
@@ -257,10 +290,10 @@ function SidebarDialogOverlay(props: { data: SidebarDialogOverlayData }) {
                     }
                 >
                     <input
+                        ref={input}
                         class="sidebar-dialog-input"
                         value={value()}
                         onInput={(event) => setValue(event.currentTarget.value)}
-                        ref={(element) => queueMicrotask(() => { element.focus(); element.select() })}
                     />
                 </Show>
                 <div class="sidebar-dialog-actions">

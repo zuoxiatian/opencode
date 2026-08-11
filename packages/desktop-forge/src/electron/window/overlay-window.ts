@@ -111,9 +111,14 @@ export class OverlayWindowManager {
     renderedModal(sender: Electron.WebContents, revision: number, contentSize?: ModalOverlayContentSize) {
         if (this.modalWindow?.webContents !== sender) throw new Error("拒绝未知视图完成弹框渲染")
         if (!this.modalInput || revision !== this.modalRevision) return
-        this.modalContentSize = this.modalInput.kind === "image-preview" && contentSize ? contentSize : null
+        this.modalContentSize = (
+            this.modalInput.kind === "image-preview" ||
+            this.modalInput.kind === "sidebar-dialog"
+        ) && contentSize ? contentSize : null
         this.syncModalBounds()
-        this.modalBackdropWindow?.setFocusable(this.modalInput.kind === "image-preview")
+        this.modalBackdropWindow?.setFocusable(
+            this.modalInput.kind === "image-preview" || this.modalInput.kind === "sidebar-dialog",
+        )
         this.modalBackdropWindow?.showInactive()
         this.modalWindow.show()
         this.raiseViews()
@@ -221,7 +226,7 @@ export class OverlayWindowManager {
 
         const backdrop = new BaseWindow({
             ...this.mainWindow.getContentBounds(),
-            backgroundColor: modalBackdropColor(),
+            ...modalBackdropStyle(),
             focusable: false,
             frame: false,
             fullscreenable: false,
@@ -233,7 +238,6 @@ export class OverlayWindowManager {
             resizable: false,
             show: false,
             skipTaskbar: true,
-            transparent: true,
         })
         const window = new BrowserWindow({
             ...this.mainWindow.getContentBounds(),
@@ -263,7 +267,10 @@ export class OverlayWindowManager {
         this.modalWindow = window
         this.syncModalBounds()
         backdrop.on("focus", () => {
-            if (this.modalBackdropWindow !== backdrop || this.modalInput?.kind !== "image-preview") return
+            if (
+                this.modalBackdropWindow !== backdrop ||
+                (this.modalInput?.kind !== "image-preview" && this.modalInput?.kind !== "sidebar-dialog")
+            ) return
             this.closeModal()
         })
         window.setMenuBarVisibility(false)
@@ -366,7 +373,9 @@ export class OverlayWindowManager {
 
     private readonly syncModalBackdropTheme = () => {
         if (!this.modalBackdropWindow || this.modalBackdropWindow.isDestroyed()) return
-        this.modalBackdropWindow.setBackgroundColor(modalBackdropColor())
+        const style = modalBackdropStyle()
+        this.modalBackdropWindow.setBackgroundColor(style.backgroundColor)
+        this.modalBackdropWindow.setOpacity(style.opacity)
     }
 
     private readonly syncToastVisibility = () => {
@@ -394,6 +403,17 @@ export class OverlayWindowManager {
                 Math.max(Math.min(IMAGE_PREVIEW_MIN_WIDTH, maxWidth), Math.ceil(this.modalContentSize.width * scale)),
             )
             const height = Math.min(maxHeight, Math.ceil(this.modalContentSize.height * scale) + IMAGE_PREVIEW_HEADER_HEIGHT)
+            this.modalWindow.setBounds({
+                height,
+                width,
+                x: bounds.x + Math.floor((bounds.width - width) / 2),
+                y: bounds.y + Math.floor((bounds.height - height) / 2),
+            }, false)
+            return
+        }
+        if (this.modalInput?.kind === "sidebar-dialog" && this.modalContentSize) {
+            const width = Math.min(Math.ceil(this.modalContentSize.width), Math.max(bounds.width - MODAL_MARGIN * 2, 1))
+            const height = Math.min(Math.ceil(this.modalContentSize.height), Math.max(bounds.height - MODAL_MARGIN * 2, 1))
             this.modalWindow.setBounds({
                 height,
                 width,
@@ -506,8 +526,10 @@ export class OverlayWindowManager {
     }
 }
 
-function modalBackdropColor() {
-    return nativeTheme.shouldUseDarkColors ? "#6B000000" : "#3D16181D"
+function modalBackdropStyle() {
+    return nativeTheme.shouldUseDarkColors
+        ? { backgroundColor: "#000000", opacity: 0.42 }
+        : { backgroundColor: "#16181D", opacity: 0.24 }
 }
 
 async function loadOverlayRenderer(webContents: WebContents, kind: "modal" | "toast") {
