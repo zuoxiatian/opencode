@@ -12,12 +12,25 @@ import {
     type ClientAuthSession,
 } from "../auth"
 
-export type ClientLoginFailureReason = "network" | "unauthorized" | "invalid"
+export type ClientAccessAction = {
+    code: string
+    type: "open_web" | "contact_admin" | "upgrade_client"
+    title: string
+    description: string
+    buttonText?: string
+    url?: string
+}
+
+export type ClientLoginFailureReason = "network" | "unauthorized" | "action_required" | "invalid"
+export type ClientLoginResult =
+    | { ok: true; session: ClientAuthSession }
+    | { ok: false; reason: "action_required"; message?: string; action: ClientAccessAction }
+    | { ok: false; reason: Exclude<ClientLoginFailureReason, "action_required">; message?: string }
 export type ClientPasswordFailureReason = "network" | "unauthorized" | "invalid_current_password" | "invalid"
 type ClientRefreshFailureReason = "missing" | "network" | "expired" | "invalid"
 let refreshPromise: Promise<ClientAuthSession> | null = null
 
-export async function loginClient(input: { username: string; password: string }) {
+export async function loginClient(input: { username: string; password: string }): Promise<ClientLoginResult> {
     const response = await clientApiFetch("/api/client/login", {
         body: JSON.stringify(input),
         headers: new Headers({ "Content-Type": "application/json" }),
@@ -27,6 +40,16 @@ export async function loginClient(input: { username: string; password: string })
     if (!response) return { ok: false, reason: "network" } as const
 
     const data = await response.json().catch(() => undefined) as unknown
+    const accessAction = clientAccessAction(data)
+    if (response.status === 403 && responseCode(data) === "CLIENT_ACTION_REQUIRED" && accessAction) {
+        return {
+            action: accessAction,
+            message: responseMessage(data),
+            ok: false,
+            reason: "action_required",
+        }
+    }
+
     if (!response.ok || !isClientAuthResponse(data)) {
         return {
             message: responseMessage(data),
@@ -338,6 +361,50 @@ function responseCode(input: unknown) {
     if (typeof input !== "object" || input === null) return undefined
     const code = (input as { code?: unknown }).code
     return typeof code === "string" && code.trim() ? code : undefined
+}
+
+function clientAccessAction(input: unknown): ClientAccessAction | undefined {
+    if (!isRecord(input)) return undefined
+    const action = input.action
+    if (!isRecord(action)) return undefined
+
+    const code = requiredString(action.code)
+    const type = requiredString(action.type)
+    const title = requiredString(action.title)
+    const description = requiredString(action.description)
+    if (!code || !isClientAccessActionType(type) || !title || !description) return undefined
+
+    const buttonText = optionalString(action.buttonText)
+    const url = optionalWebUrl(action.url)
+
+    return {
+        code,
+        description,
+        title,
+        type,
+        ...(buttonText ? { buttonText } : {}),
+        ...(url ? { url } : {}),
+    }
+}
+
+function isClientAccessActionType(input: unknown): input is ClientAccessAction["type"] {
+    return input === "open_web" || input === "contact_admin" || input === "upgrade_client"
+}
+
+function requiredString(input: unknown) {
+    return typeof input === "string" && input.trim() ? input.trim() : undefined
+}
+
+function optionalString(input: unknown) {
+    return input === undefined ? undefined : requiredString(input)
+}
+
+function optionalWebUrl(input: unknown) {
+    const value = optionalString(input)
+    if (!value || !URL.canParse(value)) return undefined
+
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined
 }
 
 function responseMessage(input: unknown) {
