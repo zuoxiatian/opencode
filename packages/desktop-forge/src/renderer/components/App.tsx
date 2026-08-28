@@ -1,8 +1,8 @@
-import { createSignal, Show, onMount, onCleanup } from "solid-js"
+import { createEffect, createMemo, createSignal, Show, onMount, onCleanup } from "solid-js"
 import { FolderPanel } from "./FolderPanel"
 import { ChatPanel } from "./ChatPanel"
 import { BrowserPanel } from "./BrowserPanel"
-import { SDKProvider } from "../context/sdk"
+import { SDKProvider, useSDK } from "../context/sdk"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import type { ThemeMode } from "../theme"
 import type { ClientAuthSession } from "../auth"
@@ -40,6 +40,7 @@ export function App(props: AppProps) {
     const [isDragging, setIsDragging] = createSignal<"folder" | "browser" | null>(null)
     const [browserLayoutRevision, setBrowserLayoutRevision] = createSignal(0)
     const [browserState, setBrowserState] = createSignal<BrowserState | null>(null)
+    const [browserConversationId, setBrowserConversationId] = createSignal<string | null>(null)
     const [chatVisibility, setChatVisibility] = createSignal(readChatVisibility())
     const [linkOpenMode, setLinkOpenMode] = createSignal(readLinkOpenMode())
     const platform = navigator.platform.toLowerCase()
@@ -54,12 +55,27 @@ export function App(props: AppProps) {
         writeLinkOpenMode(mode)
         setLinkOpenMode(mode)
     }
-    const toggleBrowser = () => {
-        const name = browserState()?.visible ? "browser.hide" : "browser.show"
-        void window.electronAPI.browserCommand({ command: { name } }).then((result) => {
+    const toggleBrowser = async (requestedConversationId?: string) => {
+        const conversationId = requestedConversationId ?? browserConversationId()
+        if (!conversationId) return
+        const state = requestedConversationId
+            ? await window.electronAPI.syncBrowserOwner(conversationId)
+            : browserState()
+        if (requestedConversationId) {
+            setBrowserConversationId(conversationId)
+            setBrowserState(state)
+        }
+        const name = state?.visible ? "browser.hide" : "browser.show"
+        return window.electronAPI.browserCommand(conversationId, { command: { name } }).then((result) => {
             if (result.state) setBrowserState(result.state)
             setBrowserLayoutRevision((value) => value + 1)
         }).catch((error: unknown) => console.error("切换内嵌浏览器失败:", error))
+    }
+    const promoteBrowserConversation = async (sourceConversationId: string, targetConversationId: string) => {
+        const state = await window.electronAPI.promoteBrowserConversation(sourceConversationId, targetConversationId)
+        setBrowserConversationId(targetConversationId)
+        setBrowserState(state)
+        setBrowserLayoutRevision((value) => value + 1)
     }
 
     // 拖拽处理
@@ -101,10 +117,10 @@ export function App(props: AppProps) {
     onMount(() => {
         document.addEventListener("mousemove", handleMouseMove)
         document.addEventListener("mouseup", handleMouseUp)
-        const unsubscribe = window.electronAPI.onBrowserStateChanged(setBrowserState)
-        void window.electronAPI.getBrowserState()
-            .then(setBrowserState)
-            .catch((error: unknown) => console.error("读取内嵌浏览器状态失败:", error))
+        const unsubscribe = window.electronAPI.onBrowserStateChanged((payload) => {
+            if (payload.conversationId !== browserConversationId()) return
+            setBrowserState(payload.state)
+        })
         onCleanup(unsubscribe)
     })
 
@@ -117,6 +133,18 @@ export function App(props: AppProps) {
     return (
         <MarkedProvider>
         <SDKProvider serverInfo={props.serverInfo}>
+            <BrowserOwnerSync
+                onPending={(conversationId) => {
+                    setBrowserConversationId(conversationId)
+                    setBrowserState(null)
+                }}
+                onSynced={(conversationId, state) => {
+                    if (browserConversationId() !== conversationId) return
+                    setBrowserConversationId(conversationId)
+                    setBrowserState(state)
+                    setBrowserLayoutRevision((value) => value + 1)
+                }}
+            />
             <div
                 class={[
                     "app-layout",
@@ -174,12 +202,14 @@ export function App(props: AppProps) {
                         linkOpenMode={linkOpenMode()}
                         browserVisible={browserState()?.visible ?? false}
                         onToggleBrowser={toggleBrowser}
+                        onPromoteBrowserConversation={promoteBrowserConversation}
                     />
                 </div>
 
-                <Show when={browserState()}>
-                    {(state) => (
-                        <>
+                <Show when={browserConversationId()}>
+                    {(conversationId) => (
+                        <Show when={browserState()}>
+                            {(state) => <>
                             <div
                                 class="resizer browser-resizer"
                                 classList={{
@@ -196,15 +226,58 @@ export function App(props: AppProps) {
                                 inert={!state().visible}
                             >
                                 <BrowserPanel
+                                    conversationId={conversationId()}
                                     layoutRevision={browserLayoutRevision()}
                                     state={state()}
                                 />
                             </div>
-                        </>
+                            </>}
+                        </Show>
                     )}
                 </Show>
             </div>
         </SDKProvider>
         </MarkedProvider>
     )
+}
+
+function BrowserOwnerSync(props: {
+    onPending: (conversationId: string | null) => void
+    onSynced: (conversationId: string | null, state: BrowserState | null) => void
+}) {
+    const sdk = useSDK()
+    const conversationId = createMemo(() => sdk.selectedSession()?.id ?? sdk.browserDraftConversationId())
+    let revision = 0
+    const unsubscribe = sdk.subscribeToEvents((event) => {
+        if (event.type !== "session.deleted") return
+        const properties = event.properties as { info?: { id?: string }; sessionID?: string }
+        const conversationId = properties.sessionID ?? properties.info?.id
+        if (!conversationId) return
+        void window.electronAPI.disposeBrowserConversation(conversationId).catch((error: unknown) => {
+            console.error("清理浏览器会话失败:", error)
+        })
+    })
+
+    createEffect(() => {
+        const id = conversationId()
+        const current = ++revision
+        props.onPending(id)
+        void window.electronAPI.syncBrowserOwner(id)
+            .then((state) => {
+                if (current !== revision) return
+                props.onSynced(id, state)
+            })
+            .catch((error: unknown) => {
+                if (current !== revision) return
+                props.onSynced(id, null)
+                console.error("同步浏览器会话失败:", error)
+            })
+    })
+
+    onCleanup(() => {
+        revision += 1
+        unsubscribe()
+        void window.electronAPI.syncBrowserOwner(null).catch(() => undefined)
+    })
+    return null
 }

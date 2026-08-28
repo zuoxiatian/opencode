@@ -13,6 +13,7 @@ export interface EmbeddedTab {
     cdpEvents: BrowserCdpEvent[]
     cdpSequence: number
     closed: boolean
+    conversationId: string
     debuggerTransport: TabDebuggerTransport
     debuggerQueue: Promise<void>
     debuggerReady: Promise<void>

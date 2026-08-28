@@ -1,17 +1,20 @@
 import { dialog, type BrowserWindow, type Session } from "electron"
 import type { BrowserEventStore } from "../event-store"
+import type { EmbeddedTabStore } from "./tab-store"
 
 export function configureBrowserPermissions(
     browserSession: Session,
     window: BrowserWindow,
     events: BrowserEventStore,
+    tabs: EmbeddedTabStore,
 ) {
     const grants = new Map<string, boolean>()
     browserSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) =>
         grants.get(permissionKey(requestingOrigin, permission)) === true)
     browserSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+        const tab = tabs.findByWebContentsId(webContents.id)
         const origin = browserOrigin(details.requestingUrl || webContents.getURL())
-        if (!origin || !promptablePermission(permission)) {
+        if (!tab || !origin || !promptablePermission(permission)) {
             callback(false)
             return
         }
@@ -24,6 +27,7 @@ export function configureBrowserPermissions(
         events.publish("permission.requested", {
             browserId: "embedded",
             payload: { origin, permission },
+            sessionId: tab.conversationId,
         })
         void dialog.showMessageBox(window, {
             buttons: ["允许", "拒绝"],
@@ -40,12 +44,14 @@ export function configureBrowserPermissions(
             events.publish("permission.resolved", {
                 browserId: "embedded",
                 payload: { granted, origin, permission },
+                sessionId: tab.conversationId,
             })
             callback(granted)
         }).catch(() => {
             events.publish("permission.resolved", {
                 browserId: "embedded",
                 payload: { granted: false, origin, permission },
+                sessionId: tab.conversationId,
             })
             callback(false)
         })

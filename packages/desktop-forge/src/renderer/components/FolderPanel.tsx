@@ -650,6 +650,7 @@ export function FolderPanel(props: FolderPanelProps) {
         forgetProjectFolder(project.worktree)
         if (sdk.directory() !== project.worktree) return
         sdk.setDirectory("")
+        sdk.resetBrowserDraftConversation()
         sdk.setSelectedSession(null)
         setFiles([])
     }
@@ -666,6 +667,7 @@ export function FolderPanel(props: FolderPanelProps) {
     const startSessionDraft = (folder: string) => {
         batch(() => {
             activateFolder(folder, { reloadSessions: false })
+            sdk.resetBrowserDraftConversation()
             sdk.setSelectedSession(null)
         })
     }
@@ -712,6 +714,7 @@ export function FolderPanel(props: FolderPanelProps) {
                 } else {
                     forgetProjectFolder(project.worktree)
                     sdk.setDirectory("")
+                    sdk.resetBrowserDraftConversation()
                     sdk.setSelectedSession(null)
                     setFiles([])
                 }

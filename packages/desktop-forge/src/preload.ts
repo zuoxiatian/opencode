@@ -54,11 +54,20 @@ export interface ElectronAPI {
     resizeToastOverlay: (revision: number, height: number) => Promise<void>
     sendOverlayAction: (action: OverlayAction) => Promise<void>
     showToast: (input: DesktopToastInput) => Promise<void>
-    browserCommand: (command: BrowserCommandInput) => Promise<BrowserCommandResponse>
-    getBrowserState: () => Promise<BrowserState | null>
-    onBrowserStateChanged: (callback: (state: BrowserState) => void) => () => void
+    browserCommand: (conversationId: string, command: BrowserCommandInput) => Promise<BrowserCommandResponse>
+    disposeBrowserConversation: (conversationId: string) => Promise<void>
+    getBrowserState: (conversationId: string) => Promise<BrowserState>
+    onBrowserStateChanged: (callback: (payload: {
+        conversationId: string
+        state: BrowserState
+    }) => void) => () => void
+    promoteBrowserConversation: (
+        sourceConversationId: string,
+        targetConversationId: string,
+    ) => Promise<BrowserState>
     setBrowserBounds: (bounds: BrowserBounds) => Promise<void>
     setBrowserSuspended: (suspended: boolean) => Promise<void>
+    syncBrowserOwner: (conversationId: string | null) => Promise<BrowserState | null>
     onServerReady: (callback: (data: ServerInfo) => void) => void
     getServerInfo: () => Promise<ServerInfo | null>
     startServer: (options: { opencodeConfig: unknown }) => Promise<ServerInfo>
@@ -129,19 +138,26 @@ const electronAPI: ElectronAPI = {
 
     showToast: (input) => ipcRenderer.invoke("overlay:show-toast", input),
 
-    browserCommand: (command) => ipcRenderer.invoke("browser:command", command),
+    browserCommand: (conversationId, command) => ipcRenderer.invoke("browser:command", conversationId, command),
 
-    getBrowserState: () => ipcRenderer.invoke("browser:get-state"),
+    disposeBrowserConversation: (conversationId) => ipcRenderer.invoke("browser:dispose-conversation", conversationId),
+
+    getBrowserState: (conversationId) => ipcRenderer.invoke("browser:get-state", conversationId),
 
     onBrowserStateChanged: (callback) => {
-        const handler = (_: unknown, state: BrowserState) => callback(state)
+        const handler = (_: unknown, payload: { conversationId: string; state: BrowserState }) => callback(payload)
         ipcRenderer.on("browser:state-changed", handler)
         return () => ipcRenderer.removeListener("browser:state-changed", handler)
     },
 
+    promoteBrowserConversation: (sourceConversationId, targetConversationId) =>
+        ipcRenderer.invoke("browser:promote-conversation", sourceConversationId, targetConversationId),
+
     setBrowserBounds: (bounds) => ipcRenderer.invoke("browser:set-bounds", bounds),
 
     setBrowserSuspended: (suspended) => ipcRenderer.invoke("browser:set-suspended", suspended),
+
+    syncBrowserOwner: (conversationId) => ipcRenderer.invoke("browser:sync-owner", conversationId),
 
     onServerReady: (callback) => {
         ipcRenderer.on("server-ready", (_, data) => callback(data))

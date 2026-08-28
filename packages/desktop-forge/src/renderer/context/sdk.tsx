@@ -3,6 +3,7 @@ import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { createOpencodeClient, type OpencodeClient, type Event, type Session } from "@opencode-ai/sdk/v2/client"
 import { applySessionEvent } from "../store/event-reducer"
 import { createInitialSessionState, type SessionState } from "../store/types"
+import { createBrowserDraftConversationId } from "../../shared/browser-conversation"
 
 // 服务器信息类型
 interface ServerInfo {
@@ -50,6 +51,8 @@ interface SDKContextType {
     setSelectedFiles: Setter<SelectedFile[]>
     selectedSession: Accessor<Session | null>
     setSelectedSession: Setter<Session | null>
+    browserDraftConversationId: Accessor<string>
+    resetBrowserDraftConversation: () => string
     sessionListVersion: Accessor<number>
     refreshSessionList: () => void
     subscribeToEvents: (callback: EventListener) => () => void
@@ -80,10 +83,21 @@ export function SDKProvider(props: SDKProviderProps) {
     const [selectedFile, setSelectedFile] = createSignal<SelectedFile | null>(null)
     const [selectedFiles, setSelectedFiles] = createSignal<SelectedFile[]>([])
     const [selectedSession, setSelectedSession] = createSignal<Session | null>(null)
+    const [browserDraftConversationId, setBrowserDraftConversationId] = createSignal(createBrowserDraftConversationId())
     const [sessionListVersion, setSessionListVersion] = createSignal(0)
     const [discussIssue, setDiscussIssue] = createSignal<DiscussIssue | null>(null)
 
     const [store, setStore] = createStore<SessionState>(createInitialSessionState())
+
+    const resetBrowserDraftConversation = () => {
+        const previous = browserDraftConversationId()
+        const id = createBrowserDraftConversationId()
+        setBrowserDraftConversationId(id)
+        void window.electronAPI.disposeBrowserConversation(previous).catch((error: unknown) => {
+            console.error("清理浏览器草稿失败:", error)
+        })
+        return id
+    }
 
     const eventListeners = new Set<EventListener>()
     const abortController = new AbortController()
@@ -117,7 +131,9 @@ export function SDKProvider(props: SDKProviderProps) {
         }
         if (event.type === "session.deleted") {
             const properties = event.properties as { sessionID?: string; info?: Partial<Session> }
-            setSelectedSession((session) => session?.id === (properties.sessionID ?? properties.info?.id) ? null : session)
+            if (selectedSession()?.id !== (properties.sessionID ?? properties.info?.id)) return
+            resetBrowserDraftConversation()
+            setSelectedSession(null)
         }
     }
 
@@ -132,6 +148,7 @@ export function SDKProvider(props: SDKProviderProps) {
         if (current && current !== dir) {
             const session = selectedSession()
             if (session && session.directory !== dir) {
+                resetBrowserDraftConversation()
                 setSelectedSession(null)
             }
         }
@@ -327,6 +344,8 @@ export function SDKProvider(props: SDKProviderProps) {
         setSelectedFiles,
         selectedSession,
         setSelectedSession,
+        browserDraftConversationId,
+        resetBrowserDraftConversation,
         sessionListVersion,
         refreshSessionList: () => setSessionListVersion((value) => value + 1),
         subscribeToEvents,

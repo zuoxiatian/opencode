@@ -15,14 +15,19 @@ import type { EmbeddedTab } from "./tab"
 
 export class EmbeddedTabStore {
     private readonly tabs: EmbeddedTab[] = []
-    private readonly historyEntries: BrowserHistoryEntry[] = []
-    private activeTabId: string | null = null
+    private readonly historyEntries: Array<{ conversationId: string; entry: BrowserHistoryEntry }> = []
+    private readonly conversations = new Map<string, {
+        activeTabId: string | null
+        lastSelectedAt: number
+        visible: boolean
+    }>()
+    private readonly promotedConversations = new Map<string, string>()
+    private activeConversationId: string | null = null
     private attachedTabId: string | null = null
     private layoutBounds: BrowserBounds = EMPTY_BOUNDS
     private suspended = false
     private destroyed = false
     private readonly sweepTimer: NodeJS.Timeout
-    private visible = false
 
     constructor(
         private readonly window: BrowserWindow,
@@ -34,9 +39,15 @@ export class EmbeddedTabStore {
         this.sweepTimer.unref()
     }
 
-    create(ownership: BrowserTabOwnership, request?: BrowserCommandRequest, activate = true) {
+    create(
+        conversationId: string,
+        ownership: BrowserTabOwnership,
+        request?: BrowserCommandRequest,
+        activate = true,
+    ) {
         if (this.destroyed) throw new BrowserRuntimeException("BROWSER_UNAVAILABLE", "Embedded browser is closed")
-        const previousActiveTabId = this.activeTabId
+        const state = this.conversation(conversationId)
+        const previousActiveTabId = state.activeTabId
         const view = new WebContentsView({
             webPreferences: {
                 contextIsolation: true,
@@ -50,6 +61,7 @@ export class EmbeddedTabStore {
             cdpEvents: [],
             cdpSequence: 0,
             closed: false,
+            conversationId,
             debuggerTransport: new TabDebuggerTransport(view.webContents),
             debuggerQueue: Promise.resolve(),
             debuggerReady: Promise.resolve(),
@@ -66,7 +78,7 @@ export class EmbeddedTabStore {
             webContents: view.webContents,
         }
         this.tabs.push(tab)
-        if (activate) this.activeTabId = tab.id
+        if (activate) state.activeTabId = tab.id
         tab.webContents.once("destroyed", () => {
             tab.closed = true
         })
@@ -74,7 +86,7 @@ export class EmbeddedTabStore {
             this.register(tab)
         } catch (error) {
             this.tabs.pop()
-            this.activeTabId = previousActiveTabId
+            state.activeTabId = previousActiveTabId
             tab.closed = true
             if (!tab.webContents.isDestroyed()) tab.webContents.close()
             throw new BrowserRuntimeException(
@@ -87,40 +99,45 @@ export class EmbeddedTabStore {
         return tab
     }
 
-    activate(tabId: string, request?: BrowserCommandRequest) {
-        const tab = this.require(tabId)
-        this.activeTabId = tab.id
-        this.visible = true
+    activate(conversationId: string, tabId: string, request?: BrowserCommandRequest) {
+        const tab = this.require(conversationId, tabId)
+        const state = this.conversation(conversationId)
+        state.activeTabId = tab.id
+        state.visible = true
+        state.lastSelectedAt = Date.now()
         this.syncView()
         this.publish("tab.activated", tab, request)
         return tab
     }
 
-    close(tabId: string, request?: BrowserCommandRequest) {
-        const index = this.tabs.findIndex((tab) => tab.id === tabId)
+    close(conversationId: string, tabId: string, request?: BrowserCommandRequest) {
+        const index = this.tabs.findIndex((tab) => tab.id === tabId && tab.conversationId === conversationId)
         if (index < 0) throw new BrowserRuntimeException("TAB_NOT_FOUND", `Browser tab not found: ${tabId}`)
         const tab = this.tabs[index]
-        const state = tabState(tab)
+        const closedState = tabState(tab)
+        const scopedIndex = this.tabs.slice(0, index).filter((item) => item.conversationId === conversationId).length
         if (this.attachedTabId === tabId) this.detach()
         tab.closed = true
         tab.debuggerTransport.destroy()
         tab.webContents.close()
         this.tabs.splice(index, 1)
-        if (this.activeTabId === tabId) {
-            this.activeTabId = this.tabs[Math.min(index, this.tabs.length - 1)]?.id ?? null
+        const state = this.conversation(conversationId)
+        if (state.activeTabId === tabId) {
+            const tabs = this.list(conversationId)
+            state.activeTabId = tabs[Math.min(scopedIndex, tabs.length - 1)]?.id ?? null
         }
-        if (!this.tabs.length) this.visible = false
+        if (!this.list(conversationId).length) state.visible = false
         this.syncView()
-        this.publish("tab.closed", tab, request, state)
+        this.publish("tab.closed", tab, request, closedState)
     }
 
-    get(tabId?: string | null) {
-        const id = tabId ?? this.activeTabId
-        return this.tabs.find((tab) => tab.id === id)
+    get(conversationId: string, tabId?: string | null) {
+        const id = tabId ?? this.conversation(conversationId).activeTabId
+        return this.tabs.find((tab) => tab.id === id && tab.conversationId === conversationId)
     }
 
-    require(tabId?: string | null) {
-        const tab = this.get(tabId)
+    require(conversationId: string, tabId?: string | null) {
+        const tab = this.get(conversationId, tabId)
         if (!tab) throw new BrowserRuntimeException("TAB_NOT_FOUND", `Browser tab not found: ${tabId ?? "active"}`)
         if (tab.closed || tab.webContents.isDestroyed()) {
             throw new BrowserRuntimeException("TAB_CLOSED", `Browser tab is closed: ${tab.id}`)
@@ -128,34 +145,35 @@ export class EmbeddedTabStore {
         return tab
     }
 
-    list() {
-        return [...this.tabs]
+    list(conversationId: string) {
+        return this.tabs.filter((tab) => tab.conversationId === conversationId)
     }
 
-    show(request?: BrowserCommandRequest) {
-        this.visible = true
-        if (!this.tabs.length) {
-            this.create({
-                createdBy: request?.sessionId === "renderer" ? "user" : "agent",
-                disposition: request?.sessionId === "renderer" ? "deliverable" : "temporary",
-                ownerSessionId: request?.sessionId === "renderer" ? undefined : request?.sessionId,
-            }, request)
+    findByWebContentsId(webContentsId: number) {
+        return this.tabs.find((tab) => tab.webContents.id === webContentsId)
+    }
+
+    show(conversationId: string, ownership: BrowserTabOwnership, request?: BrowserCommandRequest) {
+        const state = this.conversation(conversationId)
+        state.visible = true
+        if (!this.list(conversationId).length) {
+            this.create(conversationId, ownership, request)
         }
         this.syncView()
-        this.events.publish("browser.shown", eventInput(request))
+        this.events.publish("browser.shown", eventInput(conversationId, request))
     }
 
-    hide(request?: BrowserCommandRequest) {
-        this.visible = false
-        this.detach()
-        this.events.publish("browser.hidden", eventInput(request))
+    hide(conversationId: string, request?: BrowserCommandRequest) {
+        this.conversation(conversationId).visible = false
+        this.syncView()
+        this.events.publish("browser.hidden", eventInput(conversationId, request))
     }
 
     setLayoutBounds(bounds: BrowserBounds) {
         const [width, height] = this.window.isDestroyed() ? [0, 0] : this.window.getContentSize()
         this.layoutBounds = sanitizeBounds(bounds, { height, width })
         if (this.destroyed || this.window.isDestroyed()) return
-        this.get(this.attachedTabId)?.view.setBounds(this.layoutBounds)
+        this.findByTabId(this.attachedTabId)?.view.setBounds(this.layoutBounds)
     }
 
     setSuspended(suspended: boolean) {
@@ -164,9 +182,65 @@ export class EmbeddedTabStore {
         this.syncView()
     }
 
-    getState(): BrowserState {
+    getState(conversationId: string): BrowserState {
         if (this.destroyed) return browserState([], null, false, EMPTY_BOUNDS)
-        return browserState(this.tabs, this.activeTabId, this.visible, this.layoutBounds)
+        const state = this.conversation(conversationId)
+        return browserState(this.list(conversationId), state.activeTabId, state.visible, this.layoutBounds)
+    }
+
+    syncOwner(conversationId: string | null) {
+        this.activeConversationId = conversationId
+        if (conversationId) this.conversation(conversationId).lastSelectedAt = Date.now()
+        this.syncView()
+        return conversationId ? this.getState(conversationId) : null
+    }
+
+    getActiveConversationId() {
+        return this.activeConversationId
+    }
+
+    promoteConversation(sourceConversationId: string, targetConversationId: string) {
+        const promoted = this.promotedConversations.get(sourceConversationId)
+        if (promoted && promoted !== targetConversationId) {
+            throw new BrowserRuntimeException(
+                "BROWSER_UNAVAILABLE",
+                "Browser draft was already attached to another conversation",
+            )
+        }
+        if (promoted) return this.getState(targetConversationId)
+        if (this.list(targetConversationId).length) {
+            throw new BrowserRuntimeException(
+                "BROWSER_UNAVAILABLE",
+                "Target conversation already has browser tabs",
+            )
+        }
+
+        const source = this.conversations.get(sourceConversationId)
+        const target = this.conversations.get(targetConversationId)
+        this.tabs
+            .filter((tab) => tab.conversationId === sourceConversationId)
+            .forEach((tab) => {
+                tab.conversationId = targetConversationId
+                if (tab.ownership.ownerSessionId === sourceConversationId) {
+                    tab.ownership.ownerSessionId = targetConversationId
+                }
+                tab.downloads.forEach((download) => {
+                    if (download.sessionId === sourceConversationId) download.sessionId = targetConversationId
+                })
+            })
+        this.historyEntries.forEach((item) => {
+            if (item.conversationId === sourceConversationId) item.conversationId = targetConversationId
+        })
+        this.conversations.delete(sourceConversationId)
+        this.conversations.set(targetConversationId, source ?? target ?? {
+            activeTabId: null,
+            lastSelectedAt: Date.now(),
+            visible: false,
+        })
+        this.promotedConversations.set(sourceConversationId, targetConversationId)
+        if (this.activeConversationId === sourceConversationId) this.activeConversationId = targetConversationId
+        this.syncView()
+        return this.getState(targetConversationId)
     }
 
     changed(tab: EmbeddedTab, request?: BrowserCommandRequest) {
@@ -183,24 +257,23 @@ export class EmbeddedTabStore {
     ) {
         const keep = new Map(input.keep?.map((item) => [item.tabId, item.status]) ?? [])
         this.tabs
-            .filter((tab) => tab.ownership.ownerSessionId === sessionId)
+            .filter((tab) => tab.conversationId === sessionId && tab.ownership.ownerSessionId === sessionId)
             .forEach((tab) => {
                 if (keep.get(tab.id) === "deliverable") {
-                    tab.ownership = { createdBy: tab.ownership.createdBy, disposition: "deliverable" }
+                    tab.ownership.disposition = "deliverable"
+                    tab.ownership.ownerSessionId = undefined
                     this.changed(tab, request)
                     return
                 }
                 if (keep.get(tab.id) === "handoff" || tab.ownership.disposition === "handoff") {
                     tab.ownership.disposition = "handoff"
+                    tab.ownership.ownerSessionId = undefined
                     this.changed(tab, request)
                     return
                 }
                 if (tab.ownership.createdBy === "agent" && tab.ownership.disposition === "temporary") {
-                    this.close(tab.id, request)
+                    this.close(tab.conversationId, tab.id, request)
                     return
-                }
-                if (tab.ownership.createdBy === "user" && tab.ownership.disposition === "temporary") {
-                    tab.ownership.disposition = "deliverable"
                 }
                 tab.ownership.ownerSessionId = undefined
                 this.changed(tab, request)
@@ -216,20 +289,26 @@ export class EmbeddedTabStore {
             url,
         }
         const previous = this.historyEntries[0]
-        if (previous?.url === entry.url && previous.title === entry.title) {
-            this.historyEntries[0] = entry
+        if (
+            previous?.conversationId === tab.conversationId
+            && previous.entry.url === entry.url
+            && previous.entry.title === entry.title
+        ) {
+            this.historyEntries[0] = { conversationId: tab.conversationId, entry }
             return
         }
-        this.historyEntries.unshift(entry)
+        this.historyEntries.unshift({ conversationId: tab.conversationId, entry })
         if (this.historyEntries.length > 10_000) this.historyEntries.length = 10_000
     }
 
-    history(options: BrowserHistoryOptions = {}) {
+    history(conversationId: string, options: BrowserHistoryOptions = {}) {
         const from = options.from ? new Date(options.from).getTime() : Number.NEGATIVE_INFINITY
         const to = options.to ? new Date(options.to).getTime() : Number.POSITIVE_INFINITY
         const queries = options.queries?.map((query) => query.toLocaleLowerCase()) ?? []
         return this.historyEntries
-            .filter((entry) => {
+            .filter((item) => {
+                if (item.conversationId !== conversationId) return false
+                const entry = item.entry
                 const visited = new Date(entry.dateVisited).getTime()
                 if (visited < from || visited > to) return false
                 if (!queries.length) return true
@@ -237,12 +316,12 @@ export class EmbeddedTabStore {
                 return queries.every((query) => text.includes(query))
             })
             .slice(0, options.limit ?? 100)
-            .map((entry) => ({ ...entry }))
+            .map((item) => ({ ...item.entry }))
     }
 
     mark(tab: EmbeddedTab, disposition: BrowserTabOwnership["disposition"], request: BrowserCommandRequest) {
         tab.ownership.disposition = disposition
-        tab.ownership.ownerSessionId = request.sessionId
+        if (request.sessionId !== "renderer") tab.ownership.ownerSessionId = request.sessionId
         this.changed(tab, request)
     }
 
@@ -251,7 +330,6 @@ export class EmbeddedTabStore {
             throw new BrowserRuntimeException("TAB_NOT_OWNED", "Browser tab is controlled by another session")
         }
         tab.ownership.ownerSessionId = sessionId
-        if (tab.ownership.createdBy === "user") tab.ownership.disposition = "temporary"
         this.changed(tab, request)
     }
 
@@ -271,6 +349,20 @@ export class EmbeddedTabStore {
         })
     }
 
+    disposeConversation(conversationId: string) {
+        this.list(conversationId).forEach((tab) => this.close(conversationId, tab.id))
+        this.conversations.delete(conversationId)
+        this.promotedConversations.delete(conversationId)
+        for (const [source, target] of this.promotedConversations) {
+            if (target === conversationId) this.promotedConversations.delete(source)
+        }
+        const history = this.historyEntries.filter((item) => item.conversationId !== conversationId)
+        this.historyEntries.splice(0, this.historyEntries.length, ...history)
+        if (this.activeConversationId !== conversationId) return
+        this.activeConversationId = null
+        this.syncView()
+    }
+
     private publish(
         type: "tab.activated" | "tab.closed" | "tab.created" | "tab.updated",
         tab: EmbeddedTab,
@@ -282,16 +374,17 @@ export class EmbeddedTabStore {
             generation: tab.generation,
             payload: { tab: state },
             requestId: request?.requestId,
-            sessionId: request?.sessionId ?? tab.ownership.ownerSessionId,
+            sessionId: tab.conversationId,
             tabId: tab.id,
         })
     }
 
     private syncView() {
         if (this.destroyed || this.window.isDestroyed()) return
-        const active = this.get()
+        const state = this.activeConversationId ? this.conversation(this.activeConversationId) : undefined
+        const active = this.activeConversationId ? this.get(this.activeConversationId) : undefined
         const shouldAttach = !this.suspended
-            && this.visible
+            && state?.visible === true
             && active
             && !active.closed
             && !active.webContents.isDestroyed()
@@ -306,7 +399,7 @@ export class EmbeddedTabStore {
     }
 
     private detach() {
-        const attached = this.get(this.attachedTabId)
+        const attached = this.findByTabId(this.attachedTabId)
         if (attached && !this.window.isDestroyed()) this.window.contentView.removeChildView(attached.view)
         this.attachedTabId = null
     }
@@ -318,22 +411,37 @@ export class EmbeddedTabStore {
             .forEach((tab) => {
                 if (
                     tab.ownership.createdBy === "agent"
-                    && tab.ownership.disposition !== "deliverable"
+                    && tab.ownership.disposition === "temporary"
                 ) {
-                    this.close(tab.id)
+                    this.close(tab.conversationId, tab.id)
                     return
                 }
                 tab.ownership.ownerSessionId = undefined
-                tab.ownership.disposition = "deliverable"
+                if (tab.ownership.createdBy === "user" && tab.ownership.disposition === "temporary") {
+                    tab.ownership.disposition = "deliverable"
+                }
                 this.changed(tab)
             })
     }
+
+    private conversation(conversationId: string) {
+        const existing = this.conversations.get(conversationId)
+        if (existing) return existing
+        const state = { activeTabId: null, lastSelectedAt: Date.now(), visible: false }
+        this.conversations.set(conversationId, state)
+        return state
+    }
+
+    private findByTabId(tabId?: string | null) {
+        if (!tabId) return
+        return this.tabs.find((tab) => tab.id === tabId)
+    }
 }
 
-function eventInput(request?: BrowserCommandRequest) {
+function eventInput(conversationId: string, request?: BrowserCommandRequest) {
     return {
         browserId: "embedded",
         requestId: request?.requestId,
-        sessionId: request?.sessionId,
+        sessionId: conversationId,
     }
 }

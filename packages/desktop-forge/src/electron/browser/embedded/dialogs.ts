@@ -203,7 +203,7 @@ function eventInput(tab: EmbeddedTab, payload?: Record<string, unknown>) {
         browserId: "embedded",
         generation: tab.generation,
         payload,
-        sessionId: tab.ownership.ownerSessionId,
+        sessionId: tab.conversationId,
         tabId: tab.id,
     }
 }

@@ -84,7 +84,7 @@ export class FileChooserService {
                     browserId: "embedded",
                     generation: tab.generation,
                     payload: { chooser: state },
-                    sessionId: tab.ownership.ownerSessionId,
+                    sessionId: tab.conversationId,
                     tabId: tab.id,
                 })
                 this.tabs.changed(tab)
@@ -161,7 +161,7 @@ export class FileChooserService {
             browserId: "embedded",
             generation: tab.generation,
             payload: { chooserId },
-            sessionId: tab.ownership.ownerSessionId,
+            sessionId: tab.conversationId,
             tabId: tab.id,
         })
         this.tabs.changed(tab)

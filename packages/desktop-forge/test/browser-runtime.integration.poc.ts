@@ -86,6 +86,196 @@ async function runPoc() {
     await writeFile(upload, "upload payload")
 
     try {
+        step("draft-promotion-before-first-agent-command")
+        const draftConversationId = "browser-draft:runtime-poc"
+        const promotedConversationId = "conversation-promoted"
+        runtime.syncOwner(draftConversationId)
+        const draftTab = (await rendererCommand(runtime, draftConversationId, {
+            command: { name: "tabs.new" },
+        })).data.tab
+        assert.ok(draftTab)
+        const draftUrl = `http://127.0.0.1:${main.port}/?conversation=draft`
+        await rendererCommand(runtime, draftConversationId, {
+            command: { name: "tab.goto", url: draftUrl },
+            tabId: draftTab.id,
+        })
+        const draftWebContentsId = webContents.getAllWebContents()
+            .find((item) => item.getURL() === draftUrl)?.id
+        assert.ok(draftWebContentsId)
+
+        const promotedState = runtime.promoteConversation(draftConversationId, promotedConversationId)
+        assert.equal(runtime.getActiveConversationId(), promotedConversationId)
+        assert.deepEqual(runtime.getState(draftConversationId).tabs, [])
+        assert.deepEqual(promotedState.tabs.map((tab) => tab.id), [draftTab.id])
+        assert.equal(promotedState.activeTabId, draftTab.id)
+        assert.equal(promotedState.visible, true)
+        assert.equal(webContents.getAllWebContents().find((item) => item.getURL() === draftUrl)?.id, draftWebContentsId)
+        assert.deepEqual(
+            runtime.promoteConversation(draftConversationId, promotedConversationId).tabs.map((tab) => tab.id),
+            [draftTab.id],
+        )
+
+        const promotedTabs = (await agentCommand(runtime, promotedConversationId, {
+            command: { name: "tabs.list" },
+        })).data.tabs
+        assert.deepEqual(promotedTabs?.map((tab) => tab.id), [draftTab.id])
+        assert.equal(
+            runtime.getState(promotedConversationId).tabs[0]?.ownership.ownerSessionId,
+            promotedConversationId,
+        )
+        assert.match((await agentCommand(runtime, promotedConversationId, {
+            command: { name: "tab.automation.read" },
+            expectedOrigin: new URL(draftUrl).origin,
+            tabId: draftTab.id,
+        })).data.readable?.content ?? "", /Query/)
+        await agentCommand(runtime, promotedConversationId, { command: { name: "tabs.finalize" } })
+        await rendererCommand(runtime, promotedConversationId, {
+            command: { name: "tab.close" },
+            tabId: draftTab.id,
+        })
+
+        step("session-scoped-user-tabs")
+        const eventSessionsByTab = new Map<string, string | undefined>()
+        const unsubscribeSessionEvents = runtime.subscribe((event) => {
+            if (event.tabId) eventSessionsByTab.set(event.tabId, event.sessionId)
+        })
+        runtime.syncOwner("conversation-a")
+        const conversationATab = (await rendererCommand(runtime, "conversation-a", {
+            command: { name: "tabs.new" },
+        })).data.tab
+        assert.ok(conversationATab)
+        const conversationAUrl = `http://127.0.0.1:${main.port}/?conversation=a`
+        await rendererCommand(runtime, "conversation-a", {
+            command: { name: "tab.goto", url: conversationAUrl },
+            tabId: conversationATab.id,
+        })
+        const conversationAWebContentsId = webContents.getAllWebContents()
+            .find((item) => item.getURL() === conversationAUrl)?.id
+        assert.ok(conversationAWebContentsId)
+        runtime.syncOwner("conversation-b")
+        const conversationBTab = (await rendererCommand(runtime, "conversation-b", {
+            command: { name: "tabs.new" },
+        })).data.tab
+        assert.ok(conversationBTab)
+        await rendererCommand(runtime, "conversation-b", {
+            command: { name: "tab.goto", url: `http://127.0.0.1:${main.port}/isolated` },
+            tabId: conversationBTab.id,
+        })
+        assert.deepEqual(runtime.getState("conversation-a").tabs.map((tab) => tab.id), [conversationATab.id])
+        assert.deepEqual(runtime.getState("conversation-b").tabs.map((tab) => tab.id), [conversationBTab.id])
+        assert.equal(runtime.getState("conversation-a").activeTabId, conversationATab.id)
+        assert.equal(runtime.getState("conversation-b").activeTabId, conversationBTab.id)
+        assert.equal(runtime.getState("conversation-a").visible, true)
+        assert.equal(runtime.getState("conversation-b").visible, true)
+        assert.equal(eventSessionsByTab.get(conversationATab.id), "conversation-a")
+        assert.equal(eventSessionsByTab.get(conversationBTab.id), "conversation-b")
+        unsubscribeSessionEvents()
+        runtime.syncOwner("conversation-a")
+        assert.equal(runtime.getActiveConversationId(), "conversation-a")
+        assert.equal(webContents.getAllWebContents()
+            .find((item) => item.getURL() === conversationAUrl)?.id, conversationAWebContentsId)
+        runtime.syncOwner(null)
+        assert.equal(runtime.getActiveConversationId(), null)
+        assert.equal(webContents.getAllWebContents()
+            .find((item) => item.getURL() === conversationAUrl)?.id, conversationAWebContentsId)
+        runtime.syncOwner("conversation-a")
+        await agentCommand(runtime, "conversation-b", { command: { name: "tabs.new" } })
+        assert.equal(runtime.getActiveConversationId(), "conversation-a")
+        await agentCommand(runtime, "conversation-b", { command: { name: "tabs.finalize" } })
+        assert.deepEqual(runtime.getState("conversation-b").tabs.map((tab) => tab.id), [conversationBTab.id])
+        const openA = (await agentCommand(runtime, "conversation-a", {
+            command: { name: "browser.user.openTabs" },
+        })).data.userTabs
+        const openB = (await agentCommand(runtime, "conversation-b", {
+            command: { name: "browser.user.openTabs" },
+        })).data.userTabs
+        assert.deepEqual(openA?.map((tab) => tab.providerTabId), [conversationATab.id])
+        assert.deepEqual(openB?.map((tab) => tab.providerTabId), [conversationBTab.id])
+        assert.ok(openA?.[0])
+        await assert.rejects(
+            agentCommand(runtime, "conversation-a", {
+                command: { name: "tab.state" },
+                tabId: conversationATab.id,
+            }),
+            (error) => browserCode(error) === "TAB_NOT_OWNED",
+        )
+        await assert.rejects(
+            agentCommand(runtime, "conversation-b", {
+                command: { claimId: openA[0].id, name: "browser.user.claimTab" },
+            }),
+            (error) => browserCode(error) === "TAB_NOT_FOUND",
+        )
+        await agentCommand(runtime, "conversation-a", {
+            command: { claimId: openA[0].id, name: "browser.user.claimTab" },
+        })
+        assert.equal((await agentCommand(runtime, "conversation-a", {
+            command: { name: "tab.state" },
+            tabId: conversationATab.id,
+        })).data.tab?.id, conversationATab.id)
+        assert.match((await agentCommand(runtime, "conversation-a", {
+            command: { name: "tab.automation.read" },
+            expectedOrigin: new URL(conversationAUrl).origin,
+            tabId: conversationATab.id,
+        })).data.readable?.content ?? "", /Query/)
+        await assert.rejects(
+            agentCommand(runtime, "conversation-b", {
+                command: { name: "tabs.get", targetTabId: conversationATab.id },
+            }),
+            (error) => browserCode(error) === "TAB_NOT_FOUND",
+        )
+        await agentCommand(runtime, "conversation-a", { command: { name: "tabs.finalize" } })
+        assert.equal(runtime.getState("conversation-a").tabs[0]?.ownership.ownerSessionId, undefined)
+        const listedA = (await agentCommand(runtime, "conversation-a", {
+            command: { name: "tabs.list" },
+        })).data.tabs
+        assert.deepEqual(listedA?.map((tab) => tab.id), [conversationATab.id])
+        assert.equal(runtime.getState("conversation-a").tabs[0]?.ownership.ownerSessionId, "conversation-a")
+        assert.match((await agentCommand(runtime, "conversation-a", {
+            command: { name: "tab.automation.read" },
+            expectedOrigin: new URL(conversationAUrl).origin,
+            tabId: conversationATab.id,
+        })).data.readable?.content ?? "", /Query/)
+        const listedB = (await agentCommand(runtime, "conversation-b", {
+            command: { name: "tabs.list" },
+        })).data.tabs
+        assert.deepEqual(listedB?.map((tab) => tab.id), [conversationBTab.id])
+        assert.equal(runtime.getState("conversation-b").tabs[0]?.ownership.ownerSessionId, "conversation-b")
+        await assert.rejects(
+            agentCommand(runtime, "conversation-b", {
+                command: { name: "tabs.get", targetTabId: conversationATab.id },
+            }),
+            (error) => browserCode(error) === "TAB_NOT_FOUND",
+        )
+        await agentCommand(runtime, "conversation-a", { command: { name: "tabs.finalize" } })
+        await agentCommand(runtime, "conversation-b", { command: { name: "tabs.finalize" } })
+        runtime.syncOwner("conversation-a")
+        await rendererCommand(runtime, "conversation-a", {
+            command: { name: "tab.close" },
+            tabId: conversationATab.id,
+        })
+        runtime.syncOwner("conversation-b")
+        await rendererCommand(runtime, "conversation-b", {
+            command: { name: "tab.close" },
+            tabId: conversationBTab.id,
+        })
+        runtime.syncOwner("conversation-dispose")
+        const disposedTab = (await rendererCommand(runtime, "conversation-dispose", {
+            command: { name: "tabs.new" },
+        })).data.tab
+        assert.ok(disposedTab)
+        const disposedUrl = `http://127.0.0.1:${main.port}/?conversation=dispose`
+        await rendererCommand(runtime, "conversation-dispose", {
+            command: { name: "tab.goto", url: disposedUrl },
+            tabId: disposedTab.id,
+        })
+        const disposedWebContentsId = webContents.getAllWebContents()
+            .find((item) => item.getURL() === disposedUrl)?.id
+        assert.ok(disposedWebContentsId)
+        await runtime.disposeConversation("conversation-dispose")
+        assert.deepEqual(runtime.getState("conversation-dispose").tabs, [])
+        await waitForDestroyedWebContents(disposedWebContentsId)
+        runtime.syncOwner("poc-owner")
+
         step("create-and-navigate")
         runtime.setLayoutBounds({ height: 600, width: 900, x: 0, y: 0 })
         const created = await command(runtime, { command: { name: "tabs.new" } })
@@ -602,7 +792,7 @@ async function runPoc() {
 
         step("finalize-and-close-during-action")
         await command(runtime, { command: { name: "tabs.finalize" } })
-        assert.equal(runtime.getState().tabs.length, 0)
+        assert.equal(runtime.getState("poc-owner").tabs.length, 0)
 
         const closing = await command(runtime, { command: { name: "tabs.new" } })
         const closingTabId = closing.data.tab?.id
@@ -691,7 +881,23 @@ async function runPoc() {
 }
 
 function command(runtime: BrowserRuntime, input: BrowserCommandInput) {
-    return runtime.command(input, { sessionId: "poc-owner" })
+    return agentCommand(runtime, "poc-owner", input)
+}
+
+function agentCommand(runtime: BrowserRuntime, conversationId: string, input: BrowserCommandInput) {
+    return runtime.command(input, {
+        actor: "agent",
+        conversationId,
+        sessionId: conversationId,
+    })
+}
+
+function rendererCommand(runtime: BrowserRuntime, conversationId: string, input: BrowserCommandInput) {
+    return runtime.command(input, {
+        actor: "renderer",
+        conversationId,
+        sessionId: "renderer",
+    })
 }
 
 async function completedDownload(runtime: BrowserRuntime, tabId: string, downloadId: string) {
@@ -703,6 +909,13 @@ async function completedDownload(runtime: BrowserRuntime, tabId: string, downloa
     if (download.state === "completed") return download
     await new Promise((resolve) => setTimeout(resolve, 25))
     return completedDownload(runtime, tabId, downloadId)
+}
+
+async function waitForDestroyedWebContents(id: number, deadline = Date.now() + 2_000): Promise<void> {
+    if (!webContents.getAllWebContents().some((item) => item.id === id)) return
+    assert.ok(Date.now() < deadline, `WebContents ${id} was not destroyed`)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    return waitForDestroyedWebContents(id, deadline)
 }
 
 function browserCode(error: unknown) {

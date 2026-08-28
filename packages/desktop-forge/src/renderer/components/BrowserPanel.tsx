@@ -15,6 +15,7 @@ import type { BrowserCommandInput, BrowserState, BrowserTabState } from "../../s
 import { browserErrorContent, browserErrorHost } from "../../shared/browser-error"
 
 interface BrowserPanelProps {
+    conversationId: string
     layoutRevision: number
     state: BrowserState
 }
@@ -29,7 +30,7 @@ export function BrowserPanel(props: BrowserPanelProps) {
     let viewport: HTMLDivElement | undefined
 
     const run = (command: BrowserCommandInput) =>
-        window.electronAPI.browserCommand(command).catch((error: unknown) => {
+        window.electronAPI.browserCommand(props.conversationId, command).catch((error: unknown) => {
             console.error("Embedded browser command failed:", error)
         })
     const syncBounds = () => {

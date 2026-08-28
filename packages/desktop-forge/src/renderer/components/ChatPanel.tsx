@@ -107,7 +107,11 @@ interface ChatPanelProps {
     sidebarCollapsed?: boolean
     onOpenSidebar?: () => void
     browserVisible?: boolean
-    onToggleBrowser?: () => void
+    onToggleBrowser?: (conversationId?: string) => void | Promise<void>
+    onPromoteBrowserConversation: (
+        sourceConversationId: string,
+        targetConversationId: string,
+    ) => Promise<void>
     chatVisibility: ChatVisibilitySettings
     linkOpenMode: LinkOpenMode
 }
@@ -1916,6 +1920,7 @@ export function ChatPanel(props: ChatPanelProps) {
         localStorage.setItem(LAST_PROJECT_STORAGE_KEY, folder)
         batch(() => {
             if (sdk.directory() !== folder) sdk.setDirectory(folder)
+            sdk.resetBrowserDraftConversation()
             sdk.setSelectedSession(null)
             setInputText("")
             setSendError(null)
@@ -2201,7 +2206,7 @@ export function ChatPanel(props: ChatPanelProps) {
         }
     })
 
-    // 为当前文件夹创建新会话
+    // 为当前文件夹创建新会话；首条消息发送前再完成选择和浏览器绑定。
     const createNewSessionForFolder = async (title?: string) => {
         try {
             const { serverInfo } = sdk
@@ -2215,11 +2220,8 @@ export function ChatPanel(props: ChatPanelProps) {
 
             if (response.ok) {
                 const data = await response.json() as Session
-                if (newSessionPermissionMode() !== "default") setSessionPermissionMode(data.id, newSessionPermissionMode())
-                sdk.setSelectedSession(data)
-                sdk.refreshSessionList()
                 console.log(`为文件夹 ${sdk.directory()} 创建新会话: ${data.id}`)
-                return data.id as string
+                return data
             }
             const body = await response.text()
             console.error("创建会话失败:", body)
@@ -2227,6 +2229,10 @@ export function ChatPanel(props: ChatPanelProps) {
             console.error("创建会话失败:", error)
         }
         return null
+    }
+
+    const openBrowser = async () => {
+        await props.onToggleBrowser?.(currentSessionId() ?? sdk.browserDraftConversationId())
     }
 
     const ensureInitialSessionTitle = async (sid: string, text: string) => {
@@ -2415,11 +2421,32 @@ export function ChatPanel(props: ChatPanelProps) {
         let optimisticPrompt: QueuedPrompt | undefined
         try {
             const existingSessionId = currentSessionId()
-            let sid = existingSessionId
-            if (!sid) {
-                sid = await createNewSessionForFolder(createInitialSessionTitle(messageText))
-            }
+            const createdSession = existingSessionId
+                ? null
+                : await createNewSessionForFolder(createInitialSessionTitle(messageText))
+            const sid = existingSessionId ?? createdSession?.id
             if (!sid) throw new Error("创建会话失败")
+
+            if (createdSession) {
+                const draftConversationId = sdk.browserDraftConversationId()
+                await props.onPromoteBrowserConversation(draftConversationId, createdSession.id)
+                    .catch(async (error: unknown) => {
+                        await sdk.client.session.delete({
+                            directory: sdk.directory(),
+                            sessionID: createdSession.id,
+                        }, { throwOnError: false })
+                        sdk.refreshSessionList()
+                        throw error
+                    })
+                batch(() => {
+                    if (newSessionPermissionMode() !== "default") {
+                        setSessionPermissionMode(createdSession.id, newSessionPermissionMode())
+                    }
+                    sdk.setSelectedSession(createdSession)
+                    sdk.resetBrowserDraftConversation()
+                })
+                sdk.refreshSessionList()
+            }
 
             await ensureInitialSessionTitle(sid, messageText)
 
@@ -2821,7 +2848,9 @@ export function ChatPanel(props: ChatPanelProps) {
                             title="展开浏览器"
                             aria-label="展开浏览器"
                             aria-pressed={false}
-                            onClick={() => props.onToggleBrowser?.()}
+                            onClick={() => void openBrowser().catch((error: unknown) => {
+                                console.error("打开内嵌浏览器失败:", error)
+                            })}
                         >
                             <PanelRightOpen class="lucide-control-icon" size={17} strokeWidth={1.8} />
                         </button>

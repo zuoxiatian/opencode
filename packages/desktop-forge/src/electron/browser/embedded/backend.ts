@@ -169,7 +169,7 @@ export function createEmbeddedBrowserBackend(
                     disposition: tab.ownership.createdBy === "agent" ? "temporary" as const : "deliverable" as const,
                 }
                 void Promise.resolve().then(() => {
-                    const child = tabs.create(ownership)
+                    const child = tabs.create(tab.conversationId, ownership)
                     return navigation.goto(child, url, internalRequest(child.id, ownership.ownerSessionId))
                 }).catch(() => undefined)
             }
@@ -177,13 +177,12 @@ export function createEmbeddedBrowserBackend(
         })
     }
 
-    const clearPermissions = configureBrowserPermissions(browserSession, window, events)
+    const clearPermissions = configureBrowserPermissions(browserSession, window, events, tabs)
     const fileRequested = (
         details: Electron.OnBeforeRequestListenerDetails,
         callback: (response: Electron.CallbackResponse) => void,
     ) => {
-        const tab = tabs.list().find((candidate) =>
-            candidate.webContents.id === (details.webContentsId ?? details.webContents?.id))
+        const tab = tabs.findByWebContentsId(details.webContentsId ?? details.webContents?.id ?? -1)
         const requested = browserOrigin(details.url)
         callback({
             cancel: !tab
@@ -196,8 +195,7 @@ export function createEmbeddedBrowserBackend(
         details: Electron.OnHeadersReceivedListenerDetails,
         callback: (response: Electron.HeadersReceivedResponse) => void,
     ) => {
-        const tab = tabs.list().find((candidate) =>
-            candidate.webContents.id === (details.webContentsId ?? details.webContents?.id))
+        const tab = tabs.findByWebContentsId(details.webContentsId ?? details.webContents?.id ?? -1)
         if (tab && details.resourceType === "mainFrame") {
             tab.httpResponse = {
                 contentLength: responseContentLength(details.responseHeaders),
@@ -223,16 +221,20 @@ export function createEmbeddedBrowserBackend(
             await agentBrowser.destroy()
             await tabs.destroy()
         },
+        disposeConversation: async (conversationId) => {
+            await agentBrowser.closeOwner(conversationId)
+            tabs.disposeConversation(conversationId)
+        },
         dispatch: async (request, context) => {
             if (context.signal?.aborted) {
                 throw new BrowserRuntimeException("CANCELLED", "Browser command was cancelled", true)
             }
             if (request.command.name === "browser.show") {
-                tabs.show(request)
+                tabs.show(context.conversationId, ownershipFor(request, context), request)
                 return {}
             }
                 if (request.command.name === "browser.hide") {
-                    tabs.hide(request)
+                    tabs.hide(context.conversationId, request)
                     return {}
                 }
                 if (request.command.name === "browser.state") return {}
@@ -241,14 +243,21 @@ export function createEmbeddedBrowserBackend(
                     return {}
                 }
                 if (request.command.name === "browser.user.openTabs") {
-                    return { userTabs: userTabs.openTabs(request.sessionId) }
+                    return { userTabs: userTabs.openTabs(context.conversationId, request.sessionId) }
                 }
                 if (request.command.name === "browser.user.claimTab") {
-                    return { tab: tabState(userTabs.claimTab(request.sessionId, request.command.claimId, request)) }
+                    return {
+                        tab: tabState(userTabs.claimTab(
+                            context.conversationId,
+                            request.sessionId,
+                            request.command.claimId,
+                            request,
+                        )),
+                    }
                 }
                 if (request.command.name === "browser.user.history") {
                     return {
-                        history: tabs.history({
+                        history: tabs.history(context.conversationId, {
                             from: request.command.from,
                             limit: request.command.limit,
                             queries: request.command.queries,
@@ -257,20 +266,23 @@ export function createEmbeddedBrowserBackend(
                     }
                 }
                 if (request.command.name === "tabs.list") {
+                    if (context.actor === "agent") {
+                        userTabs.claimAvailableTabs(context.conversationId, request.sessionId, request)
+                    }
                     return {
-                        tabs: tabs.list()
-                            .filter((tab) => visibleToSession(tab, request.sessionId))
+                        tabs: tabs.list(context.conversationId)
+                            .filter((tab) => visibleToActor(tab, request, context))
                             .map(tabState),
                     }
                 }
                 if (request.command.name === "tabs.selected") {
-                    const tab = tabs.get()
-                    if (tab && !visibleToSession(tab, request.sessionId)) return { tab: undefined }
+                    const tab = tabs.get(context.conversationId)
+                    if (tab && !visibleToActor(tab, request, context)) return { tab: undefined }
                     return { tab: tab ? tabState(tab) : undefined }
                 }
                 if (request.command.name === "tabs.get") {
-                    const tab = tabs.require(request.command.targetTabId)
-                    if (!visibleToSession(tab, request.sessionId)) {
+                    const tab = tabs.require(context.conversationId, request.command.targetTabId)
+                    if (!visibleToActor(tab, request, context)) {
                         throw new BrowserRuntimeException(
                             "TAB_NOT_FOUND",
                             `Browser tab not found: ${request.command.targetTabId}`,
@@ -279,8 +291,8 @@ export function createEmbeddedBrowserBackend(
                     return { tab: tabState(tab) }
                 }
                 if (request.command.name === "tabs.new") {
-                    const tab = tabs.create(ownershipFor(request), request)
-                    tabs.show(request)
+                    const tab = tabs.create(context.conversationId, ownershipFor(request, context), request)
+                    tabs.show(context.conversationId, tab.ownership, request)
                     return { tab: tabState(tab) }
                 }
                 if (request.command.name === "tabs.finalize") {
@@ -291,7 +303,7 @@ export function createEmbeddedBrowserBackend(
                     return {}
                 }
 
-                const tab = tabs.require(request.tabId)
+                const tab = tabs.require(context.conversationId, request.tabId)
                 tabs.touch(tab)
                 return await dispatchTabCommand({
                     agentBrowser,
@@ -310,9 +322,16 @@ export function createEmbeddedBrowserBackend(
                     window,
                 })
         },
-        getState: () => tabs.getState(),
+        getActiveConversationId: () => tabs.getActiveConversationId(),
+        getState: (conversationId) => tabs.getState(conversationId),
+        promoteConversation: (sourceConversationId, targetConversationId) => {
+            const state = tabs.promoteConversation(sourceConversationId, targetConversationId)
+            userTabs.promoteConversation(sourceConversationId, targetConversationId)
+            return state
+        },
         setLayoutBounds: (bounds: BrowserBounds) => tabs.setLayoutBounds(bounds),
         setSuspended: (suspended: boolean) => tabs.setSuspended(suspended),
+        syncOwner: (conversationId) => tabs.syncOwner(conversationId),
     }
 }
 
@@ -356,11 +375,11 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.state") return { tab: tabState(tab) }
     if (command.name === "tab.activate") {
-        services.tabs.activate(tab.id, services.request)
+        services.tabs.activate(services.context.conversationId, tab.id, services.request)
         return { tab: tabState(tab) }
     }
     if (command.name === "tab.close") {
-        services.tabs.close(tab.id, services.request)
+        services.tabs.close(services.context.conversationId, tab.id, services.request)
         return {}
     }
     if (command.name === "tab.mark") {
@@ -388,7 +407,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.screenshot") {
         if (tab.error) {
-            const state = services.tabs.getState()
+            const state = services.tabs.getState(services.context.conversationId)
             return {
                 screenshot: await captureErrorScreenshot(
                     services.window,
@@ -435,7 +454,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             download: await triggeredWait(
                 services.context.signal,
                 (signal) => services.downloads.wait(
-                    tab.id,
+                    tab,
                     services.request,
                     command.timeout,
                     signal,
@@ -509,7 +528,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             download: await triggeredWait(
                 services.context.signal,
                 (signal) => services.downloads.wait(
-                    tab.id,
+                    tab,
                     services.request,
                     command.timeout,
                     signal,
@@ -561,7 +580,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
             download: await triggeredWait(
                 services.context.signal,
                 (signal) => services.downloads.wait(
-                    tab.id,
+                    tab,
                     services.request,
                     command.timeout,
                     signal,
@@ -572,7 +591,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
         }
     }
     if (command.name === "tab.download.get") {
-        return { download: services.downloads.get(tab.id, command.downloadId, services.request.sessionId) }
+        return { download: services.downloads.get(tab, command.downloadId, services.request.sessionId) }
     }
     if (command.name === "tab.clipboard.read") {
         return { clipboardItems: await readClipboard(tab) }
@@ -685,9 +704,13 @@ async function triggeredWait<T>(
         .finally(() => controller.abort())
 }
 
-function visibleToSession(tab: EmbeddedTab, sessionId: string) {
-    return sessionId === "renderer"
-        || tab.ownership.ownerSessionId === sessionId
+function visibleToActor(
+    tab: EmbeddedTab,
+    request: BrowserCommandRequest,
+    context: BrowserDispatchContext,
+) {
+    return context.actor === "renderer"
+        || tab.ownership.ownerSessionId === request.sessionId
 }
 
 function cuaMouseButton(button: number | undefined) {
@@ -698,9 +721,10 @@ function cuaMouseButton(button: number | undefined) {
 
 function ownershipFor(
     request: BrowserCommandRequest,
+    context: BrowserDispatchContext,
     disposition?: "deliverable" | "handoff" | "temporary",
 ) {
-    const user = request.sessionId === "renderer"
+    const user = context.actor === "renderer"
     return {
         createdBy: user ? "user" as const : "agent" as const,
         disposition: disposition ?? (user ? "deliverable" as const : "temporary" as const),

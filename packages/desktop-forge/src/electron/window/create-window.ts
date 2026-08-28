@@ -1,5 +1,5 @@
 import type { BrowserWindow as BrowserWindowType, MenuItemConstructorOptions } from "electron"
-import { app, BrowserWindow, Menu, nativeTheme } from "electron"
+import { app, BrowserWindow, Menu, nativeTheme, shell } from "electron"
 import { join } from "node:path"
 import { APP_NAME, APP_VERSION } from "../constants"
 import { BUNDLE_DIR, appIconPath } from "../resources/paths"
@@ -84,12 +84,25 @@ export async function createMainWindow(state: MainState) {
     state.browserTransport ??= await startBrowserTransportServer(() => state.browserRuntime)
     window.webContents.setWindowOpenHandler(({ url }) => {
         if (isWebUrl(url)) {
-            void state.browserRuntime
-                ?.command({ command: { name: "tabs.new" } })
+            const runtime = state.browserRuntime
+            const conversationId = runtime?.getActiveConversationId()
+            if (!runtime || !conversationId) {
+                void shell.openExternal(url)
+                return { action: "deny" }
+            }
+            void runtime.command({ command: { name: "tabs.new" } }, {
+                actor: "renderer",
+                conversationId,
+                sessionId: "renderer",
+            })
                 .then((created) => created.data.tab?.id
-                    ? state.browserRuntime?.command({
+                    ? runtime.command({
                         command: { name: "tab.goto", url },
                         tabId: created.data.tab.id,
+                    }, {
+                        actor: "renderer",
+                        conversationId,
+                        sessionId: "renderer",
                     })
                     : undefined)
                 .catch(() => undefined)

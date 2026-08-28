@@ -5,6 +5,7 @@ import type { BrowserDownload, BrowserCommandRequest } from "@opencode-ai/browse
 import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import type { EmbeddedTabStore } from "./tab-store"
+import type { EmbeddedTab } from "./tab"
 
 export class DownloadService {
     private readonly createdAt = new Map<string, number>()
@@ -24,7 +25,7 @@ export class DownloadService {
     ) {
         mkdirSync(this.directory, { recursive: true })
         this.listener = (_event, item, webContents) => {
-            const tab = this.tabs.list().find((candidate) => candidate.webContents.id === webContents?.id)
+            const tab = this.tabs.findByWebContentsId(webContents?.id ?? -1)
             if (!tab) return
             const download: BrowserDownload = {
                 filename: item.getFilename(),
@@ -44,13 +45,13 @@ export class DownloadService {
                 item.setSaveDialogOptions({ defaultPath: item.getFilename(), title: "保存下载文件" })
             }
             this.resolveWaiter(tab.id, download)
-            this.events.publish("download.created", eventInput(download))
+            this.events.publish("download.created", eventInput(tab, download))
             const updated = (_updateEvent: Event, state: "interrupted" | "progressing") => {
                 download.receivedBytes = item.getReceivedBytes()
                 download.totalBytes = item.getTotalBytes()
                 download.state = state === "interrupted" ? "failed" : "in-progress"
                 download.error = state === "interrupted" ? "Download interrupted" : undefined
-                this.events.publish("download.updated", eventInput(download))
+                this.events.publish("download.updated", eventInput(tab, download))
                 this.tabs.changed(tab)
             }
             const done = (_doneEvent: Event, state: "cancelled" | "completed" | "interrupted") => {
@@ -72,7 +73,7 @@ export class DownloadService {
                         : "Download interrupted"
                 this.events.publish(
                     state === "completed" ? "download.completed" : "download.failed",
-                    eventInput(download),
+                    eventInput(tab, download),
                 )
                 this.tabs.changed(tab)
             }
@@ -84,8 +85,8 @@ export class DownloadService {
         browserSession.on("will-download", this.listener)
     }
 
-    get(tabId: string, downloadId: string, sessionId: string) {
-        const download = this.tabs.require(tabId).downloads.get(downloadId)
+    get(tab: EmbeddedTab, downloadId: string, sessionId: string) {
+        const download = tab.downloads.get(downloadId)
         if (!download || download.sessionId !== sessionId) {
             throw new BrowserRuntimeException("DOWNLOAD_NOT_FOUND", `Download not found: ${downloadId}`)
         }
@@ -93,13 +94,13 @@ export class DownloadService {
     }
 
     wait(
-        tabId: string,
+        tab: EmbeddedTab,
         request: BrowserCommandRequest,
         timeout = 30_000,
         signal?: AbortSignal,
         includeRecent = true,
     ) {
-        const tab = this.tabs.require(tabId)
+        const tabId = tab.id
         if (signal?.aborted) {
             return Promise.reject(new BrowserRuntimeException("CANCELLED", "Download wait was cancelled", true))
         }
@@ -176,11 +177,11 @@ export class DownloadService {
     }
 }
 
-function eventInput(download: BrowserDownload) {
+function eventInput(tab: EmbeddedTab, download: BrowserDownload) {
     return {
         browserId: "embedded",
         payload: { download: { ...download } },
-        sessionId: download.sessionId,
+        sessionId: tab.conversationId,
         tabId: download.tabId,
     }
 }

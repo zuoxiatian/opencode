@@ -19,6 +19,7 @@ import type {
     SkillOperationResult,
 } from "../../shared/skill-market"
 import type { BrowserBounds, BrowserCommandInput } from "../../shared/browser"
+import { isBrowserDraftConversationId } from "../../shared/browser-conversation"
 import type { DesktopToastInput, ModalOverlayContentSize, ModalOverlayInput, OverlayAction } from "../../shared/overlay"
 
 type SkillMarketMutationResult = SkillOperationResult | SkillDeleteResult
@@ -85,11 +86,30 @@ export function registerIpcHandlers(state: MainState) {
         await shell.openExternal(url)
     })
 
-    ipcMain.handle("browser:get-state", (event) => {
+    ipcMain.handle("browser:get-state", (event, conversationId: string) => {
         assertMainWindowSender(state, event.sender)
-        return state.browserRuntime
-            ?.command({ command: { name: "browser.state" } })
-            .then((result) => result.state ?? null) ?? null
+        if (!state.browserRuntime) throw new Error("内嵌浏览器当前不可用")
+        return state.browserRuntime.getState(requireConversationId(conversationId))
+    })
+
+    ipcMain.handle("browser:dispose-conversation", (event, conversationId: string) => {
+        assertMainWindowSender(state, event.sender)
+        if (!state.browserRuntime) throw new Error("内嵌浏览器当前不可用")
+        return state.browserRuntime.disposeConversation(requireConversationId(conversationId))
+    })
+
+    ipcMain.handle("browser:promote-conversation", (
+        event,
+        sourceConversationId: string,
+        targetConversationId: string,
+    ) => {
+        assertMainWindowSender(state, event.sender)
+        if (!state.browserRuntime) throw new Error("内嵌浏览器当前不可用")
+        const source = requireConversationId(sourceConversationId)
+        const target = requireConversationId(targetConversationId)
+        if (!isBrowserDraftConversationId(source)) throw new Error("浏览器草稿 ID 无效")
+        if (isBrowserDraftConversationId(target)) throw new Error("目标会话必须是真实会话")
+        return state.browserRuntime.promoteConversation(source, target)
     })
 
     ipcMain.handle("browser:set-bounds", (event, bounds: BrowserBounds) => {
@@ -103,10 +123,24 @@ export function registerIpcHandlers(state: MainState) {
         state.browserRuntime?.setSuspended(suspended)
     })
 
-    ipcMain.handle("browser:command", (event, command: BrowserCommandInput) => {
+    ipcMain.handle("browser:sync-owner", (event, conversationId: string | null) => {
         assertMainWindowSender(state, event.sender)
         if (!state.browserRuntime) throw new Error("内嵌浏览器当前不可用")
-        return state.browserRuntime.command(command)
+        return state.browserRuntime.syncOwner(conversationId === null ? null : requireConversationId(conversationId))
+    })
+
+    ipcMain.handle("browser:command", (event, conversationId: string, command: BrowserCommandInput) => {
+        assertMainWindowSender(state, event.sender)
+        if (!state.browserRuntime) throw new Error("内嵌浏览器当前不可用")
+        const id = requireConversationId(conversationId)
+        if (state.browserRuntime.getActiveConversationId() !== id) {
+            throw new Error("浏览器会话已经切换，请重试")
+        }
+        return state.browserRuntime.command(command, {
+            actor: "renderer",
+            conversationId: id,
+            sessionId: "renderer",
+        })
     })
 
     ipcMain.handle("client-api:request", (_, input: ClientApiRequest) => requestClientApi(input))
@@ -280,6 +314,11 @@ function isModalOverlayInput(input: ModalOverlayInput) {
 
 function isWebUrl(input: string) {
     return input.startsWith("https://") || input.startsWith("http://")
+}
+
+function requireConversationId(input: unknown) {
+    if (typeof input === "string" && input.trim()) return input
+    throw new Error("浏览器命令缺少会话 ID")
 }
 
 async function requestClientApi(input: ClientApiRequest): Promise<ClientApiResponse> {

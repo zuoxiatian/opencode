@@ -24,7 +24,7 @@ export class BrowserCommandDispatcher {
 
     dispatch(
         request: BrowserCommandRequest,
-        context: BrowserDispatchContext = {},
+        context: BrowserDispatchContext,
     ): Promise<BrowserCommandResponse> {
         const existing = this.requests.get(request.requestId)
         if (existing) {
@@ -48,35 +48,34 @@ export class BrowserCommandDispatcher {
         if (request.command.name === "browser.list") {
             return {
                 data: { browsers: this.registry.list() },
-                events: eventsForSession(this.events.since(cursor), request.sessionId),
+                events: eventsForConversation(this.events.since(cursor), context.conversationId),
                 protocolVersion: BROWSER_PROTOCOL_VERSION,
                 requestId: request.requestId,
             }
         }
 
         const backend = this.registry.get(request.browserId)
-        this.security.ensureAllowed(request, backend.getState())
+        this.security.ensureAllowed(request, backend.getState(context.conversationId), context)
         const data = await backend.dispatch(request, context)
         return {
             data,
-            events: eventsForSession(this.events.since(cursor), request.sessionId),
+            events: eventsForConversation(this.events.since(cursor), context.conversationId),
             protocolVersion: BROWSER_PROTOCOL_VERSION,
             requestId: request.requestId,
-            state: stateForSession(backend.getState(), request.sessionId),
+            state: stateForActor(backend.getState(context.conversationId), request.sessionId, context.actor),
         }
     }
 }
 
-function eventsForSession(
+function eventsForConversation(
     events: BrowserCommandResponse["events"],
-    sessionId: string,
+    conversationId: string,
 ) {
-    if (sessionId === "renderer") return events
-    return events.filter((event) => !event.sessionId || event.sessionId === sessionId)
+    return events.filter((event) => !event.sessionId || event.sessionId === conversationId)
 }
 
-function stateForSession(state: BrowserState, sessionId: string): BrowserState {
-    if (sessionId === "renderer") return state
+function stateForActor(state: BrowserState, sessionId: string, actor: BrowserDispatchContext["actor"]): BrowserState {
+    if (actor === "renderer") return state
     const tabs = state.tabs.filter((tab) => tab.ownership.ownerSessionId === sessionId)
     return {
         ...state,

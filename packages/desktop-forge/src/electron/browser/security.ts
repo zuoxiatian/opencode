@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { isAbsolute } from "node:path"
 import type { BrowserCommand, BrowserCommandRequest, BrowserState } from "@opencode-ai/browser-protocol"
+import type { BrowserDispatchContext } from "./backend"
 import { BrowserRuntimeException } from "./errors"
 import { browserOrigin, normalizeUrl } from "./embedded/navigation"
 
@@ -52,7 +53,14 @@ const emptyTabCommands = new Set<BrowserCommand["name"]>([
 ])
 
 export class BrowserSecurityGate {
-    ensureAllowed(request: BrowserCommandRequest, state: BrowserState) {
+    ensureAllowed(
+        request: BrowserCommandRequest,
+        state: BrowserState,
+        context: BrowserDispatchContext = {
+            actor: request.sessionId === "renderer" ? "renderer" : "agent",
+            conversationId: request.sessionId,
+        },
+    ) {
         if (!request.requestId || !request.sessionId) {
             throw new BrowserRuntimeException("INVALID_COMMAND", "Browser request identity is missing")
         }
@@ -65,7 +73,7 @@ export class BrowserSecurityGate {
             throw new BrowserRuntimeException("TAB_NOT_FOUND", `Browser tab not found: ${request.tabId}`)
         }
         if (
-            request.sessionId !== "renderer"
+            context.actor === "agent"
             && tab
             && tab.ownership.ownerSessionId !== request.sessionId
         ) {

@@ -133,7 +133,7 @@ export class NavigationService {
         const url = normalizeUrl(input)
         this.prepare(tab, url)
         const generation = tab.generation
-        if (activate) this.tabs.activate(tab.id, request)
+        if (activate) this.tabs.activate(tab.conversationId, tab.id, request)
         const completed = expectNavigation(tab.webContents, timeout, signal, url)
         const loading = tab.webContents.loadURL(url)
         void loading.catch(() => undefined)
@@ -251,7 +251,6 @@ export class NavigationService {
         this.events.publish("navigation.failed", {
             ...eventInput(tab, { error }),
             requestId: request?.requestId,
-            sessionId: request?.sessionId,
         })
         this.tabs.changed(tab, request)
     }
@@ -432,7 +431,7 @@ function eventInput(tab: EmbeddedTab, payload?: Record<string, unknown>) {
         browserId: "embedded",
         generation: tab.generation,
         payload,
-        sessionId: tab.ownership.ownerSessionId,
+        sessionId: tab.conversationId,
         tabId: tab.id,
     }
 }
