@@ -1,11 +1,17 @@
 import { createSignal, onMount, Show } from "solid-js"
 import Eye from "lucide-solid/icons/eye"
 import EyeOff from "lucide-solid/icons/eye-off"
+import CircleAlert from "lucide-solid/icons/circle-alert"
+import ExternalLink from "lucide-solid/icons/external-link"
 import Lock from "lucide-solid/icons/lock"
 import LoaderCircle from "lucide-solid/icons/loader-circle"
 import User from "lucide-solid/icons/user"
 import type { ClientAuthSession } from "../auth"
-import { loginClient, type ClientLoginFailureReason } from "../api/client"
+import {
+    loginClient,
+    type ClientAccessAction,
+    type ClientLoginFailureReason,
+} from "../api/client"
 import welcomeIcon from "../../../build/128x128.png"
 import { showDesktopToast } from "../toast"
 
@@ -18,6 +24,7 @@ export function LoginPage(props: LoginPageProps) {
     const [password, setPassword] = createSignal("")
     const [passwordVisible, setPasswordVisible] = createSignal(false)
     const [isSubmitting, setIsSubmitting] = createSignal(false)
+    const [accessAction, setAccessAction] = createSignal<ClientAccessAction | null>(null)
     let usernameInput: HTMLInputElement | undefined
 
     onMount(() => usernameInput?.focus())
@@ -36,6 +43,14 @@ export function LoginPage(props: LoginPageProps) {
                 ? "账号或密码不正确"
                 : "登录失败，请稍后重试")
 
+    const openAccessAction = (action: ClientAccessAction) => {
+        if (!action.url) return
+
+        return window.electronAPI.openExternal(action.url).catch(() => {
+            notifyLoginError("无法打开处理页面，请稍后重试")
+        })
+    }
+
     const submit = async (event: Event) => {
         event.preventDefault()
         if (isSubmitting()) return
@@ -45,12 +60,19 @@ export function LoginPage(props: LoginPageProps) {
         }
 
         setIsSubmitting(true)
+        setAccessAction(null)
 
         const result = await loginClient({
             password: password(),
             username: username().trim(),
         })
         if (!result.ok) {
+            if (result.reason === "action_required") {
+                setAccessAction(result.action)
+                setIsSubmitting(false)
+                return
+            }
+
             notifyLoginError(loginErrorDescription(result))
             setIsSubmitting(false)
             return
@@ -76,6 +98,28 @@ export function LoginPage(props: LoginPageProps) {
                             <h2>欢迎回来</h2>
                             <p>登录您的账号以继续使用 LongwiseTechAgent</p>
                         </div>
+
+                        <Show when={accessAction()}>
+                            {(action) => (
+                                <section class="login-access-action" role="alert" aria-live="polite">
+                                    <CircleAlert class="login-access-action-icon" size={19} strokeWidth={1.9} />
+                                    <div class="login-access-action-content">
+                                        <strong>{action().title}</strong>
+                                        <p>{action().description}</p>
+                                        <Show when={action().url}>
+                                            <button
+                                                type="button"
+                                                class="login-access-action-button"
+                                                onClick={() => void openAccessAction(action())}
+                                            >
+                                                <ExternalLink size={15} strokeWidth={1.9} />
+                                                <span>{action().buttonText ?? "前往处理"}</span>
+                                            </button>
+                                        </Show>
+                                    </div>
+                                </section>
+                            )}
+                        </Show>
 
                         <label class="login-field">
                             <span class="login-field-label">用户名</span>
