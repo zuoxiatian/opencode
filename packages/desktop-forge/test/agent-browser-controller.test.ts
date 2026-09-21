@@ -168,6 +168,41 @@ describe("agent-browser TabController", () => {
         await controller.destroy()
     })
 
+    test("does not cap active sessions by default", async () => {
+        const gateway = new FakeGateway()
+        const runner = new FakeRunner()
+        const controller = new AgentBrowserTabController(
+            gateway as unknown as CdpTabGateway,
+            runner as unknown as Pick<
+                AgentBrowserProcessManager,
+                "prepare" | "run" | "stop" | "terminate"
+            >,
+        )
+        const releases: Array<() => void> = []
+        runner.handler = (input) => input.operation === "close"
+            ? Promise.resolve({ data: {}, success: true })
+            : new Promise((resolve) => releases.push(() => resolve({
+                data: {},
+                success: true,
+            })))
+
+        const active = Array.from({ length: 5 }, (_, index) =>
+            controller.run(command(fakeTab(`tab-${index + 1}`, "owner"), `open-${index + 1}`)))
+        await tick()
+
+        expect(runner.calls.map((call) => call.operation)).toEqual([
+            "open-1",
+            "open-2",
+            "open-3",
+            "open-4",
+            "open-5",
+        ])
+
+        releases.splice(0).forEach((release) => release())
+        await Promise.all(active)
+        await controller.destroy()
+    })
+
     test("enforces the active session limit", async () => {
         const gateway = new FakeGateway()
         const runner = new FakeRunner()

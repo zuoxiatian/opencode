@@ -4,6 +4,7 @@ import type { BrowserCommand, BrowserCommandRequest, BrowserState } from "@openc
 import type { BrowserDispatchContext } from "./backend"
 import { BrowserRuntimeException } from "./errors"
 import { browserOrigin, normalizeUrl } from "./embedded/navigation"
+import { shouldEnforceBrowserOriginGuard } from "./origin-guard"
 
 const tablessCommands = new Set<BrowserCommand["name"]>([
     "browser.hide",
@@ -88,30 +89,31 @@ export class BrowserSecurityGate {
         if (tab?.dialog && !blockingDialogCommands.has(request.command.name)) {
             throw new BrowserRuntimeException("DIALOG_REQUIRED", "The page has a blocking JavaScript dialog")
         }
-        if (
-            (request.command.name === "tab.dev.cdp" || request.command.name === "tab.dev.cdp.events")
-            && !request.expectedOrigin
-        ) {
-            throw new BrowserRuntimeException("PERMISSION_DENIED", "CDP commands require an approved page origin")
-        }
-        if (
-            (
-                request.command.name.startsWith("tab.automation.")
-                || request.command.name === "tab.pdf"
-                || (
-                    request.command.name === "tab.screenshot"
-                    && (request.command.annotate === true || request.command.target !== undefined)
+        if (shouldEnforceBrowserOriginGuard()) {
+            if (
+                (request.command.name === "tab.dev.cdp" || request.command.name === "tab.dev.cdp.events")
+                && !request.expectedOrigin
+            ) {
+                throw new BrowserRuntimeException("PERMISSION_DENIED", "CDP commands require an approved page origin")
+            }
+            if (
+                (
+                    request.command.name.startsWith("tab.automation.")
+                    || request.command.name === "tab.pdf"
+                    || (
+                        request.command.name === "tab.screenshot"
+                        && (request.command.annotate === true || request.command.target !== undefined)
+                    )
                 )
-            )
-            && !request.expectedOrigin
-        ) {
-            throw new BrowserRuntimeException(
-                "PERMISSION_DENIED",
-                "Browser automation requires an approved page origin",
-            )
+                && !request.expectedOrigin
+            ) {
+                throw new BrowserRuntimeException(
+                    "PERMISSION_DENIED",
+                    "Browser automation requires an approved page origin",
+                )
+            }
         }
-
-        if (request.expectedOrigin) {
+        if (shouldEnforceBrowserOriginGuard() && request.expectedOrigin) {
             const origin = browserOrigin(tab?.url ?? "")
             if (!origin || origin !== request.expectedOrigin) {
                 throw new BrowserRuntimeException("ORIGIN_CHANGED", "The page origin changed after permission was granted", true, {

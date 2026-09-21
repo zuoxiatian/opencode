@@ -34,7 +34,7 @@ export function createAgentBrowserTabController() {
             runtimeDir,
             socketDir: agentBrowserSocketDir(runtimeDir),
         }),
-        4,
+        undefined,
         writeAgentBrowserDiagnostic,
     )
 }

@@ -13,6 +13,7 @@ import path from "node:path"
 import type { EmbeddedTab } from "../embedded/tab"
 import { browserOrigin } from "../embedded/navigation"
 import { BrowserRuntimeException } from "../errors"
+import { shouldEnforceBrowserOriginGuard } from "../origin-guard"
 import {
     AgentBrowserTabController,
     type AgentBrowserTransaction,
@@ -60,7 +61,7 @@ export class AgentBrowserCommandAdapter {
             (transaction) => {
                 const guarded: AgentBrowserTransaction = {
                     run: (input) => {
-                        if (expectedOrigin) ensureOrigin(tab, expectedOrigin)
+                        if (shouldEnforceBrowserOriginGuard() && expectedOrigin) ensureOrigin(tab, expectedOrigin)
                         return transaction.run(input)
                     },
                 }

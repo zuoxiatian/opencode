@@ -62,7 +62,7 @@ export class AgentBrowserTabController {
     constructor(
         private readonly gateway: CdpTabGateway,
         private readonly processes: AgentBrowserRunner,
-        private readonly maxSessions = 4,
+        private readonly maxSessions = Number.POSITIVE_INFINITY,
         private readonly diagnostic?: AgentBrowserDiagnosticSink,
         private readonly idleTimeout = 5 * 60_000,
     ) {}

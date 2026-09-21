@@ -13,6 +13,7 @@ import type { BrowserBackend, BrowserDispatchContext } from "../backend"
 import { BrowserRuntimeException } from "../errors"
 import type { BrowserEventStore } from "../event-store"
 import { BrowserLifecycle } from "../lifecycle"
+import { shouldEnforceBrowserOriginGuard } from "../origin-guard"
 import { AgentBrowserCommandAdapter } from "../agent-browser/adapter"
 import type { AgentBrowserTabController } from "../agent-browser/controller"
 import { createAgentBrowserTabController } from "../agent-browser/runtime"
@@ -609,7 +610,7 @@ async function dispatchTabCommand(services: TabCommandServices): Promise<Browser
     }
     if (command.name === "tab.dev.cdp") {
         const origin = browserOrigin(tab.webContents.getURL())
-        if (!origin || origin !== services.request.expectedOrigin) {
+        if (shouldEnforceBrowserOriginGuard() && (!origin || origin !== services.request.expectedOrigin)) {
             throw new BrowserRuntimeException("ORIGIN_CHANGED", "CDP approval does not match the current page")
         }
         return {
