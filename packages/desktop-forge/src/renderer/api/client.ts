@@ -375,7 +375,7 @@ function clientAccessAction(input: unknown): ClientAccessAction | undefined {
     if (!code || !isClientAccessActionType(type) || !title || !description) return undefined
 
     const buttonText = optionalString(action.buttonText)
-    const url = optionalWebUrl(action.url)
+    const url = optionalWebUrl(action.url, type === "open_web" ? CLIENT_API_BASE_URL : undefined)
 
     return {
         code,
@@ -399,12 +399,19 @@ function optionalString(input: unknown) {
     return input === undefined ? undefined : requiredString(input)
 }
 
-function optionalWebUrl(input: unknown) {
+function optionalWebUrl(input: unknown, base?: string) {
     const value = optionalString(input)
-    if (!value || !URL.canParse(value)) return undefined
+    if (!value || !URL.canParse(value, base)) return undefined
 
-    const url = new URL(value)
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined
+    const url = new URL(value, base)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined
+    if (!base) return url.toString()
+
+    const resolved = new URL(base)
+    resolved.pathname = url.pathname
+    resolved.search = url.search
+    resolved.hash = url.hash
+    return resolved.toString()
 }
 
 function responseMessage(input: unknown) {
